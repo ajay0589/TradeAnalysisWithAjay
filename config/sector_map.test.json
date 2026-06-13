@@ -1,0 +1,12 @@
+{
+  "generated_on": "2026-06-13",
+  "source": "NSE quote-equity metadata + Zerodha NSE index instruments",
+  "sectors": {},
+  "symbols": {},
+  "unmapped": {
+    "360ONE": {
+      "industryInfo": {},
+      "indices": []
+    }
+  }
+}

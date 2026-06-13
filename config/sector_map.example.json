@@ -1,0 +1,17 @@
+{
+  "sectors": {
+    "NIFTY ENERGY": {
+      "index_symbol": "NIFTY ENERGY",
+      "data_file": "NIFTY_ENERGY.csv"
+    },
+    "NIFTY IT": {
+      "index_symbol": "NIFTY IT",
+      "data_file": "NIFTY_IT.csv"
+    }
+  },
+  "symbols": {
+    "RELIANCE": "NIFTY ENERGY",
+    "TCS": "NIFTY IT"
+  }
+}
+

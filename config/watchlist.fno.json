@@ -1,0 +1,1699 @@
+{
+  "timezone": "Asia/Kolkata",
+  "generated_from": "data\\raw\\zerodha\\instruments_NFO.csv + data\\raw\\zerodha\\instruments_NSE.csv",
+  "generated_on": "2026-06-13",
+  "risk": {
+    "max_risk_per_trade_percent": 1.0,
+    "avoid_event_days": true
+  },
+  "symbols": [
+    {
+      "symbol": "360ONE",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "360ONE.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ABB",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ABB.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ABCAPITAL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ABCAPITAL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ADANIENSOL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ADANIENSOL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ADANIENT",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ADANIENT.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ADANIGREEN",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ADANIGREEN.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ADANIPORTS",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ADANIPORTS.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ADANIPOWER",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ADANIPOWER.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ALKEM",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ALKEM.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "AMBER",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "AMBER.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "AMBUJACEM",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "AMBUJACEM.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ANGELONE",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ANGELONE.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "APLAPOLLO",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "APLAPOLLO.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "APOLLOHOSP",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "APOLLOHOSP.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ASHOKLEY",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ASHOKLEY.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ASIANPAINT",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ASIANPAINT.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ASTRAL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ASTRAL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "AUBANK",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "AUBANK.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "AUROPHARMA",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "AUROPHARMA.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "AXISBANK",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "AXISBANK.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "BAJAJ-AUTO",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "BAJAJ-AUTO.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "BAJAJFINSV",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "BAJAJFINSV.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "BAJAJHLDNG",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "BAJAJHLDNG.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "BAJFINANCE",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "BAJFINANCE.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "BANDHANBNK",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "BANDHANBNK.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "BANKBARODA",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "BANKBARODA.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "BANKINDIA",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "BANKINDIA.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "BDL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "BDL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "BEL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "BEL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "BHARATFORG",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "BHARATFORG.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "BHARTIARTL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "BHARTIARTL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "BHEL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "BHEL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "BIOCON",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "BIOCON.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "BLUESTARCO",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "BLUESTARCO.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "BOSCHLTD",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "BOSCHLTD.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "BPCL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "BPCL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "BRITANNIA",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "BRITANNIA.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "BSE",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "BSE.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "CAMS",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "CAMS.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "CANBK",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "CANBK.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "CDSL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "CDSL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "CGPOWER",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "CGPOWER.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "CHOLAFIN",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "CHOLAFIN.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "CIPLA",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "CIPLA.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "COALINDIA",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "COALINDIA.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "COCHINSHIP",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "COCHINSHIP.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "COFORGE",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "COFORGE.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "COLPAL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "COLPAL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "CONCOR",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "CONCOR.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "CROMPTON",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "CROMPTON.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "CUMMINSIND",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "CUMMINSIND.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "DABUR",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "DABUR.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "DALBHARAT",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "DALBHARAT.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "DELHIVERY",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "DELHIVERY.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "DIVISLAB",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "DIVISLAB.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "DIXON",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "DIXON.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "DLF",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "DLF.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "DMART",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "DMART.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "DRREDDY",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "DRREDDY.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "EICHERMOT",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "EICHERMOT.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ETERNAL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ETERNAL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "EXIDEIND",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "EXIDEIND.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "FEDERALBNK",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "FEDERALBNK.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "FORCEMOT",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "FORCEMOT.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "FORTIS",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "FORTIS.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "GAIL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "GAIL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "GLENMARK",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "GLENMARK.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "GMRAIRPORT",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "GMRAIRPORT.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "GODFRYPHLP",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "GODFRYPHLP.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "GODREJCP",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "GODREJCP.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "GODREJPROP",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "GODREJPROP.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "GRASIM",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "GRASIM.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "GVT&D",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "GVT&D.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "HAL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "HAL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "HAVELLS",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "HAVELLS.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "HCLTECH",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "HCLTECH.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "HDFCAMC",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "HDFCAMC.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "HDFCBANK",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "HDFCBANK.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "HDFCLIFE",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "HDFCLIFE.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "HEROMOTOCO",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "HEROMOTOCO.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "HINDALCO",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "HINDALCO.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "HINDPETRO",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "HINDPETRO.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "HINDUNILVR",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "HINDUNILVR.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "HINDZINC",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "HINDZINC.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "HYUNDAI",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "HYUNDAI.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ICICIBANK",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ICICIBANK.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ICICIGI",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ICICIGI.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ICICIPRULI",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ICICIPRULI.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "IDEA",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "IDEA.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "IDFCFIRSTB",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "IDFCFIRSTB.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "IEX",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "IEX.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "INDHOTEL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "INDHOTEL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "INDIANB",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "INDIANB.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "INDIGO",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "INDIGO.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "INDUSINDBK",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "INDUSINDBK.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "INDUSTOWER",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "INDUSTOWER.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "INFY",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "INFY.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "INOXWIND",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "INOXWIND.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "IOC",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "IOC.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "IREDA",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "IREDA.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "IRFC",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "IRFC.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ITC",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ITC.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "JINDALSTEL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "JINDALSTEL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "JIOFIN",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "JIOFIN.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "JSWENERGY",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "JSWENERGY.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "JSWSTEEL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "JSWSTEEL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "JUBLFOOD",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "JUBLFOOD.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "KALYANKJIL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "KALYANKJIL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "KAYNES",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "KAYNES.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "KEI",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "KEI.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "KFINTECH",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "KFINTECH.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "KOTAKBANK",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "KOTAKBANK.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "KPITTECH",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "KPITTECH.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "LAURUSLABS",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "LAURUSLABS.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "LICHSGFIN",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "LICHSGFIN.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "LICI",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "LICI.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "LODHA",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "LODHA.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "LT",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "LT.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "LTF",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "LTF.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "LTM",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "LTM.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "LUPIN",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "LUPIN.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "M&M",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "M&M.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "MANAPPURAM",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "MANAPPURAM.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "MANKIND",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "MANKIND.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "MARICO",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "MARICO.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "MARUTI",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "MARUTI.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "MAXHEALTH",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "MAXHEALTH.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "MAZDOCK",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "MAZDOCK.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "MCX",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "MCX.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "MFSL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "MFSL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "MOTHERSON",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "MOTHERSON.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "MOTILALOFS",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "MOTILALOFS.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "MPHASIS",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "MPHASIS.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "MUTHOOTFIN",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "MUTHOOTFIN.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "NAM-INDIA",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "NAM-INDIA.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "NATIONALUM",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "NATIONALUM.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "NAUKRI",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "NAUKRI.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "NBCC",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "NBCC.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "NESTLEIND",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "NESTLEIND.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "NHPC",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "NHPC.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "NMDC",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "NMDC.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "NTPC",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "NTPC.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "NUVAMA",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "NUVAMA.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "NYKAA",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "NYKAA.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "OBEROIRLTY",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "OBEROIRLTY.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "OFSS",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "OFSS.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "OIL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "OIL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ONGC",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ONGC.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "PAGEIND",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "PAGEIND.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "PATANJALI",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "PATANJALI.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "PAYTM",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "PAYTM.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "PERSISTENT",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "PERSISTENT.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "PETRONET",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "PETRONET.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "PFC",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "PFC.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "PGEL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "PGEL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "PHOENIXLTD",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "PHOENIXLTD.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "PIDILITIND",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "PIDILITIND.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "PIIND",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "PIIND.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "PNB",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "PNB.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "PNBHOUSING",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "PNBHOUSING.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "POLICYBZR",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "POLICYBZR.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "POLYCAB",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "POLYCAB.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "POWERGRID",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "POWERGRID.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "POWERINDIA",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "POWERINDIA.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "PREMIERENE",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "PREMIERENE.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "PRESTIGE",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "PRESTIGE.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "RADICO",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "RADICO.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "RBLBANK",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "RBLBANK.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "RECLTD",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "RECLTD.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "RELIANCE",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "RELIANCE.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "RVNL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "RVNL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "SAIL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "SAIL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "SAMMAANCAP",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "SAMMAANCAP.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "SBICARD",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "SBICARD.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "SBILIFE",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "SBILIFE.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "SBIN",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "SBIN.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "SHREECEM",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "SHREECEM.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "SHRIRAMFIN",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "SHRIRAMFIN.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "SIEMENS",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "SIEMENS.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "SOLARINDS",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "SOLARINDS.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "SONACOMS",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "SONACOMS.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "SRF",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "SRF.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "SUNPHARMA",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "SUNPHARMA.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "SUPREMEIND",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "SUPREMEIND.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "SUZLON",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "SUZLON.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "SWIGGY",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "SWIGGY.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "TATACONSUM",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "TATACONSUM.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "TATAELXSI",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "TATAELXSI.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "TATAPOWER",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "TATAPOWER.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "TATASTEEL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "TATASTEEL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "TCS",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "TCS.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "TECHM",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "TECHM.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "TIINDIA",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "TIINDIA.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "TITAN",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "TITAN.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "TMPV",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "TMPV.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "TORNTPHARM",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "TORNTPHARM.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "TRENT",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "TRENT.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "TVSMOTOR",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "TVSMOTOR.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ULTRACEMCO",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ULTRACEMCO.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "UNIONBANK",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "UNIONBANK.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "UNITDSPR",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "UNITDSPR.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "UNOMINDA",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "UNOMINDA.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "UPL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "UPL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "VBL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "VBL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "VEDL",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "VEDL.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "VMM",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "VMM.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "VOLTAS",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "VOLTAS.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "WAAREEENER",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "WAAREEENER.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "WIPRO",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "WIPRO.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "YESBANK",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "YESBANK.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    },
+    {
+      "symbol": "ZYDUSLIFE",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "ZYDUSLIFE.csv",
+      "notes": "Generated F&O stock from Zerodha NFO futures universe.",
+      "fundamentals": {}
+    }
+  ]
+}

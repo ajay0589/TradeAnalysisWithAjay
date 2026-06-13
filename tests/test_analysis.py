@@ -1,0 +1,248 @@
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+from trading_analysis.analysis.fundamental import analyze_fundamentals
+from trading_analysis.analysis.market_structure import analyze_market_structure
+from trading_analysis.analysis.options import (
+    OptionContract,
+    analyze_option_chain,
+    classify_buildup,
+    nearest_expiry,
+    option_contracts_for_symbol,
+    select_strikes_around_spot,
+)
+from trading_analysis.analysis.relative_strength import compare_relative_strength
+from trading_analysis.analysis.scoring import combine_signals
+from trading_analysis.analysis.technical import analyze_technical
+from trading_analysis.analysis.trade_decision import build_trade_decision
+from trading_analysis.brokers.zerodha import (
+    build_login_url,
+    chunked,
+    extract_request_token,
+    kite_checksum,
+    parse_kite_timestamp,
+    resolve_instrument_token,
+)
+from trading_analysis.data_sources.fno_universe import build_fno_watchlist, fno_stock_symbols
+from trading_analysis.data_sources.nse_equity import (
+    build_sector_map_from_csv_rows,
+    build_sector_map_from_metadata,
+    choose_sector_index,
+)
+from trading_analysis.data_sources.csv_loader import load_candles
+from trading_analysis.models import FundamentalSnapshot
+
+
+class AnalysisTests(unittest.TestCase):
+    def test_sample_candles_produce_signal(self) -> None:
+        candles = load_candles(Path("data/sample/RELIANCE.csv"))
+
+        technical = analyze_technical(candles)
+
+        self.assertGreaterEqual(technical.score, 0)
+        self.assertLessEqual(technical.score, 100)
+        self.assertIsNotNone(technical.rsi14)
+
+    def test_combined_score_stays_bounded(self) -> None:
+        candles = load_candles(Path("data/sample/TCS.csv"))
+        technical = analyze_technical(candles)
+        fundamental = analyze_fundamentals(
+            FundamentalSnapshot(
+                roe_percent=25,
+                debt_to_equity=0.1,
+                sales_growth_yoy_percent=12,
+                profit_growth_yoy_percent=15,
+                pledged_percent=0,
+            )
+        )
+
+        signal = combine_signals("TCS", technical, fundamental)
+
+        self.assertGreaterEqual(signal.score, 0)
+        self.assertLessEqual(signal.score, 100)
+
+    def test_kite_timestamp_parser_handles_india_offset(self) -> None:
+        timestamp = parse_kite_timestamp("2017-12-15T09:15:00+0530")
+
+        self.assertEqual(timestamp.hour, 9)
+        self.assertEqual(timestamp.utcoffset().total_seconds(), 19800)
+
+    def test_resolve_instrument_token_from_cached_master(self) -> None:
+        instruments = [
+            {"exchange": "NSE", "tradingsymbol": "INFY", "instrument_token": "408065"},
+            {"exchange": "NFO", "tradingsymbol": "NIFTY26JUNFUT", "instrument_token": "12517890"},
+        ]
+
+        token = resolve_instrument_token(instruments, "nse", "infy")
+
+        self.assertEqual(token, "408065")
+
+    def test_kite_login_helpers(self) -> None:
+        login_url = build_login_url("abc123")
+
+        self.assertEqual(login_url, "https://kite.zerodha.com/connect/login?v=3&api_key=abc123")
+        self.assertEqual(
+            extract_request_token("https://example.com/?status=success&request_token=req123"),
+            "req123",
+        )
+        self.assertEqual(
+            kite_checksum("api", "request", "secret"),
+            "257f5edc0415fc77bd14b16e08ca983df5e4d049db7c63e292f18f6d640402b5",
+        )
+
+    def test_fno_universe_uses_stock_futures_that_exist_on_nse(self) -> None:
+        nfo = [
+            {"exchange": "NFO", "segment": "NFO-FUT", "instrument_type": "FUT", "name": "NIFTY"},
+            {"exchange": "NFO", "segment": "NFO-FUT", "instrument_type": "FUT", "name": "RELIANCE"},
+            {"exchange": "NFO", "segment": "NFO-OPT", "instrument_type": "CE", "name": "TCS"},
+        ]
+        nse = [
+            {"exchange": "NSE", "segment": "INDICES", "instrument_type": "EQ", "tradingsymbol": "NIFTY 50"},
+            {"exchange": "NSE", "segment": "NSE", "instrument_type": "EQ", "tradingsymbol": "RELIANCE"},
+            {"exchange": "NSE", "segment": "NSE", "instrument_type": "EQ", "tradingsymbol": "TCS"},
+        ]
+
+        symbols = fno_stock_symbols(nfo, nse)
+        watchlist = build_fno_watchlist(symbols, source="test")
+
+        self.assertEqual(symbols, ["RELIANCE"])
+        self.assertEqual(watchlist["symbols"][0]["data_file"], "RELIANCE.csv")
+
+    def test_option_chain_analysis_and_buildup(self) -> None:
+        contracts = [
+            OptionContract("ABC26JUN100CE", "ABC", __import__("datetime").date(2026, 6, 30), 100, "CE", 100),
+            OptionContract("ABC26JUN100PE", "ABC", __import__("datetime").date(2026, 6, 30), 100, "PE", 100),
+            OptionContract("ABC26JUN110CE", "ABC", __import__("datetime").date(2026, 6, 30), 110, "CE", 100),
+            OptionContract("ABC26JUN110PE", "ABC", __import__("datetime").date(2026, 6, 30), 110, "PE", 100),
+        ]
+        quotes = {
+            "NFO:ABC26JUN100CE": {"last_price": 8, "volume": 10, "oi": 130, "ohlc": {"close": 7}},
+            "NFO:ABC26JUN100PE": {"last_price": 4, "volume": 20, "oi": 100, "ohlc": {"close": 5}},
+            "NFO:ABC26JUN110CE": {"last_price": 3, "volume": 30, "oi": 70, "ohlc": {"close": 4}},
+            "NFO:ABC26JUN110PE": {"last_price": 9, "volume": 40, "oi": 250, "ohlc": {"close": 8}},
+        }
+        previous = {
+            "ABC26JUN100CE": {"oi": "100"},
+            "ABC26JUN100PE": {"oi": "120"},
+            "ABC26JUN110CE": {"oi": "60"},
+            "ABC26JUN110PE": {"oi": "240"},
+        }
+
+        analysis = analyze_option_chain(
+            "ABC",
+            contracts[0].expiry,
+            contracts,
+            quotes,
+            spot_price=105,
+            previous_rows=previous,
+        )
+
+        self.assertEqual(round(analysis.pcr_oi or 0, 2), 1.75)
+        self.assertEqual(analysis.highest_call_oi_strike, 100)
+        self.assertEqual(analysis.highest_put_oi_strike, 110)
+        self.assertIn("Long build-up", {row.buildup for row in analysis.rows})
+        self.assertEqual(classify_buildup(-1, 10), "Short build-up")
+
+    def test_option_contract_selection_helpers(self) -> None:
+        rows = [
+            {
+                "exchange": "NFO",
+                "segment": "NFO-OPT",
+                "instrument_type": "CE",
+                "name": "ABC",
+                "tradingsymbol": "ABC26JUN100CE",
+                "expiry": "2026-06-30",
+                "strike": "100",
+                "lot_size": "50",
+            },
+            {
+                "exchange": "NFO",
+                "segment": "NFO-OPT",
+                "instrument_type": "PE",
+                "name": "ABC",
+                "tradingsymbol": "ABC26JUN110PE",
+                "expiry": "2026-06-30",
+                "strike": "110",
+                "lot_size": "50",
+            },
+        ]
+
+        contracts = option_contracts_for_symbol(rows, "abc")
+
+        self.assertEqual(nearest_expiry(contracts, today=__import__("datetime").date(2026, 6, 1)).isoformat(), "2026-06-30")
+        self.assertEqual(len(select_strikes_around_spot(contracts, 105, 0)), 1)
+        self.assertEqual(chunked(["a", "b", "c"], 2), [["a", "b"], ["c"]])
+
+    def test_market_structure_support_resistance_are_price_relative(self) -> None:
+        candles = load_candles(Path("data/sample/RELIANCE.csv"))
+
+        structure = analyze_market_structure(candles)
+
+        self.assertLessEqual(structure.support or 0, candles[-1].close)
+        self.assertGreaterEqual(structure.resistance or candles[-1].close, candles[-1].close)
+
+    def test_relative_strength_and_trade_decision(self) -> None:
+        stock = load_candles(Path("data/sample/RELIANCE.csv"))
+        benchmark = load_candles(Path("data/sample/TCS.csv"))
+        technical = analyze_technical(stock)
+        structure = analyze_market_structure(stock)
+
+        rs = compare_relative_strength("Stock vs Benchmark", stock, benchmark, lookback=10)
+        decision = build_trade_decision(
+            "RELIANCE",
+            daily_technical=technical,
+            daily_structure=structure,
+        )
+
+        self.assertIn(rs.label, {"outperforming", "underperforming", "neutral", "insufficient data"})
+        self.assertIn(decision.bias, {"bullish", "bearish", "neutral"})
+
+    def test_sector_map_prefers_zerodha_index_aliases(self) -> None:
+        metadata = {
+            "metadata": {"pdSectorIndAll": ["NIFTY 50", "NIFTY ENERGY", "NIFTY OIL & GAS"]},
+            "industryInfo": {
+                "macro": "Energy",
+                "sector": "Oil Gas & Consumable Fuels",
+                "industry": "Petroleum Products",
+                "basicIndustry": "Refineries & Marketing",
+            },
+        }
+        nse_instruments = [
+            {"exchange": "NSE", "segment": "INDICES", "tradingsymbol": "NIFTY ENERGY"},
+            {"exchange": "NSE", "segment": "INDICES", "tradingsymbol": "NIFTY OIL AND GAS"},
+        ]
+
+        selected = choose_sector_index(metadata, {"NIFTY ENERGY", "NIFTY OIL AND GAS"})
+        sector_map = build_sector_map_from_metadata(["RELIANCE"], {"RELIANCE": metadata}, nse_instruments)
+
+        self.assertEqual(selected, "NIFTY OIL AND GAS")
+        self.assertEqual(sector_map["symbols"]["RELIANCE"]["index_symbol"], "NIFTY OIL AND GAS")
+        self.assertEqual(sector_map["symbols"]["RELIANCE"]["data_file"], "NIFTY_OIL_AND_GAS.csv")
+
+    def test_sector_map_from_csv_rows(self) -> None:
+        rows = [
+            {"Symbol": "RELIANCE", "Industry": "Oil Gas & Consumable Fuels", "Index Symbol": "NIFTY OIL & GAS"},
+            {"Symbol": "TCS", "Industry": "Information Technology", "Index Symbol": ""},
+            {"Symbol": "ABB", "Industry": "Capital Goods", "Index Symbol": ""},
+        ]
+        nse_instruments = [
+            {"exchange": "NSE", "segment": "INDICES", "tradingsymbol": "NIFTY OIL AND GAS"},
+            {"exchange": "NSE", "segment": "INDICES", "tradingsymbol": "NIFTY IT"},
+        ]
+
+        sector_map = build_sector_map_from_csv_rows(
+            rows,
+            nse_instruments,
+            source="test.csv",
+            symbols_filter=["RELIANCE", "TCS", "ABB"],
+        )
+
+        self.assertEqual(sector_map["symbols"]["RELIANCE"]["index_symbol"], "NIFTY OIL AND GAS")
+        self.assertEqual(sector_map["symbols"]["TCS"]["index_symbol"], "NIFTY IT")
+        self.assertIn("ABB", sector_map["unmapped"])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,38 @@
+{
+  "timezone": "Asia/Kolkata",
+  "risk": {
+    "max_risk_per_trade_percent": 1.0,
+    "avoid_event_days": true
+  },
+  "symbols": [
+    {
+      "symbol": "RELIANCE",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "RELIANCE.csv",
+      "notes": "Synthetic sample data. Replace with broker/NSE-authorized candles.",
+      "fundamentals": {
+        "roe_percent": 18.2,
+        "debt_to_equity": 0.36,
+        "sales_growth_yoy_percent": 8.5,
+        "profit_growth_yoy_percent": 10.1,
+        "pledged_percent": 0.0
+      }
+    },
+    {
+      "symbol": "TCS",
+      "exchange": "NSE",
+      "instrument_type": "EQ",
+      "data_file": "TCS.csv",
+      "notes": "Synthetic sample data. Replace with broker/NSE-authorized candles.",
+      "fundamentals": {
+        "roe_percent": 51.0,
+        "debt_to_equity": 0.08,
+        "sales_growth_yoy_percent": 6.2,
+        "profit_growth_yoy_percent": 7.4,
+        "pledged_percent": 0.0
+      }
+    }
+  ]
+}
+
