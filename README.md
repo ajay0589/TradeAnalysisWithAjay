@@ -178,6 +178,54 @@ Use `--skip-option-chain` when you only want price and relative-strength context
 python -m trading_analysis.cli trade-decision --symbol RELIANCE --skip-option-chain
 ```
 
+## Web UI
+
+Start the local F&O decision dashboard:
+
+```powershell
+python -m trading_analysis.web_app --host 127.0.0.1 --port 8765
+```
+
+Then open `http://127.0.0.1:8765`.
+
+The dashboard supports:
+
+- analyzing one F&O stock by symbol, or by company name when the Zerodha NSE instrument cache is present
+- checking whether the Zerodha access token is valid, expired, missing, or unreachable
+- opening the Zerodha login URL and updating `.env` by pasting the redirected URL containing `request_token`
+- scanning bullish candidates for put selling
+- scanning bearish candidates for call selling
+- scanning neutral candidates for short strangle candidates
+- selecting Monthly, Weekly, Daily, 1 hour, or 15 min chart analysis
+- selecting either a days-back window or explicit from/to dates
+- optionally refreshing candles from Zerodha before analysis
+- optional nearest-expiry option-chain context when Zerodha credentials and NFO instruments are available
+
+Scans only include F&O symbols whose candle CSV exists for the selected timeframe. Weekly and monthly charts are derived from daily candles.
+
+Bulk-download candles for the F&O universe:
+
+```powershell
+python -m trading_analysis.cli bulk-fno-candles --timeframes day,60minute,15minute --days 90
+```
+
+For monthly chart analysis, keep a longer daily history:
+
+```powershell
+python -m trading_analysis.cli bulk-fno-candles --timeframes day --days 1460
+```
+
+Option-chain analytics currently includes PCR, max pain, total option volume, ATM IV, IV change from the previous snapshot, OI change, and OI percent change. IV percentile needs accumulated historical IV snapshots before it can be calculated reliably.
+
+Zerodha token refresh from the UI:
+
+1. Click `Login` in the Zerodha panel.
+2. Complete Kite login in the browser.
+3. Copy the full redirected URL from the browser address bar. It should contain `request_token=...`.
+4. Paste it into `Redirected URL or request token`.
+5. Click `Update access token`.
+6. Click `Check` to confirm the token is valid.
+
 ## Credentials
 
 Create a local `.env` file from `.env.example` when you are ready to connect broker APIs. Do not share or commit `.env`.

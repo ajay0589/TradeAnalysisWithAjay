@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import math
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -32,6 +33,9 @@ class OptionChainRow:
     oi: int
     previous_oi: int | None
     oi_change: int | None
+    oi_change_percent: float | None
+    implied_volatility: float | None
+    iv_change: float | None
     volume: int
     bid_price: float | None
     ask_price: float | None
@@ -46,6 +50,12 @@ class OptionChainAnalysis:
     contract_count: int
     pcr_oi: float | None
     max_pain: float | None
+    atm_iv: float | None
+    atm_iv_change: float | None
+    iv_percentile: float | None
+    total_volume: int
+    total_oi_change: int | None
+    total_oi_change_percent: float | None
     highest_call_oi_strike: float | None
     highest_put_oi_strike: float | None
     rows: tuple[OptionChainRow, ...]
@@ -113,7 +123,12 @@ def analyze_option_chain(
 ) -> OptionChainAnalysis:
     previous_rows = previous_rows or {}
     rows = [
-        _row_from_quote(contract, quotes.get(contract.kite_key, {}), previous_rows.get(contract.tradingsymbol))
+        _row_from_quote(
+            contract,
+            quotes.get(contract.kite_key, {}),
+            previous_rows.get(contract.tradingsymbol),
+            spot_price,
+        )
         for contract in contracts
         if contract.kite_key in quotes
     ]
@@ -121,6 +136,9 @@ def analyze_option_chain(
     put_rows = [row for row in rows if row.option_type == "PE"]
     call_oi = sum(row.oi for row in call_rows)
     put_oi = sum(row.oi for row in put_rows)
+    total_oi = call_oi + put_oi
+    previous_total_oi = sum(row.previous_oi for row in rows if row.previous_oi is not None)
+    total_oi_change = (total_oi - previous_total_oi) if previous_total_oi else None
 
     return OptionChainAnalysis(
         symbol=symbol.upper(),
@@ -129,6 +147,12 @@ def analyze_option_chain(
         contract_count=len(rows),
         pcr_oi=(put_oi / call_oi) if call_oi else None,
         max_pain=_max_pain(rows),
+        atm_iv=_atm_iv(rows, spot_price),
+        atm_iv_change=_atm_iv_change(rows, spot_price),
+        iv_percentile=None,
+        total_volume=sum(row.volume for row in rows),
+        total_oi_change=total_oi_change,
+        total_oi_change_percent=((total_oi_change / previous_total_oi) * 100) if previous_total_oi else None,
         highest_call_oi_strike=_highest_oi_strike(call_rows),
         highest_put_oi_strike=_highest_oi_strike(put_rows),
         rows=tuple(sorted(rows, key=lambda row: (row.strike, row.option_type))),
@@ -160,6 +184,9 @@ def write_option_chain_snapshot(path: str | Path, analysis: OptionChainAnalysis)
         "oi",
         "previous_oi",
         "oi_change",
+        "oi_change_percent",
+        "implied_volatility",
+        "iv_change",
         "volume",
         "bid_price",
         "ask_price",
@@ -184,6 +211,9 @@ def write_option_chain_snapshot(path: str | Path, analysis: OptionChainAnalysis)
                     "oi": row.oi,
                     "previous_oi": "" if row.previous_oi is None else row.previous_oi,
                     "oi_change": "" if row.oi_change is None else row.oi_change,
+                    "oi_change_percent": "" if row.oi_change_percent is None else row.oi_change_percent,
+                    "implied_volatility": "" if row.implied_volatility is None else row.implied_volatility,
+                    "iv_change": "" if row.iv_change is None else row.iv_change,
                     "volume": row.volume,
                     "bid_price": "" if row.bid_price is None else row.bid_price,
                     "ask_price": "" if row.ask_price is None else row.ask_price,
@@ -196,6 +226,7 @@ def _row_from_quote(
     contract: OptionContract,
     quote: dict[str, Any],
     previous_row: dict[str, str] | None,
+    spot_price: float | None,
 ) -> OptionChainRow:
     last_price = _float(quote.get("last_price"))
     previous_close = _float((quote.get("ohlc") or {}).get("close"))
@@ -203,6 +234,16 @@ def _row_from_quote(
     oi = int(_float(quote.get("oi")) or 0)
     previous_oi = _optional_int((previous_row or {}).get("oi"))
     oi_change = oi - previous_oi if previous_oi is not None else None
+    oi_change_percent = (oi_change / previous_oi * 100) if previous_oi else None
+    implied_volatility = implied_volatility_percent(
+        option_type=contract.option_type,
+        option_price=last_price,
+        spot_price=spot_price,
+        strike=contract.strike,
+        expiry=contract.expiry,
+    )
+    previous_iv = _float((previous_row or {}).get("implied_volatility"))
+    iv_change = implied_volatility - previous_iv if implied_volatility is not None and previous_iv is not None else None
     bid_price = _depth_price(quote, "buy")
     ask_price = _depth_price(quote, "sell")
     return OptionChainRow(
@@ -215,6 +256,9 @@ def _row_from_quote(
         oi=oi,
         previous_oi=previous_oi,
         oi_change=oi_change,
+        oi_change_percent=oi_change_percent,
+        implied_volatility=implied_volatility,
+        iv_change=iv_change,
         volume=int(_float(quote.get("volume")) or 0),
         bid_price=bid_price,
         ask_price=ask_price,
@@ -236,6 +280,34 @@ def classify_buildup(price_change: float | None, oi_change: int | None) -> str:
     return "Neutral"
 
 
+def implied_volatility_percent(
+    option_type: str,
+    option_price: float | None,
+    spot_price: float | None,
+    strike: float,
+    expiry: date,
+    risk_free_rate: float = 0.065,
+) -> float | None:
+    if option_price is None or option_price <= 0 or spot_price is None or spot_price <= 0 or strike <= 0:
+        return None
+    days_to_expiry = max((expiry - date.today()).days, 1)
+    years_to_expiry = days_to_expiry / 365
+    intrinsic = max(0.0, spot_price - strike) if option_type == "CE" else max(0.0, strike - spot_price)
+    if option_price < intrinsic:
+        return None
+
+    low = 0.0001
+    high = 5.0
+    for _ in range(80):
+        mid = (low + high) / 2
+        theoretical = _black_scholes_price(option_type, spot_price, strike, years_to_expiry, risk_free_rate, mid)
+        if theoretical > option_price:
+            high = mid
+        else:
+            low = mid
+    return ((low + high) / 2) * 100
+
+
 def _max_pain(rows: list[OptionChainRow]) -> float | None:
     strikes = sorted({row.strike for row in rows})
     if not strikes:
@@ -252,10 +324,52 @@ def _max_pain(rows: list[OptionChainRow]) -> float | None:
     return min(pain_by_strike, key=pain_by_strike.get)
 
 
+def _atm_iv(rows: list[OptionChainRow], spot_price: float | None) -> float | None:
+    atm_rows = _atm_rows(rows, spot_price)
+    values = [row.implied_volatility for row in atm_rows if row.implied_volatility is not None]
+    return (sum(values) / len(values)) if values else None
+
+
+def _atm_iv_change(rows: list[OptionChainRow], spot_price: float | None) -> float | None:
+    atm_rows = _atm_rows(rows, spot_price)
+    values = [row.iv_change for row in atm_rows if row.iv_change is not None]
+    return (sum(values) / len(values)) if values else None
+
+
+def _atm_rows(rows: list[OptionChainRow], spot_price: float | None) -> list[OptionChainRow]:
+    if not rows or spot_price is None:
+        return []
+    atm_strike = min({row.strike for row in rows}, key=lambda strike: abs(strike - spot_price))
+    return [row for row in rows if row.strike == atm_strike]
+
+
 def _highest_oi_strike(rows: list[OptionChainRow]) -> float | None:
     if not rows:
         return None
     return max(rows, key=lambda row: row.oi).strike
+
+
+def _black_scholes_price(
+    option_type: str,
+    spot: float,
+    strike: float,
+    years_to_expiry: float,
+    risk_free_rate: float,
+    volatility: float,
+) -> float:
+    if years_to_expiry <= 0 or volatility <= 0:
+        return max(0.0, spot - strike) if option_type == "CE" else max(0.0, strike - spot)
+    denominator = volatility * math.sqrt(years_to_expiry)
+    d1 = (math.log(spot / strike) + (risk_free_rate + 0.5 * volatility * volatility) * years_to_expiry) / denominator
+    d2 = d1 - denominator
+    discount = math.exp(-risk_free_rate * years_to_expiry)
+    if option_type == "CE":
+        return spot * _normal_cdf(d1) - strike * discount * _normal_cdf(d2)
+    return strike * discount * _normal_cdf(-d2) - spot * _normal_cdf(-d1)
+
+
+def _normal_cdf(value: float) -> float:
+    return 0.5 * (1 + math.erf(value / math.sqrt(2)))
 
 
 def _depth_price(quote: dict[str, Any], side: str) -> float | None:
@@ -277,4 +391,3 @@ def _optional_int(value: Any) -> int | None:
     if value is None or value == "":
         return None
     return int(float(value))
-

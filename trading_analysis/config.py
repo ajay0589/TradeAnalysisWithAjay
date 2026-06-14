@@ -54,6 +54,24 @@ def load_settings() -> Settings:
     )
 
 
+def upsert_env_value(path: str | Path, key: str, value: str) -> None:
+    env_path = Path(path)
+    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+    prefix = f"{key}="
+    updated = False
+    new_lines = []
+    for line in lines:
+        if line.startswith(prefix):
+            new_lines.append(f"{key}={value}")
+            updated = True
+        else:
+            new_lines.append(line)
+    if not updated:
+        new_lines.append(f"{key}={value}")
+    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    os.environ[key] = value
+
+
 def load_watchlist(path: str | Path) -> list[WatchlistItem]:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     symbols = payload.get("symbols", [])
@@ -73,4 +91,3 @@ def load_watchlist(path: str | Path) -> list[WatchlistItem]:
 def _env(name: str) -> str | None:
     value = os.getenv(name)
     return value if value else None
-

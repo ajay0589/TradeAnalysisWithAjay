@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>F&O Decision Desk</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar">
+        <div>
+          <h1>F&O Decision Desk</h1>
+          <p id="dataStatus">Loading market universe...</p>
+        </div>
+        <div class="status-strip">
+          <span id="availableCount">-</span>
+          <span id="missingCount">-</span>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <aside class="sidebar">
+          <div class="panel auth-panel">
+            <div class="auth-head">
+              <label>Zerodha</label>
+              <span id="zerodhaStatus" class="token-status">checking</span>
+            </div>
+            <div class="auth-actions">
+              <button id="checkZerodhaBtn">Check</button>
+              <a id="zerodhaLoginLink" class="button-link" href="#" target="_blank" rel="noreferrer">Login</a>
+            </div>
+            <label for="zerodhaRedirectUrl">Redirected URL or request token</label>
+            <textarea id="zerodhaRedirectUrl" rows="3" placeholder="Paste the URL containing request_token=..."></textarea>
+            <button id="updateZerodhaTokenBtn" class="full-btn">Update access token</button>
+          </div>
+
+          <div class="panel">
+            <label for="symbolInput">Stock</label>
+            <div class="search-row">
+              <input id="symbolInput" list="symbolList" placeholder="RELIANCE" autocomplete="off" />
+              <button id="analyzeBtn">Analyze</button>
+            </div>
+            <datalist id="symbolList"></datalist>
+            <label for="timeframeSelect">Timeframe</label>
+            <select id="timeframeSelect">
+              <option value="month">Monthly</option>
+              <option value="week">Weekly</option>
+              <option value="day" selected>Daily</option>
+              <option value="60minute">1 hour</option>
+              <option value="15minute">15 min</option>
+            </select>
+            <div class="date-grid">
+              <div>
+                <label for="daysBack">Days</label>
+                <input id="daysBack" type="number" min="1" step="1" placeholder="90" />
+              </div>
+              <div>
+                <label for="toDate">To</label>
+                <input id="toDate" type="date" />
+              </div>
+            </div>
+            <label for="fromDate">From</label>
+            <input id="fromDate" type="date" />
+            <label class="check-row">
+              <input id="refreshToggle" type="checkbox" />
+              Pull latest candles
+            </label>
+            <label class="check-row">
+              <input id="optionChainToggle" type="checkbox" />
+              Option chain
+            </label>
+            <label for="previousSnapshot">Previous snapshot</label>
+            <input id="previousSnapshot" placeholder="data/raw/option_chain/RELIANCE_2026-06-30.csv" />
+          </div>
+
+          <div class="panel">
+            <label>Scan</label>
+            <div class="segmented">
+              <button data-scan="bullish">Bullish</button>
+              <button data-scan="bearish">Bearish</button>
+              <button data-scan="neutral">Neutral</button>
+            </div>
+          </div>
+        </aside>
+
+        <section class="content">
+          <section class="summary-grid" id="summaryGrid">
+            <div class="metric">
+              <span>Bias</span>
+              <strong id="biasValue">-</strong>
+            </div>
+            <div class="metric">
+              <span>Score</span>
+              <strong id="scoreValue">-</strong>
+            </div>
+            <div class="metric">
+              <span>Strategy</span>
+              <strong id="strategyValue">-</strong>
+            </div>
+            <div class="metric">
+              <span>Decision</span>
+              <strong id="decisionValue">-</strong>
+            </div>
+          </section>
+
+          <section class="report-grid">
+            <div class="table-panel">
+              <div class="panel-head">
+                <h2>Structure</h2>
+                <span id="structureMeta"></span>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                  <th>Frame</th>
+                  <th>Close</th>
+                    <th>Trend</th>
+                    <th>Structure</th>
+                    <th>Support</th>
+                    <th>Resistance</th>
+                    <th>Invalidation</th>
+                  </tr>
+                </thead>
+                <tbody id="structureBody"></tbody>
+              </table>
+            </div>
+
+            <div class="table-panel">
+              <div class="panel-head">
+                <h2>Relative Strength</h2>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Comparison</th>
+                    <th>Subject</th>
+                    <th>Benchmark</th>
+                    <th>Relative</th>
+                    <th>Label</th>
+                  </tr>
+                </thead>
+                <tbody id="rsBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="table-panel">
+            <div class="panel-head">
+              <h2 id="scanTitle">Candidates</h2>
+              <span id="scanMeta"></span>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Score</th>
+                  <th>Bias</th>
+                  <th>Strategy</th>
+                  <th>Close</th>
+                  <th>Trend</th>
+                  <th>Support</th>
+                  <th>Resistance</th>
+                  <th>RS</th>
+                </tr>
+              </thead>
+              <tbody id="scanBody"></tbody>
+            </table>
+          </section>
+
+          <section class="table-panel">
+            <div class="panel-head">
+              <h2>Option Chain</h2>
+              <span id="optionMeta"></span>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Strike</th>
+                  <th>Type</th>
+                  <th>LTP</th>
+                  <th>IV</th>
+                  <th>IV Chg</th>
+                  <th>OI</th>
+                  <th>OI Chg</th>
+                  <th>OI Chg %</th>
+                  <th>Build-up</th>
+                </tr>
+              </thead>
+              <tbody id="optionBody"></tbody>
+            </table>
+          </section>
+
+          <section class="notes" id="notes"></section>
+        </section>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

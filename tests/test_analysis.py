@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import unittest
+import os
+import tempfile
+from datetime import datetime
 from pathlib import Path
 
+from trading_analysis.candles import normalize_timeframe, prepare_candles, candle_window
 from trading_analysis.analysis.fundamental import analyze_fundamentals
 from trading_analysis.analysis.market_structure import analyze_market_structure
 from trading_analysis.analysis.options import (
@@ -32,7 +36,9 @@ from trading_analysis.data_sources.nse_equity import (
     choose_sector_index,
 )
 from trading_analysis.data_sources.csv_loader import load_candles
-from trading_analysis.models import FundamentalSnapshot
+from trading_analysis.config import upsert_env_value
+from trading_analysis.models import Candle, FundamentalSnapshot
+from trading_analysis.web_services import classify_setup
 
 
 class AnalysisTests(unittest.TestCase):
@@ -242,6 +248,46 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(sector_map["symbols"]["RELIANCE"]["index_symbol"], "NIFTY OIL AND GAS")
         self.assertEqual(sector_map["symbols"]["TCS"]["index_symbol"], "NIFTY IT")
         self.assertIn("ABB", sector_map["unmapped"])
+
+    def test_web_setup_classification_matches_options_action(self) -> None:
+        self.assertEqual(classify_setup(70, "bullish", "uptrend")["strategy"], "Sell put option")
+        self.assertEqual(classify_setup(30, "bearish", "downtrend")["strategy"], "Sell call option")
+        self.assertEqual(
+            classify_setup(50, "neutral", "range")["strategy"],
+            "Sell call and put as strangle",
+        )
+
+    def test_timeframe_aliases_and_weekly_resample(self) -> None:
+        candles = [
+            Candle(datetime(2026, 6, 1), 10, 12, 9, 11, 100),
+            Candle(datetime(2026, 6, 2), 11, 13, 10, 12, 120),
+            Candle(datetime(2026, 6, 8), 12, 15, 11, 14, 150),
+        ]
+
+        weekly = prepare_candles(candles, "weekly", candle_window())
+
+        self.assertEqual(normalize_timeframe("1hour"), "60minute")
+        self.assertEqual(len(weekly), 2)
+        self.assertEqual(weekly[0].open, 10)
+        self.assertEqual(weekly[0].high, 13)
+        self.assertEqual(weekly[0].volume, 220)
+
+    def test_env_upsert_updates_file_and_process_environment(self) -> None:
+        original = os.environ.get("ZERODHA_ACCESS_TOKEN")
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                env_path = Path(tmpdir) / ".env"
+                env_path.write_text("TRADING_MODE=paper\nZERODHA_ACCESS_TOKEN=old\n", encoding="utf-8")
+
+                upsert_env_value(env_path, "ZERODHA_ACCESS_TOKEN", "new")
+
+                self.assertIn("ZERODHA_ACCESS_TOKEN=new", env_path.read_text(encoding="utf-8"))
+                self.assertEqual(os.environ.get("ZERODHA_ACCESS_TOKEN"), "new")
+        finally:
+            if original is None:
+                os.environ.pop("ZERODHA_ACCESS_TOKEN", None)
+            else:
+                os.environ["ZERODHA_ACCESS_TOKEN"] = original
 
 
 if __name__ == "__main__":

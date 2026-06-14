@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from dataclasses import asdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from trading_analysis.analysis.fundamental import analyze_fundamentals
@@ -35,7 +36,15 @@ from trading_analysis.brokers.zerodha import (
     write_candles_csv,
     write_instruments_csv,
 )
-from trading_analysis.config import load_settings, load_watchlist
+from trading_analysis.candles import (
+    candle_path,
+    candle_window,
+    fetch_interval,
+    normalize_timeframe,
+    safe_symbol_filename,
+    source_timeframe,
+)
+from trading_analysis.config import load_settings, load_watchlist, upsert_env_value
 from trading_analysis.data_sources.fno_universe import build_fno_watchlist, fno_stock_symbols, write_watchlist
 from trading_analysis.data_sources.csv_loader import load_candles, load_candles_for_item
 from trading_analysis.data_sources.nse_equity import (
@@ -252,6 +261,49 @@ def main() -> None:
     mtf_parser.add_argument("--skip-benchmark", action="store_true", help="Only download the stock candles")
     mtf_parser.add_argument("--skip-sector", action="store_true", help="Skip sector-index candles")
 
+    bulk_parser = subparsers.add_parser(
+        "bulk-fno-candles",
+        help="Bulk-download candles for the full F&O stock watchlist",
+    )
+    bulk_parser.add_argument(
+        "--watchlist",
+        default="config/watchlist.fno.json",
+        help="F&O watchlist JSON",
+    )
+    bulk_parser.add_argument(
+        "--instrument-cache",
+        default="data/raw/zerodha/instruments_NSE.csv",
+        help="Cached Zerodha NSE instruments CSV",
+    )
+    bulk_parser.add_argument(
+        "--sector-map",
+        default="config/sector_map.generated.json",
+        help="Optional stock-to-sector-index mapping JSON",
+    )
+    bulk_parser.add_argument(
+        "--output-root",
+        default="data/raw/candles",
+        help="Root candle directory. Day candles go here; intraday candles go under interval subfolders.",
+    )
+    bulk_parser.add_argument(
+        "--timeframes",
+        default="day,60minute,15minute",
+        help="Comma-separated timeframes: month, week, day, 60minute, 15minute. Week/month use day candles.",
+    )
+    bulk_parser.add_argument("--from-date", help="Start date/time. Overrides --days when provided.")
+    bulk_parser.add_argument("--to-date", help="End date/time. Defaults to now.")
+    bulk_parser.add_argument(
+        "--days",
+        type=int,
+        default=90,
+        help="Days back from --to-date/now when --from-date is not provided.",
+    )
+    bulk_parser.add_argument("--limit", type=int, help="Optional symbol limit for testing")
+    bulk_parser.add_argument("--sleep-seconds", type=float, default=0.35, help="Delay between broker requests")
+    bulk_parser.add_argument("--skip-benchmark", action="store_true", help="Skip Nifty 50 candles")
+    bulk_parser.add_argument("--skip-sectors", action="store_true", help="Skip mapped sector-index candles")
+    bulk_parser.add_argument("--fail-fast", action="store_true", help="Stop on the first download error")
+
     option_chain_parser = subparsers.add_parser(
         "option-chain",
         help="Analyze an F&O stock option chain using Zerodha quote snapshots",
@@ -371,6 +423,8 @@ def main() -> None:
         run_zerodha_candles(args)
     elif args.command == "update-mtf-candles":
         run_update_mtf_candles(args)
+    elif args.command == "bulk-fno-candles":
+        run_bulk_fno_candles(args)
     elif args.command == "option-chain":
         run_option_chain(args)
     elif args.command == "fii-dii":
@@ -471,7 +525,7 @@ def run_zerodha_access_token(args: argparse.Namespace) -> None:
         raise SystemExit("Zerodha response did not contain access_token.")
 
     if args.write_env:
-        _upsert_env_value(args.env_file, "ZERODHA_ACCESS_TOKEN", access_token)
+        upsert_env_value(args.env_file, "ZERODHA_ACCESS_TOKEN", access_token)
         print(f"Updated ZERODHA_ACCESS_TOKEN in {args.env_file}")
     else:
         print(access_token)
@@ -591,6 +645,67 @@ def run_update_mtf_candles(args: argparse.Namespace) -> None:
             )
             write_candles_csv(output, candles)
             print(f"Wrote {len(candles)} {interval} candles for {tradingsymbol}: {output}")
+
+
+def run_bulk_fno_candles(args: argparse.Namespace) -> None:
+    client = _zerodha_client_from_settings()
+    instruments = load_instruments_csv(args.instrument_cache)
+    watchlist = load_watchlist(args.watchlist)
+    symbols = [item.symbol for item in watchlist]
+    if args.limit:
+        symbols = symbols[: args.limit]
+
+    source_timeframes = _bulk_source_timeframes(args.timeframes)
+    window = candle_window(from_date=args.from_date, to_date=args.to_date, days=None if args.from_date else args.days)
+    if window.from_time is None:
+        window = type(window)(
+            from_time=window.to_time - timedelta(days=args.days),
+            to_time=window.to_time,
+            days=args.days,
+        )
+
+    targets = [(symbol, safe_symbol_filename(symbol)) for symbol in symbols]
+    if not args.skip_benchmark:
+        targets.append(("NIFTY 50", "NIFTY_50"))
+    if not args.skip_sectors:
+        targets.extend(_sector_targets_for_symbols(symbols, args.sector_map))
+    targets = _dedupe_targets(targets)
+
+    print(
+        f"Downloading {len(targets)} targets x {len(source_timeframes)} timeframe(s) "
+        f"from {window.from_time} to {window.to_time}"
+    )
+
+    successes = 0
+    errors: list[str] = []
+    for tradingsymbol, file_stem in targets:
+        for timeframe in source_timeframes:
+            try:
+                token = resolve_instrument_token(instruments, "NSE", tradingsymbol)
+                candles = client.historical_candles(
+                    instrument_token=token,
+                    interval=fetch_interval(timeframe),
+                    from_time=window.from_time,
+                    to_time=window.to_time,
+                )
+                output = candle_path(args.output_root, timeframe, file_stem)
+                write_candles_csv(output, candles)
+                successes += 1
+                print(f"Wrote {len(candles)} {timeframe} candles for {tradingsymbol}: {output}")
+            except Exception as exc:
+                message = f"{tradingsymbol} {timeframe}: {exc}"
+                errors.append(message)
+                print(f"ERROR {message}")
+                if args.fail_fast:
+                    raise
+            if args.sleep_seconds:
+                time.sleep(args.sleep_seconds)
+
+    print(f"\nCompleted {successes} downloads with {len(errors)} error(s).")
+    if errors:
+        print("Errors:")
+        for error in errors[:50]:
+            print(f"- {error}")
 
 
 def run_option_chain(args: argparse.Namespace) -> None:
@@ -802,31 +917,59 @@ def _mtf_output_path(output_root: str, interval: str, file_stem: str) -> Path:
     return root / interval / f"{file_stem}.csv"
 
 
-def _upsert_env_value(path: str, key: str, value: str) -> None:
-    env_path = Path(path)
-    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
-    prefix = f"{key}="
-    updated = False
-    new_lines = []
-    for line in lines:
-        if line.startswith(prefix):
-            new_lines.append(f"{key}={value}")
-            updated = True
-        else:
-            new_lines.append(line)
-    if not updated:
-        new_lines.append(f"{key}={value}")
-    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+def _bulk_source_timeframes(value: str) -> list[str]:
+    order = ["day", "60minute", "15minute"]
+    normalized = {source_timeframe(normalize_timeframe(part)) for part in value.split(",") if part.strip()}
+    return [timeframe for timeframe in order if timeframe in normalized]
+
+
+def _sector_targets_for_symbols(symbols: list[str], sector_map_path: str) -> list[tuple[str, str]]:
+    sector_map = load_sector_map(sector_map_path)
+    targets = []
+    for symbol in symbols:
+        sector_config = sector_config_for_symbol(sector_map, symbol)
+        if sector_config:
+            targets.append((sector_config["index_symbol"].upper(), Path(sector_config["data_file"]).stem))
+    return targets
+
+
+def _dedupe_targets(targets: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    output = []
+    seen: set[tuple[str, str]] = set()
+    for tradingsymbol, file_stem in targets:
+        key = (tradingsymbol.upper(), file_stem)
+        if key in seen:
+            continue
+        output.append(key)
+        seen.add(key)
+    return output
 
 
 def _render_option_chain_summary(analysis) -> str:
-    headers = ["Symbol", "Expiry", "Spot", "Contracts", "PCR OI", "Max Pain", "High CE OI", "High PE OI"]
+    headers = [
+        "Symbol",
+        "Expiry",
+        "Spot",
+        "Contracts",
+        "ATM IV",
+        "IV Chg",
+        "Volume",
+        "OI % Chg",
+        "PCR OI",
+        "Max Pain",
+        "High CE OI",
+        "High PE OI",
+    ]
     rows = [
         [
             analysis.symbol,
             analysis.expiry.isoformat(),
             _fmt(analysis.spot_price),
             str(analysis.contract_count),
+            _fmt(analysis.atm_iv),
+            _fmt(analysis.atm_iv_change),
+            str(analysis.total_volume),
+            _fmt(analysis.total_oi_change_percent),
             _fmt(analysis.pcr_oi),
             _fmt(analysis.max_pain),
             _fmt(analysis.highest_call_oi_strike),
@@ -837,15 +980,18 @@ def _render_option_chain_summary(analysis) -> str:
 
 
 def _render_option_chain_rows(analysis) -> str:
-    headers = ["Strike", "Type", "LTP", "Chg", "OI", "OI Chg", "Volume", "Bid", "Ask", "Build-up"]
+    headers = ["Strike", "Type", "LTP", "Chg", "IV", "IV Chg", "OI", "OI Chg", "OI % Chg", "Volume", "Bid", "Ask", "Build-up"]
     rows = [
         [
             _fmt(row.strike),
             row.option_type,
             _fmt(row.last_price),
             _fmt(row.price_change),
+            _fmt(row.implied_volatility),
+            _fmt(row.iv_change),
             str(row.oi),
             "-" if row.oi_change is None else str(row.oi_change),
+            _fmt(row.oi_change_percent),
             str(row.volume),
             _fmt(row.bid_price),
             _fmt(row.ask_price),
