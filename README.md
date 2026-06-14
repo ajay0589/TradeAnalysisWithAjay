@@ -196,12 +196,18 @@ The dashboard supports:
 - scanning bullish candidates for put selling
 - scanning bearish candidates for call selling
 - scanning neutral candidates for short strangle candidates
+- bulk-downloading all F&O candles with progress and failure reporting
+- generating the sector map by uploading a CSV
+- viewing latest cached/refreshed FII/DII market flow
 - selecting Monthly, Weekly, Daily, 1 hour, or 15 min chart analysis
 - selecting either a days-back window or explicit from/to dates
 - optionally refreshing candles from Zerodha before analysis
-- optional nearest-expiry option-chain context when Zerodha credentials and NFO instruments are available
+- reviewing Day + 1 hour + 15 min multi-timeframe direction, including volume and volume-vs-20-candle average
+- advanced option-chain context with expiry selection, all-strikes mode, strikes-around-spot mode, previous snapshot comparison, PCR, max pain, IV, OI change, and build-up
+- saving the current trade-decision report as JSON under `reports`
 
 Scans only include F&O symbols whose candle CSV exists for the selected timeframe. Weekly and monthly charts are derived from daily candles.
+Multi-timeframe direction uses daily candles for swing bias, 1-hour candles for setup confirmation, and 15-minute candles for intraday timing. Volume comes from Zerodha candle data and is shown as last-candle volume plus `Vol x20`.
 
 Bulk-download candles for the F&O universe:
 
@@ -216,6 +222,8 @@ python -m trading_analysis.cli bulk-fno-candles --timeframes day --days 1460
 ```
 
 Option-chain analytics currently includes PCR, max pain, total option volume, ATM IV, IV change from the previous snapshot, OI change, and OI percent change. IV percentile needs accumulated historical IV snapshots before it can be calculated reliably.
+
+Sector map CSV upload expects a symbol column plus sector/industry/index detail. Supported columns are the same as `generate-sector-map-from-csv`, including `symbol`, `industry`, `sector`, `macro`, and optional `index_symbol`.
 
 Zerodha token refresh from the UI:
 

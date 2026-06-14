@@ -1,5 +1,8 @@
 const state = {
   symbols: [],
+  lastAnalysis: null,
+  bulkJobId: null,
+  bulkPollTimer: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -8,6 +11,11 @@ function fmt(value) {
   if (value === null || value === undefined || value === "") return "-";
   if (typeof value === "number") return value.toFixed(2);
   return String(value);
+}
+
+function fmtInt(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  return Number(value).toLocaleString("en-IN");
 }
 
 function chartParams() {
@@ -20,6 +28,17 @@ function chartParams() {
   if (days) params.set("days", days);
   if (fromDate) params.set("from_date", fromDate);
   if (toDate) params.set("to_date", toDate);
+  return params;
+}
+
+function scanParams() {
+  const params = new URLSearchParams({
+    timeframe: $("scanTimeframeSelect").value,
+  });
+  const days = $("scanDays").value.trim();
+  const limit = $("scanLimit").value.trim();
+  if (days) params.set("days", days);
+  params.set("limit", limit || "all");
   return params;
 }
 
@@ -113,6 +132,86 @@ async function loadSymbols() {
   });
 }
 
+async function loadSectorStatus() {
+  try {
+    const data = await api("/api/sector-map/status");
+    renderSectorStatus(data);
+  } catch (error) {
+    $("sectorStatus").textContent = error.message;
+  }
+}
+
+function renderSectorStatus(data) {
+  if (!data.exists) {
+    $("sectorStatus").textContent = `Missing sector map: ${data.path}`;
+    return;
+  }
+  $("sectorStatus").textContent = `${data.mapped} mapped / ${data.unmapped} unmapped / ${data.sectors} sectors (${data.generated_on || "unknown date"})`;
+}
+
+async function uploadSectorCsv() {
+  const file = $("sectorCsvFile").files[0];
+  if (!file) {
+    setNotes(["Choose a sector CSV file first."], true);
+    return;
+  }
+  setNotes("Generating sector map...");
+  try {
+    const csvText = await file.text();
+    const data = await postApi("/api/sector-map/from-csv", { csv_text: csvText });
+    renderSectorStatus(data);
+    setNotes(`Sector map generated: ${data.mapped} mapped, ${data.unmapped} unmapped.`);
+  } catch (error) {
+    setNotes([error.message], true);
+  }
+}
+
+async function loadFiiDii(refresh = false) {
+  try {
+    const data = refresh ? await postApi("/api/fii-dii/refresh", {}) : await api("/api/fii-dii");
+    renderFiiDii(data);
+    if (data.error) setNotes([`FII/DII refresh failed: ${data.error}`], true);
+  } catch (error) {
+    $("fiiDiiStatus").textContent = error.message;
+  }
+}
+
+function renderFiiDii(data) {
+  const rows = data.rows || [];
+  $("fiiDiiStatus").textContent = rows.length
+    ? `${rows.length} FII/DII row(s) loaded from ${data.path}`
+    : `No FII/DII rows available at ${data.path}`;
+  if (!rows.length) {
+    $("fiiDiiHead").innerHTML = "";
+    $("fiiDiiBody").innerHTML = "";
+    return;
+  }
+  const columns = Object.keys(rows[0]).slice(0, 6);
+  $("fiiDiiHead").innerHTML = `<tr>${columns.map((key) => `<th>${key}</th>`).join("")}</tr>`;
+  $("fiiDiiBody").innerHTML = rows
+    .slice(0, 6)
+    .map((row) => `<tr>${columns.map((key) => `<td>${row[key] || "-"}</td>`).join("")}</tr>`)
+    .join("");
+}
+
+async function loadOptionExpiries() {
+  const symbol = $("symbolInput").value.trim().toUpperCase();
+  const select = $("expirySelect");
+  select.innerHTML = `<option value="">Nearest expiry</option>`;
+  if (!symbol) return;
+  try {
+    const data = await api(`/api/option-expiries?symbol=${encodeURIComponent(symbol)}`);
+    (data.expiries || []).forEach((expiry) => {
+      const option = document.createElement("option");
+      option.value = expiry;
+      option.textContent = expiry === data.nearest ? `${expiry} (nearest)` : expiry;
+      select.appendChild(option);
+    });
+  } catch (error) {
+    setNotes([error.message], true);
+  }
+}
+
 async function analyze() {
   const symbol = $("symbolInput").value.trim().toUpperCase();
   if (!symbol) return;
@@ -122,13 +221,83 @@ async function analyze() {
     symbol,
     option_chain: $("optionChainToggle").checked ? "true" : "false",
     previous_snapshot: $("previousSnapshot").value.trim(),
+    expiry: $("expirySelect").value,
+    strikes_around: $("strikesAround").value.trim() || "10",
+    all_strikes: $("allStrikesToggle").checked ? "true" : "false",
     refresh: $("refreshToggle").checked ? "true" : "false",
   });
   chartParams().forEach((value, key) => params.set(key, value));
   try {
     const data = await api(`/api/analyze?${params.toString()}`);
+    state.lastAnalysis = data;
     renderAnalysis(data);
+    $("reportStatus").textContent = "Report ready to save";
     setNotes((data.warnings || []).concat(data.decision.warnings || []));
+  } catch (error) {
+    setNotes([error.message], true);
+  }
+}
+
+async function startBulkDownload() {
+  const timeframes = [];
+  if ($("bulkDay").checked) timeframes.push("day");
+  if ($("bulkHour").checked) timeframes.push("60minute");
+  if ($("bulk15").checked) timeframes.push("15minute");
+  if (!timeframes.length) {
+    setNotes(["Select at least one timeframe for bulk download."], true);
+    return;
+  }
+  const payload = {
+    timeframes,
+    days: $("bulkDays").value ? Number($("bulkDays").value) : 90,
+    limit: $("bulkLimit").value ? Number($("bulkLimit").value) : null,
+  };
+  try {
+    const job = await postApi("/api/bulk-candles", payload);
+    state.bulkJobId = job.job_id;
+    renderBulkJob(job);
+    pollBulkJob();
+  } catch (error) {
+    setNotes([error.message], true);
+  }
+}
+
+async function pollBulkJob() {
+  if (!state.bulkJobId) return;
+  clearTimeout(state.bulkPollTimer);
+  try {
+    const job = await api(`/api/job?job_id=${encodeURIComponent(state.bulkJobId)}`);
+    renderBulkJob(job);
+    if (["queued", "running"].includes(job.status)) {
+      state.bulkPollTimer = setTimeout(pollBulkJob, 1500);
+    }
+  } catch (error) {
+    $("bulkStatus").textContent = error.message;
+  }
+}
+
+function renderBulkJob(job) {
+  const total = job.total || 0;
+  const completed = job.completed || 0;
+  const percent = total ? Math.round((completed / total) * 100) : 0;
+  $("bulkProgressBar").style.width = `${percent}%`;
+  $("bulkMeta").textContent = `${job.status} / ${completed}/${total}`;
+  $("bulkStatus").textContent = `${job.status}: ${job.current || "idle"} | success ${job.successes} | failures ${job.failures}`;
+  $("bulkErrors").innerHTML = (job.errors || [])
+    .slice(-6)
+    .map((error) => `<div>${error}</div>`)
+    .join("");
+}
+
+async function saveReport() {
+  if (!state.lastAnalysis) {
+    setNotes(["Run Analyze before saving a report."], true);
+    return;
+  }
+  try {
+    const data = await postApi("/api/export-report", state.lastAnalysis);
+    $("reportStatus").textContent = `Saved: ${data.path}`;
+    setNotes(`Report saved: ${data.path}`);
   } catch (error) {
     setNotes([error.message], true);
   }
@@ -137,11 +306,11 @@ async function analyze() {
 async function scan(type) {
   setNotes(`Loading ${type} scan...`);
   try {
-    const params = chartParams();
+    const params = scanParams();
     params.set("type", type);
     const data = await api(`/api/scan?${params.toString()}`);
     $("scanTitle").textContent = `${capitalize(type)} candidates`;
-    $("scanMeta").textContent = `${data.results.length} shown / ${data.available_symbols} ready / ${data.timeframe_label}`;
+    $("scanMeta").textContent = `${data.results.length} shown / ${data.matched_symbols} matched / ${data.available_symbols} ready / ${data.timeframe_label}`;
     renderScan(data.results);
     setNotes(`${data.strategy}. Verify option chain, liquidity, event risk, and risk/reward before trade.`);
   } catch (error) {
@@ -157,6 +326,9 @@ function renderAnalysis(data) {
   $("decisionValue").textContent = data.decision.decision;
   $("structureMeta").textContent = `${data.chart.label} / ${data.chart.candle_count} candles`;
 
+  renderMultiTimeframe(data.multi_timeframe);
+  renderOptionGuide(data.option_trade_guide);
+  renderCoverage(data.analysis_summary);
   $("structureBody").innerHTML = [
     structureRow(data.chart.label, data.chart.technical, data.chart.structure),
     structureRow("60m", data.hourly.technical, data.hourly.structure),
@@ -164,6 +336,89 @@ function renderAnalysis(data) {
 
   renderRelativeStrength(data.relative_strength);
   renderOptionChain(data.option_chain);
+}
+
+function renderMultiTimeframe(mtf) {
+  if (!mtf || !mtf.rows) {
+    $("mtfMeta").textContent = "-";
+    $("mtfBody").innerHTML = "";
+    return;
+  }
+  $("mtfMeta").textContent = mtf.summary;
+  $("mtfBody").innerHTML = mtf.rows
+    .map((row) => {
+      if (row.status !== "analyzed") {
+        return `
+          <tr>
+            <td>${row.label}</td>
+            <td><span class="status-badge status-${row.status}">${statusLabel(row.status)}</span></td>
+            <td colspan="10">${row.message || "Not available"} ${row.path || ""}</td>
+          </tr>
+        `;
+      }
+      return `
+        <tr>
+          <td>${row.label}</td>
+          <td><span class="status-badge status-analyzed">${row.volume_signal}</span></td>
+          <td>${fmt(row.close)}</td>
+          <td class="${row.technical_trend}">${row.technical_trend}</td>
+          <td>${row.structure_trend}</td>
+          <td>${row.score}</td>
+          <td>${fmt(row.rsi14)}</td>
+          <td>${fmtInt(row.volume)}</td>
+          <td>${fmt(row.volume_ratio20)}</td>
+          <td>${fmt(row.support)}</td>
+          <td>${fmt(row.resistance)}</td>
+          <td>${fmt(row.invalidation)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function renderOptionGuide(guide) {
+  if (!guide || !guide.rows) {
+    $("optionGuideMeta").textContent = "-";
+    $("optionGuideBody").innerHTML = "";
+    return;
+  }
+  $("optionGuideMeta").textContent = guide.summary || "-";
+  $("optionGuideBody").innerHTML = guide.rows
+    .map(
+      (row) => `
+        <tr>
+          <td>${row.action}</td>
+          <td>${row.strike_zone}</td>
+          <td>${row.why}</td>
+          <td>${row.risk_check}</td>
+        </tr>
+      `
+    )
+    .join("");
+}
+
+function renderCoverage(summary) {
+  if (!summary || !summary.rows) {
+    $("coverageMeta").textContent = "-";
+    $("coverageBody").innerHTML = "";
+    return;
+  }
+  const analyzed = summary.rows.filter((row) => row.status === "analyzed").length;
+  const pulled = summary.rows.filter((row) => row.status === "pulled").length;
+  const missing = summary.rows.filter((row) => ["missing", "failed", "not_analyzed", "not_requested"].includes(row.status)).length;
+  $("coverageMeta").textContent = `${summary.timeframe_label} / ${analyzed} analyzed / ${pulled} pulled / ${missing} skipped or missing`;
+  $("coverageBody").innerHTML = summary.rows
+    .map(
+      (row) => `
+        <tr>
+          <td>${row.name}</td>
+          <td><span class="status-badge status-${row.status}">${statusLabel(row.status)}</span></td>
+          <td>${row.detail || "-"}</td>
+          <td>${row.source || "-"}</td>
+        </tr>
+      `
+    )
+    .join("");
 }
 
 function structureRow(frame, technical, structure) {
@@ -244,6 +499,7 @@ function renderScan(rows) {
           <td>${row.timeframe}: ${row.daily_trend} / ${row.daily_structure}</td>
           <td>${fmt(row.support)}</td>
           <td>${fmt(row.resistance)}</td>
+          <td>${row.option_zone || "-"}</td>
           <td>${row.stock_vs_nifty}</td>
         </tr>
       `
@@ -272,21 +528,31 @@ function capitalize(value) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+function statusLabel(value) {
+  return value.replaceAll("_", " ");
+}
+
 $("analyzeBtn").addEventListener("click", analyze);
 $("checkZerodhaBtn").addEventListener("click", checkZerodhaStatus);
 $("updateZerodhaTokenBtn").addEventListener("click", updateZerodhaToken);
+$("bulkDownloadBtn").addEventListener("click", startBulkDownload);
+$("sectorUploadBtn").addEventListener("click", uploadSectorCsv);
+$("refreshFiiDiiBtn").addEventListener("click", () => loadFiiDii(true));
+$("saveReportBtn").addEventListener("click", saveReport);
 $("symbolInput").addEventListener("keydown", (event) => {
   if (event.key === "Enter") analyze();
 });
+$("symbolInput").addEventListener("blur", loadOptionExpiries);
 document.querySelectorAll("[data-scan]").forEach((button) => {
   button.addEventListener("click", () => scan(button.dataset.scan));
 });
 
-Promise.all([loadZerodhaLoginUrl(), checkZerodhaStatus(), loadSymbols()])
+Promise.all([loadZerodhaLoginUrl(), checkZerodhaStatus(), loadSymbols(), loadSectorStatus(), loadFiiDii(false)])
   .then(() => {
     const first = state.symbols.find((row) => row.has_daily);
     if (first) {
       $("symbolInput").value = first.symbol;
+      loadOptionExpiries();
       analyze();
     }
     return scan("neutral");

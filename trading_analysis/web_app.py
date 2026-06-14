@@ -34,12 +34,24 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(self.service.zerodha_status())
             elif parsed.path == "/api/zerodha/login-url":
                 self._send_json(self.service.zerodha_login_url())
+            elif parsed.path == "/api/job":
+                params = parse_qs(parsed.query)
+                self._send_json(self.service.job_status(_required(params, "job_id")))
+            elif parsed.path == "/api/sector-map/status":
+                self._send_json(self.service.sector_map_status())
+            elif parsed.path == "/api/fii-dii":
+                self._send_json(self.service.fii_dii_activity(refresh=False))
+            elif parsed.path == "/api/option-expiries":
+                params = parse_qs(parsed.query)
+                self._send_json(self.service.option_expiries(_required(params, "symbol")))
             elif parsed.path == "/api/analyze":
                 params = parse_qs(parsed.query)
                 symbol = _required(params, "symbol")
                 include_chain = params.get("option_chain", ["false"])[0].lower() == "true"
                 previous_snapshot = params.get("previous_snapshot", [None])[0] or None
                 strikes_around = int(params.get("strikes_around", ["10"])[0])
+                expiry = params.get("expiry", [None])[0] or None
+                all_strikes = params.get("all_strikes", ["false"])[0].lower() == "true"
                 timeframe = params.get("timeframe", ["day"])[0]
                 from_date = params.get("from_date", [None])[0] or None
                 to_date = params.get("to_date", [None])[0] or None
@@ -51,6 +63,8 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         include_option_chain=include_chain,
                         previous_snapshot=previous_snapshot,
                         strikes_around=strikes_around,
+                        expiry=expiry,
+                        all_strikes=all_strikes,
                         timeframe=timeframe,
                         from_date=from_date,
                         to_date=to_date,
@@ -61,7 +75,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/scan":
                 params = parse_qs(parsed.query)
                 scan_type = params.get("type", ["bullish"])[0]
-                limit = int(params.get("limit", ["50"])[0])
+                limit = _optional_limit(params.get("limit", ["all"])[0])
                 self._send_json(
                     self.service.scan(
                         scan_type,
@@ -86,6 +100,30 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 if not request_token:
                     raise ValueError("Paste the redirected Zerodha URL or request_token.")
                 self._send_json(self.service.update_zerodha_access_token(request_token))
+            elif parsed.path == "/api/bulk-candles":
+                payload = self._read_json()
+                self._send_json(
+                    self.service.start_bulk_candle_download(
+                        timeframes=list(payload.get("timeframes") or []),
+                        days=_optional_int(payload.get("days")),
+                        from_date=payload.get("from_date") or None,
+                        to_date=payload.get("to_date") or None,
+                        limit=_optional_int(payload.get("limit")),
+                        sleep_seconds=float(payload.get("sleep_seconds") or 0.35),
+                    )
+                )
+            elif parsed.path == "/api/sector-map/from-csv":
+                payload = self._read_json()
+                self._send_json(
+                    self.service.generate_sector_map_from_csv_text(
+                        csv_text=str(payload.get("csv_text") or ""),
+                        include_all=bool(payload.get("include_all")),
+                    )
+                )
+            elif parsed.path == "/api/fii-dii/refresh":
+                self._send_json(self.service.fii_dii_activity(refresh=True))
+            elif parsed.path == "/api/export-report":
+                self._send_json(self.service.export_report(self._read_json()))
             else:
                 self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
         except Exception as exc:
@@ -132,6 +170,15 @@ def _optional_int(value: str | None) -> int | None:
     if value is None or value == "":
         return None
     return int(value)
+
+
+def _optional_limit(value: str | None) -> int | None:
+    if value is None:
+        return None
+    cleaned = value.strip().lower()
+    if cleaned in {"", "all"}:
+        return None
+    return int(cleaned)
 
 
 def main() -> None:
