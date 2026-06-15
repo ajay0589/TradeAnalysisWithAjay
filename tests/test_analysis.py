@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from trading_analysis.candles import normalize_timeframe, prepare_candles, candle_window
@@ -38,7 +38,13 @@ from trading_analysis.data_sources.nse_equity import (
 from trading_analysis.data_sources.csv_loader import load_candles
 from trading_analysis.config import upsert_env_value
 from trading_analysis.models import Candle, FundamentalSnapshot
-from trading_analysis.web_services import classify_setup
+from trading_analysis.web_services import (
+    AnalysisService,
+    _bulk_window_days,
+    _normalize_bulk_requested_timeframes,
+    _normalize_bulk_timeframes,
+    classify_setup,
+)
 
 
 class AnalysisTests(unittest.TestCase):
@@ -130,10 +136,10 @@ class AnalysisTests(unittest.TestCase):
             "NFO:ABC26JUN110PE": {"last_price": 9, "volume": 40, "oi": 250, "ohlc": {"close": 8}},
         }
         previous = {
-            "ABC26JUN100CE": {"oi": "100"},
-            "ABC26JUN100PE": {"oi": "120"},
-            "ABC26JUN110CE": {"oi": "60"},
-            "ABC26JUN110PE": {"oi": "240"},
+            "ABC26JUN100CE": {"oi": "100", "last_price": "6"},
+            "ABC26JUN100PE": {"oi": "120", "last_price": "5"},
+            "ABC26JUN110CE": {"oi": "60", "last_price": "4"},
+            "ABC26JUN110PE": {"oi": "240", "last_price": "8"},
         }
 
         analysis = analyze_option_chain(
@@ -149,6 +155,10 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(analysis.highest_call_oi_strike, 100)
         self.assertEqual(analysis.highest_put_oi_strike, 110)
         self.assertIn("Long build-up", {row.buildup for row in analysis.rows})
+        self.assertEqual(
+            next(row for row in analysis.rows if row.tradingsymbol == "ABC26JUN100CE").previous_close,
+            6,
+        )
         self.assertEqual(classify_buildup(-1, 10), "Short build-up")
 
     def test_option_contract_selection_helpers(self) -> None:
@@ -256,6 +266,105 @@ class AnalysisTests(unittest.TestCase):
             classify_setup(50, "neutral", "range")["strategy"],
             "Sell call and put as strangle",
         )
+
+    def test_web_symbols_include_index_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            watchlist = root / "watchlist.json"
+            watchlist.write_text(
+                '{"symbols":[{"symbol":"RELIANCE","instrument_type":"EQ"}]}',
+                encoding="utf-8",
+            )
+            candles = root / "candles"
+            candles.mkdir()
+            (candles / "NIFTY_50.csv").write_text("", encoding="utf-8")
+            nse_instruments = root / "instruments_NSE.csv"
+            nse_instruments.write_text(
+                "instrument_token,exchange,tradingsymbol,name,segment,instrument_type\n"
+                "256265,NSE,NIFTY 50,NIFTY 50,INDICES,EQ\n"
+                "260105,NSE,NIFTY BANK,NIFTY BANK,INDICES,EQ\n"
+                "738561,NSE,RELIANCE,RELIANCE,NSE,EQ\n",
+                encoding="utf-8",
+            )
+
+            service = AnalysisService(
+                watchlist_path=watchlist,
+                daily_data_dir=candles,
+                nse_instruments_path=nse_instruments,
+            )
+            payload = service.symbols()
+            symbols = {row["symbol"]: row for row in payload["symbols"]}
+
+            self.assertEqual(service.resolve_symbol("NIFTY 50"), "NIFTY")
+            self.assertEqual(service.resolve_symbol("banknifty"), "BANKNIFTY")
+            self.assertEqual(service.resolve_symbol("SENSEX"), "SENSEX")
+            self.assertTrue(symbols["NIFTY"]["has_daily"])
+            self.assertIn("BANKNIFTY", symbols)
+            self.assertIn("SENSEX", symbols)
+            self.assertEqual(payload["total_indexes"], 3)
+
+    def test_option_snapshot_history_is_listed_by_symbol_and_expiry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            option_chain_dir = root / "option_chain"
+            history = option_chain_dir / "history"
+            history.mkdir(parents=True)
+            latest = option_chain_dir / "NIFTY_2026-06-16.csv"
+            old = history / "NIFTY_2026-06-16_20260615_091500.csv"
+            csv_text = (
+                "snapshot_time,symbol,expiry,tradingsymbol,strike,option_type,last_price,oi\n"
+                "2026-06-15T09:15:00,NIFTY,2026-06-16,NIFTY2661625000CE,25000,CE,100,1000\n"
+            )
+            latest.write_text(csv_text.replace("09:15:00", "10:00:00"), encoding="utf-8")
+            old.write_text(csv_text, encoding="utf-8")
+
+            service = AnalysisService(option_chain_dir=option_chain_dir)
+            payload = service.option_snapshots("NIFTY", "2026-06-16")
+            paths = {row["path"] for row in payload["snapshots"]}
+
+            self.assertEqual(payload["symbol"], "NIFTY")
+            self.assertEqual(payload["expiry"], "2026-06-16")
+            self.assertIn(str(latest), paths)
+            self.assertIn(str(old), paths)
+
+    def test_multi_timeframe_includes_monthly_and_weekly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            candles_dir = root / "candles"
+            candles_dir.mkdir()
+            rows = ["date,open,high,low,close,volume,open_interest"]
+            start = datetime(2022, 1, 1)
+            for index in range(1700):
+                day = start + timedelta(days=index)
+                close = 100 + index * 0.1
+                rows.append(f"{day.isoformat()},{close - 1},{close + 1},{close - 2},{close},1000,")
+            (candles_dir / "ABC.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+            service = AnalysisService(daily_data_dir=candles_dir)
+            mtf = service._multi_timeframe_analysis(
+                "ABC",
+                candle_window(days=90, now=datetime(2026, 6, 15)),
+            )
+            by_frame = {row["timeframe"]: row for row in mtf["rows"]}
+
+            self.assertEqual([row["timeframe"] for row in mtf["rows"]], ["month", "week", "day", "60minute", "15minute"])
+            self.assertEqual(by_frame["month"]["lookback_days"], 1460)
+            self.assertEqual(by_frame["week"]["lookback_days"], 730)
+            self.assertEqual(by_frame["day"]["lookback_days"], 365)
+            self.assertEqual(by_frame["60minute"]["lookback_days"], 90)
+            self.assertEqual(by_frame["15minute"]["lookback_days"], 90)
+            self.assertEqual(by_frame["month"]["status"], "analyzed")
+            self.assertEqual(by_frame["week"]["status"], "analyzed")
+            self.assertEqual(by_frame["day"]["status"], "analyzed")
+
+    def test_bulk_download_timeframes_include_monthly_weekly_as_day_source(self) -> None:
+        requested = _normalize_bulk_requested_timeframes(["month", "week", "15minute"])
+
+        self.assertEqual(requested, ["month", "week", "15minute"])
+        self.assertEqual(_normalize_bulk_timeframes(requested), ["day", "15minute"])
+        self.assertEqual(_bulk_window_days(requested, 90), 1460)
+        self.assertEqual(_bulk_window_days(["week"], 90), 730)
+        self.assertEqual(_bulk_window_days(["day", "60minute"], 90), 90)
 
     def test_timeframe_aliases_and_weekly_resample(self) -> None:
         candles = [

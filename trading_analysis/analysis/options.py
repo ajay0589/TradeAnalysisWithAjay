@@ -229,8 +229,10 @@ def _row_from_quote(
     spot_price: float | None,
 ) -> OptionChainRow:
     last_price = _float(quote.get("last_price"))
-    previous_close = _float((quote.get("ohlc") or {}).get("close"))
-    price_change = last_price - previous_close if previous_close is not None else None
+    previous_close = _float((previous_row or {}).get("last_price"))
+    if previous_close is None:
+        previous_close = _float((quote.get("ohlc") or {}).get("close"))
+    price_change = last_price - previous_close if last_price is not None and previous_close is not None else None
     oi = int(_float(quote.get("oi")) or 0)
     previous_oi = _optional_int((previous_row or {}).get("oi"))
     oi_change = oi - previous_oi if previous_oi is not None else None

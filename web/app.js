@@ -7,6 +7,19 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 
+const BULK_TIMEFRAME_LABELS = {
+  month: "Monthly",
+  week: "Weekly",
+  day: "Day",
+  "60minute": "1 hour",
+  "15minute": "15 min",
+};
+
+const BULK_DERIVED_MIN_DAYS = {
+  month: 1460,
+  week: 730,
+};
+
 function fmt(value) {
   if (value === null || value === undefined || value === "") return "-";
   if (typeof value === "number") return value.toFixed(2);
@@ -120,7 +133,7 @@ async function loadSymbols() {
   state.symbols = data.symbols;
   $("availableCount").textContent = `${data.available} ready`;
   $("missingCount").textContent = `${data.missing} missing candles`;
-  $("dataStatus").textContent = `${data.total} F&O stocks tracked`;
+  $("dataStatus").textContent = `${data.total_fno_symbols || data.total} F&O stocks + ${data.total_indexes || 0} indexes tracked`;
 
   const list = $("symbolList");
   list.innerHTML = "";
@@ -207,9 +220,39 @@ async function loadOptionExpiries() {
       option.textContent = expiry === data.nearest ? `${expiry} (nearest)` : expiry;
       select.appendChild(option);
     });
+    await loadOptionSnapshots();
   } catch (error) {
     setNotes([error.message], true);
   }
+}
+
+async function loadOptionSnapshots() {
+  const symbol = $("symbolInput").value.trim().toUpperCase();
+  const select = $("previousSnapshotSelect");
+  select.innerHTML = `<option value="">Auto latest saved snapshot</option>`;
+  if (!symbol) {
+    $("snapshotStatus").textContent = "Enter a symbol to load snapshots.";
+    return;
+  }
+  const params = new URLSearchParams({ symbol });
+  if ($("expirySelect").value) params.set("expiry", $("expirySelect").value);
+  try {
+    const data = await api(`/api/option-snapshots?${params.toString()}`);
+    const snapshots = data.snapshots || [];
+    snapshots.forEach((snapshot) => {
+      const option = document.createElement("option");
+      option.value = snapshot.path;
+      option.textContent = snapshot.label;
+      select.appendChild(option);
+    });
+    $("snapshotStatus").textContent = `${snapshots.length} saved snapshot(s) for ${data.symbol}${data.expiry ? ` ${data.expiry}` : ""}`;
+  } catch (error) {
+    $("snapshotStatus").textContent = error.message;
+  }
+}
+
+function useSelectedSnapshot() {
+  $("previousSnapshot").value = $("previousSnapshotSelect").value;
 }
 
 async function analyze() {
@@ -233,16 +276,15 @@ async function analyze() {
     renderAnalysis(data);
     $("reportStatus").textContent = "Report ready to save";
     setNotes((data.warnings || []).concat(data.decision.warnings || []));
+    if ($("optionChainToggle").checked) await loadOptionSnapshots();
   } catch (error) {
     setNotes([error.message], true);
   }
 }
 
 async function startBulkDownload() {
-  const timeframes = [];
-  if ($("bulkDay").checked) timeframes.push("day");
-  if ($("bulkHour").checked) timeframes.push("60minute");
-  if ($("bulk15").checked) timeframes.push("15minute");
+  adjustBulkDaysForHigherFrames();
+  const timeframes = selectedBulkTimeframes();
   if (!timeframes.length) {
     setNotes(["Select at least one timeframe for bulk download."], true);
     return;
@@ -280,13 +322,47 @@ function renderBulkJob(job) {
   const total = job.total || 0;
   const completed = job.completed || 0;
   const percent = total ? Math.round((completed / total) * 100) : 0;
+  const requested = bulkFrameLabels(job.requested_timeframes || job.timeframes || []);
+  const sources = bulkFrameLabels(job.source_timeframes || job.timeframes || []);
+  const windowDays = job.window && job.window.days ? `${job.window.days} days` : "";
+  const requestNote = requested && sources && requested !== sources
+    ? ` | requested ${requested}, downloaded ${sources}`
+    : requested
+      ? ` | ${requested}`
+      : "";
+  const windowNote = windowDays ? ` | ${windowDays}` : "";
   $("bulkProgressBar").style.width = `${percent}%`;
   $("bulkMeta").textContent = `${job.status} / ${completed}/${total}`;
-  $("bulkStatus").textContent = `${job.status}: ${job.current || "idle"} | success ${job.successes} | failures ${job.failures}`;
+  $("bulkStatus").textContent = `${job.status}: ${job.current || "idle"} | success ${job.successes} | failures ${job.failures}${requestNote}${windowNote}`;
   $("bulkErrors").innerHTML = (job.errors || [])
     .slice(-6)
     .map((error) => `<div>${error}</div>`)
     .join("");
+}
+
+function selectedBulkTimeframes() {
+  const timeframes = [];
+  if ($("bulkMonth").checked) timeframes.push("month");
+  if ($("bulkWeek").checked) timeframes.push("week");
+  if ($("bulkDay").checked) timeframes.push("day");
+  if ($("bulkHour").checked) timeframes.push("60minute");
+  if ($("bulk15").checked) timeframes.push("15minute");
+  return timeframes;
+}
+
+function adjustBulkDaysForHigherFrames() {
+  const minimum = selectedBulkTimeframes().reduce(
+    (highest, timeframe) => Math.max(highest, BULK_DERIVED_MIN_DAYS[timeframe] || 0),
+    0
+  );
+  if (!minimum) return;
+  const field = $("bulkDays");
+  const current = Number(field.value || 0);
+  if (!current || current < minimum) field.value = String(minimum);
+}
+
+function bulkFrameLabels(values) {
+  return (values || []).map((value) => BULK_TIMEFRAME_LABELS[value] || value).join(", ");
 }
 
 async function saveReport() {
@@ -336,6 +412,7 @@ function renderAnalysis(data) {
 
   renderRelativeStrength(data.relative_strength);
   renderOptionChain(data.option_chain);
+  renderSnapshotStatus(data.option_snapshot);
 }
 
 function renderMultiTimeframe(mtf) {
@@ -352,7 +429,8 @@ function renderMultiTimeframe(mtf) {
           <tr>
             <td>${row.label}</td>
             <td><span class="status-badge status-${row.status}">${statusLabel(row.status)}</span></td>
-            <td colspan="10">${row.message || "Not available"} ${row.path || ""}</td>
+            <td>${fmtInt(row.candle_count)}</td>
+            <td colspan="10">${row.message || "Not available"} ${row.path || ""} ${mtfWindowLabel(row)}</td>
           </tr>
         `;
       }
@@ -360,6 +438,7 @@ function renderMultiTimeframe(mtf) {
         <tr>
           <td>${row.label}</td>
           <td><span class="status-badge status-analyzed">${row.volume_signal}</span></td>
+          <td>${fmtInt(row.candle_count)}<div class="cell-note">${mtfWindowLabel(row)}</div></td>
           <td>${fmt(row.close)}</td>
           <td class="${row.technical_trend}">${row.technical_trend}</td>
           <td>${row.structure_trend}</td>
@@ -374,6 +453,13 @@ function renderMultiTimeframe(mtf) {
       `;
     })
     .join("");
+}
+
+function mtfWindowLabel(row) {
+  const days = row.lookback_days ? `${row.lookback_days}d` : "";
+  const range = row.from && row.to ? `${String(row.from).slice(0, 10)} to ${String(row.to).slice(0, 10)}` : "";
+  if (days && range) return `${days} / ${range}`;
+  return days || range || "";
 }
 
 function renderOptionGuide(guide) {
@@ -486,6 +572,14 @@ function renderOptionChain(chain) {
     .join("");
 }
 
+function renderSnapshotStatus(snapshot) {
+  if (!snapshot) return;
+  const comparison = snapshot.previous_snapshot_found
+    ? `Compared with ${snapshot.previous_snapshot}`
+    : `No previous snapshot found at ${snapshot.previous_snapshot}`;
+  $("snapshotStatus").textContent = `${comparison}. Saved history: ${snapshot.history_snapshot}`;
+}
+
 function renderScan(rows) {
   $("scanBody").innerHTML = rows
     .map(
@@ -536,6 +630,8 @@ $("analyzeBtn").addEventListener("click", analyze);
 $("checkZerodhaBtn").addEventListener("click", checkZerodhaStatus);
 $("updateZerodhaTokenBtn").addEventListener("click", updateZerodhaToken);
 $("bulkDownloadBtn").addEventListener("click", startBulkDownload);
+$("bulkMonth").addEventListener("change", adjustBulkDaysForHigherFrames);
+$("bulkWeek").addEventListener("change", adjustBulkDaysForHigherFrames);
 $("sectorUploadBtn").addEventListener("click", uploadSectorCsv);
 $("refreshFiiDiiBtn").addEventListener("click", () => loadFiiDii(true));
 $("saveReportBtn").addEventListener("click", saveReport);
@@ -543,6 +639,12 @@ $("symbolInput").addEventListener("keydown", (event) => {
   if (event.key === "Enter") analyze();
 });
 $("symbolInput").addEventListener("blur", loadOptionExpiries);
+$("expirySelect").addEventListener("change", loadOptionSnapshots);
+$("previousSnapshotSelect").addEventListener("change", useSelectedSnapshot);
+$("refreshSnapshotsBtn").addEventListener("click", loadOptionSnapshots);
+$("previousSnapshot").addEventListener("input", () => {
+  $("previousSnapshotSelect").value = "";
+});
 document.querySelectorAll("[data-scan]").forEach((button) => {
   button.addEventListener("click", () => scan(button.dataset.scan));
 });

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import shutil
 import threading
 import time
 import uuid
@@ -61,6 +62,55 @@ DEFAULT_REFRESH_DAYS = {
     "15minute": 45,
 }
 
+MULTI_TIMEFRAMES = ("month", "week", "day", "60minute", "15minute")
+
+MULTI_TIMEFRAME_MIN_DAYS = {
+    "month": 1460,
+    "week": 730,
+    "day": 365,
+    "60minute": 90,
+    "15minute": 45,
+}
+
+INDEX_DEFINITIONS = {
+    "NIFTY": {
+        "symbol": "NIFTY",
+        "name": "Nifty 50 Index",
+        "exchange": "NSE",
+        "tradingsymbol": "NIFTY 50",
+        "data_stem": "NIFTY_50",
+        "option_underlying": "NIFTY",
+        "spot_quote_key": "NSE:NIFTY 50",
+        "aliases": ("NIFTY", "NIFTY 50", "NIFTY_50"),
+    },
+    "BANKNIFTY": {
+        "symbol": "BANKNIFTY",
+        "name": "Nifty Bank Index",
+        "exchange": "NSE",
+        "tradingsymbol": "NIFTY BANK",
+        "data_stem": "NIFTY_BANK",
+        "option_underlying": "BANKNIFTY",
+        "spot_quote_key": "NSE:NIFTY BANK",
+        "aliases": ("BANKNIFTY", "BANK NIFTY", "NIFTY BANK", "NIFTY_BANK"),
+    },
+    "SENSEX": {
+        "symbol": "SENSEX",
+        "name": "S&P BSE Sensex Index",
+        "exchange": "BSE",
+        "tradingsymbol": "SENSEX",
+        "data_stem": "SENSEX",
+        "option_underlying": "SENSEX",
+        "spot_quote_key": "BSE:SENSEX",
+        "aliases": ("SENSEX", "BSE SENSEX", "S&P BSE SENSEX"),
+    },
+}
+
+INDEX_ALIASES = {
+    " ".join(alias.upper().replace("_", " ").split()): symbol
+    for symbol, definition in INDEX_DEFINITIONS.items()
+    for alias in definition["aliases"]
+}
+
 
 class AnalysisService:
     def __init__(
@@ -70,8 +120,10 @@ class AnalysisService:
         hourly_data_dir: str | Path = "data/raw/candles/60minute",
         sector_map_path: str | Path = "config/sector_map.generated.json",
         nse_instruments_path: str | Path = "data/raw/zerodha/instruments_NSE.csv",
+        bse_instruments_path: str | Path = "data/raw/zerodha/instruments_BSE.csv",
         nfo_instruments_path: str | Path = "data/raw/zerodha/instruments_NFO.csv",
         fii_dii_path: str | Path = "data/raw/nse/fii_dii.csv",
+        option_chain_dir: str | Path = "data/raw/option_chain",
         reports_dir: str | Path = "reports",
         benchmark_file: str = "NIFTY_50.csv",
     ) -> None:
@@ -80,8 +132,10 @@ class AnalysisService:
         self.hourly_data_dir = Path(hourly_data_dir)
         self.sector_map_path = Path(sector_map_path)
         self.nse_instruments_path = Path(nse_instruments_path)
+        self.bse_instruments_path = Path(bse_instruments_path)
         self.nfo_instruments_path = Path(nfo_instruments_path)
         self.fii_dii_path = Path(fii_dii_path)
+        self.option_chain_dir = Path(option_chain_dir)
         self.reports_dir = Path(reports_dir)
         self.benchmark_file = benchmark_file
         self._jobs: dict[str, dict[str, Any]] = {}
@@ -153,13 +207,15 @@ class AnalysisService:
         limit: int | None = None,
         sleep_seconds: float = 0.35,
     ) -> dict[str, Any]:
+        requested_timeframes = _normalize_bulk_requested_timeframes(timeframes)
         normalized_timeframes = _normalize_bulk_timeframes(timeframes)
-        window = candle_window(from_date=from_date, to_date=to_date, days=None if from_date else days)
+        effective_days = _bulk_window_days(requested_timeframes, days)
+        window = candle_window(from_date=from_date, to_date=to_date, days=None if from_date else effective_days)
         if window.from_time is None:
             window = type(window)(
-                from_time=window.to_time - timedelta(days=days or 90),
+                from_time=window.to_time - timedelta(days=effective_days),
                 to_time=window.to_time,
-                days=days or 90,
+                days=effective_days,
             )
         symbols = self._watchlist_symbols()
         if limit:
@@ -181,6 +237,8 @@ class AnalysisService:
             "current": "",
             "results": [],
             "errors": [],
+            "requested_timeframes": requested_timeframes,
+            "source_timeframes": normalized_timeframes,
             "timeframes": normalized_timeframes,
             "window": {
                 "from": window.from_time,
@@ -266,12 +324,24 @@ class AnalysisService:
 
     def option_expiries(self, symbol: str) -> dict[str, Any]:
         symbol = self.resolve_symbol(symbol)
-        contracts = option_contracts_for_symbol(load_instruments_csv(self.nfo_instruments_path), symbol)
+        option_underlying = self._option_underlying(symbol)
+        contracts = option_contracts_for_symbol(load_instruments_csv(self.nfo_instruments_path), option_underlying)
         expiries = sorted({contract.expiry.isoformat() for contract in contracts})
         return {
             "symbol": symbol,
+            "option_underlying": option_underlying,
             "expiries": expiries,
             "nearest": nearest_expiry(contracts).isoformat() if contracts else None,
+        }
+
+    def option_snapshots(self, symbol: str, expiry: str | None = None) -> dict[str, Any]:
+        symbol = self.resolve_symbol(symbol)
+        selected_expiry = self._selected_snapshot_expiry(symbol, expiry)
+        snapshots = self._snapshot_rows(symbol, selected_expiry)
+        return {
+            "symbol": symbol,
+            "expiry": selected_expiry.isoformat() if selected_expiry else None,
+            "snapshots": snapshots,
         }
 
     def export_report(self, payload: dict[str, Any]) -> dict[str, str]:
@@ -288,21 +358,17 @@ class AnalysisService:
     def symbols(self) -> dict[str, Any]:
         watchlist = self._watchlist_symbols()
         names = self._symbol_names()
-        available = [symbol for symbol in watchlist if self._has_candles(symbol, "day")]
+        index_rows = [self._symbol_row(symbol, INDEX_DEFINITIONS[symbol]["name"], "index") for symbol in INDEX_DEFINITIONS]
+        stock_rows = [self._symbol_row(symbol, names.get(symbol, ""), "stock") for symbol in watchlist]
+        rows = index_rows + stock_rows
+        available = [row for row in rows if row["has_daily"]]
         return {
-            "total": len(watchlist),
+            "total": len(rows),
+            "total_fno_symbols": len(watchlist),
+            "total_indexes": len(index_rows),
             "available": len(available),
-            "missing": len(watchlist) - len(available),
-            "symbols": [
-                {
-                    "symbol": symbol,
-                    "name": names.get(symbol, ""),
-                    "has_daily": self._has_candles(symbol, "day"),
-                    "has_hourly": self._has_candles(symbol, "60minute"),
-                    "has_15minute": self._has_candles(symbol, "15minute"),
-                }
-                for symbol in watchlist
-            ],
+            "missing": len(rows) - len(available),
+            "symbols": rows,
         }
 
     def analyze_symbol(
@@ -350,12 +416,13 @@ class AnalysisService:
 
         relative_strength = self._relative_strength(symbol, chart_candles, normalized_timeframe, window)
         option_chain = None
+        option_snapshot = None
         warnings: list[str] = []
         for refresh_error in refresh_errors:
             warnings.append(f"Zerodha candle refresh failed; using cached candles: {refresh_error}")
         if include_option_chain:
             try:
-                option_chain = self._option_chain(symbol, previous_snapshot, strikes_around, expiry, all_strikes)
+                option_chain, option_snapshot = self._option_chain(symbol, previous_snapshot, strikes_around, expiry, all_strikes)
             except Exception as exc:
                 warnings.append(f"Option-chain fetch failed: {exc}")
 
@@ -379,6 +446,7 @@ class AnalysisService:
             relative_strength=relative_strength,
             include_option_chain=include_option_chain,
             option_chain=option_chain,
+            option_snapshot=option_snapshot,
             refresh_requested=refresh,
             refresh_results=refresh_results,
             refresh_error="; ".join(refresh_errors) if refresh_errors else None,
@@ -392,6 +460,7 @@ class AnalysisService:
             "decision": asdict(decision),
             "multi_timeframe": multi_timeframe,
             "option_trade_guide": _option_trade_guide(setup, chart_structure, option_chain),
+            "option_snapshot": option_snapshot,
             "analysis_summary": analysis_summary,
             "chart": {
                 "timeframe": normalized_timeframe,
@@ -419,25 +488,24 @@ class AnalysisService:
         source = source_timeframe(timeframe)
         interval = fetch_interval(source)
         client = _zerodha_client()
-        instruments = self._nse_instruments()
         fetch_window = _window_with_default_from(window, timeframe)
-        targets = [(symbol.upper(), safe_symbol_filename(symbol))]
+        targets = [self._candle_target(symbol)]
 
         benchmark_symbol = self.benchmark_file.replace("_", " ").removesuffix(".csv")
-        targets.append((benchmark_symbol.upper(), Path(self.benchmark_file).stem))
+        targets.append(("NSE", benchmark_symbol.upper(), Path(self.benchmark_file).stem))
 
         sector_config = sector_config_for_symbol(load_sector_map(self.sector_map_path), symbol)
         if sector_config:
-            targets.append((sector_config["index_symbol"].upper(), Path(sector_config["data_file"]).stem))
+            targets.append(("NSE", sector_config["index_symbol"].upper(), Path(sector_config["data_file"]).stem))
 
         results = []
-        seen: set[tuple[str, str]] = set()
-        for tradingsymbol, file_stem in targets:
-            key = (tradingsymbol, file_stem)
+        seen: set[tuple[str, str, str]] = set()
+        for exchange, tradingsymbol, file_stem in targets:
+            key = (exchange, tradingsymbol, file_stem)
             if key in seen:
                 continue
             seen.add(key)
-            token = resolve_instrument_token(instruments, "NSE", tradingsymbol)
+            token = resolve_instrument_token(self._instruments_for_exchange(exchange), exchange, tradingsymbol)
             candles = client.historical_candles(
                 instrument_token=token,
                 interval=interval,
@@ -449,6 +517,7 @@ class AnalysisService:
             results.append(
                 {
                     "symbol": tradingsymbol,
+                    "exchange": exchange,
                     "timeframe": source,
                     "candles": len(candles),
                     "output": str(output),
@@ -460,13 +529,13 @@ class AnalysisService:
         self._update_job(job_id, status="running", started_at=datetime.now().isoformat(timespec="seconds"))
         try:
             client = _zerodha_client()
-            instruments = self._nse_instruments()
-            for tradingsymbol, file_stem in targets:
+            for exchange, tradingsymbol, file_stem in targets:
                 for timeframe in timeframes:
-                    current = f"{tradingsymbol} {timeframe}"
+                    current = f"{exchange}:{tradingsymbol} {timeframe}"
                     self._update_job(job_id, current=current)
                     try:
-                        token = resolve_instrument_token(instruments, "NSE", tradingsymbol)
+                        instruments = self._instruments_for_exchange(exchange)
+                        token = resolve_instrument_token(instruments, exchange, tradingsymbol)
                         candles = client.historical_candles(
                             instrument_token=token,
                             interval=fetch_interval(timeframe),
@@ -479,6 +548,7 @@ class AnalysisService:
                             job_id,
                             {
                                 "symbol": tradingsymbol,
+                                "exchange": exchange,
                                 "timeframe": timeframe,
                                 "candles": len(candles),
                                 "output": str(output),
@@ -495,14 +565,14 @@ class AnalysisService:
             self._append_job_error(job_id, str(exc))
             self._update_job(job_id, status="failed", finished_at=datetime.now().isoformat(timespec="seconds"), current="")
 
-    def _bulk_targets(self, symbols: list[str]) -> list[tuple[str, str]]:
-        targets = [(symbol.upper(), safe_symbol_filename(symbol)) for symbol in symbols]
-        targets.append(("NIFTY 50", "NIFTY_50"))
+    def _bulk_targets(self, symbols: list[str]) -> list[tuple[str, str, str]]:
+        targets = [self._candle_target(symbol) for symbol in symbols]
+        targets.extend(self._candle_target(symbol) for symbol in INDEX_DEFINITIONS)
         sector_map = load_sector_map(self.sector_map_path)
         for symbol in symbols:
             sector_config = sector_config_for_symbol(sector_map, symbol)
             if sector_config:
-                targets.append((sector_config["index_symbol"].upper(), Path(sector_config["data_file"]).stem))
+                targets.append(("NSE", sector_config["index_symbol"].upper(), Path(sector_config["data_file"]).stem))
         return _dedupe_targets(targets)
 
     def _update_job(self, job_id: str, **updates) -> None:
@@ -530,6 +600,10 @@ class AnalysisService:
 
     def resolve_symbol(self, value: str) -> str:
         query = value.upper().strip()
+        index_symbol = _index_symbol_for(value)
+        if index_symbol:
+            return index_symbol
+
         watchlist = set(self._watchlist_symbols())
         if query in watchlist or self._has_candles(query, "day"):
             return query
@@ -608,6 +682,16 @@ class AnalysisService:
             return []
         return [item.symbol for item in load_watchlist(self.watchlist_path)]
 
+    def _symbol_row(self, symbol: str, name: str, instrument_group: str) -> dict[str, Any]:
+        return {
+            "symbol": symbol,
+            "name": name,
+            "type": instrument_group,
+            "has_daily": self._has_candles(symbol, "day"),
+            "has_hourly": self._has_candles(symbol, "60minute"),
+            "has_15minute": self._has_candles(symbol, "15minute"),
+        }
+
     def _symbol_names(self) -> dict[str, str]:
         return {
             row.get("tradingsymbol", "").upper(): row.get("name", "")
@@ -619,6 +703,21 @@ class AnalysisService:
         if not self.nse_instruments_path.exists():
             return []
         return load_instruments_csv(self.nse_instruments_path)
+
+    def _instruments_for_exchange(self, exchange: str) -> list[dict[str, str]]:
+        exchange = exchange.upper()
+        if exchange == "NSE":
+            path = self.nse_instruments_path
+        elif exchange == "BSE":
+            path = self.bse_instruments_path
+        else:
+            raise ValueError(f"Unsupported candle exchange: {exchange}")
+        if not path.exists():
+            raise FileNotFoundError(
+                f"{exchange} instrument cache not found: {path}. "
+                f"Run: python -m trading_analysis.cli zerodha-instruments --exchange {exchange} --output {path}"
+            )
+        return load_instruments_csv(path)
 
     def _relative_strength(self, symbol: str, chart_candles, timeframe: str, window) -> Any:
         benchmark = self._load_optional_timeframe(Path(self.benchmark_file).stem, timeframe, window)
@@ -643,29 +742,125 @@ class AnalysisService:
     ) -> Any:
         client = _zerodha_client()
         instruments = load_instruments_csv(self.nfo_instruments_path)
-        contracts = option_contracts_for_symbol(instruments, symbol)
+        option_underlying = self._option_underlying(symbol)
+        contracts = option_contracts_for_symbol(instruments, option_underlying)
         if not contracts:
-            raise ValueError(f"No NFO option contracts found for {symbol}")
+            raise ValueError(f"No NFO option contracts found for {option_underlying}")
 
         selected_expiry = date.fromisoformat(expiry) if expiry else nearest_expiry(contracts)
-        contracts = option_contracts_for_symbol(instruments, symbol, expiry=selected_expiry)
-        spot_key = f"NSE:{symbol}"
+        contracts = option_contracts_for_symbol(instruments, option_underlying, expiry=selected_expiry)
+        spot_key = self._spot_quote_key(symbol)
         spot_quote = client.quotes([spot_key]).get(spot_key, {})
         spot_price = _optional_float(spot_quote.get("last_price"))
         selected = contracts if all_strikes else select_strikes_around_spot(contracts, spot_price, strikes_around)
         quotes = client.quotes([contract.kite_key for contract in selected])
-        default_snapshot = Path("data/raw/option_chain") / f"{symbol}_{selected_expiry.isoformat()}.csv"
+        default_snapshot = self._latest_snapshot_path(symbol, selected_expiry)
         previous_path = Path(previous_snapshot) if previous_snapshot else default_snapshot
-        previous = load_option_chain_snapshot(previous_path) if previous_path.exists() else {}
+        previous_exists = previous_path.exists()
+        previous = load_option_chain_snapshot(previous_path) if previous_exists else {}
         analysis = analyze_option_chain(symbol, selected_expiry, selected, quotes, spot_price, previous)
+        archived_previous = self._archive_latest_snapshot(symbol, selected_expiry)
+        history_snapshot = self._history_snapshot_path(symbol, selected_expiry)
+        write_option_chain_snapshot(history_snapshot, analysis)
         write_option_chain_snapshot(default_snapshot, analysis)
-        return analysis
+        return analysis, {
+            "symbol": symbol,
+            "expiry": selected_expiry.isoformat(),
+            "previous_snapshot": str(previous_path),
+            "previous_snapshot_found": previous_exists,
+            "latest_snapshot": str(default_snapshot),
+            "history_snapshot": str(history_snapshot),
+            "archived_previous_latest": str(archived_previous) if archived_previous else None,
+        }
 
     def _has_candles(self, symbol: str, timeframe: str) -> bool:
-        return candle_path(self.daily_data_dir, timeframe, symbol).exists()
+        return candle_path(self.daily_data_dir, timeframe, self._data_stem(symbol)).exists()
 
     def _available_count(self, timeframe: str) -> int:
         return sum(1 for symbol in self._watchlist_symbols() if self._has_candles(symbol, timeframe))
+
+    def _data_stem(self, symbol_or_stem: str) -> str:
+        index = _index_definition_for(symbol_or_stem)
+        return index["data_stem"] if index else symbol_or_stem
+
+    def _candle_target(self, symbol: str) -> tuple[str, str, str]:
+        index = _index_definition_for(symbol)
+        if index:
+            return (index["exchange"], index["tradingsymbol"], index["data_stem"])
+        return ("NSE", symbol.upper(), safe_symbol_filename(symbol))
+
+    def _option_underlying(self, symbol: str) -> str:
+        index = _index_definition_for(symbol)
+        return index["option_underlying"] if index else symbol.upper()
+
+    def _spot_quote_key(self, symbol: str) -> str:
+        index = _index_definition_for(symbol)
+        return index["spot_quote_key"] if index else f"NSE:{symbol.upper()}"
+
+    def _selected_snapshot_expiry(self, symbol: str, expiry: str | None):
+        if expiry:
+            return date.fromisoformat(expiry)
+        try:
+            option_underlying = self._option_underlying(symbol)
+            contracts = option_contracts_for_symbol(load_instruments_csv(self.nfo_instruments_path), option_underlying)
+            return nearest_expiry(contracts) if contracts else None
+        except Exception:
+            return None
+
+    def _latest_snapshot_path(self, symbol: str, expiry: date) -> Path:
+        return self.option_chain_dir / f"{symbol}_{expiry.isoformat()}.csv"
+
+    def _history_snapshot_dir(self) -> Path:
+        return self.option_chain_dir / "history"
+
+    def _history_snapshot_path(self, symbol: str, expiry: date, when: datetime | None = None) -> Path:
+        when = when or datetime.now()
+        base = self._history_snapshot_dir() / f"{symbol}_{expiry.isoformat()}_{when.strftime('%Y%m%d_%H%M%S')}.csv"
+        if not base.exists():
+            return base
+        for suffix in range(1, 100):
+            candidate = self._history_snapshot_dir() / f"{symbol}_{expiry.isoformat()}_{when.strftime('%Y%m%d_%H%M%S')}_{suffix}.csv"
+            if not candidate.exists():
+                return candidate
+        return self._history_snapshot_dir() / f"{symbol}_{expiry.isoformat()}_{when.strftime('%Y%m%d_%H%M%S_%f')}.csv"
+
+    def _archive_latest_snapshot(self, symbol: str, expiry: date) -> Path | None:
+        latest = self._latest_snapshot_path(symbol, expiry)
+        if not latest.exists():
+            return None
+        snapshot_time = _snapshot_time_from_file(latest)
+        archive_time = _parse_snapshot_time(snapshot_time) or datetime.fromtimestamp(latest.stat().st_mtime)
+        archive = self._history_snapshot_path(symbol, expiry, archive_time)
+        self._history_snapshot_dir().mkdir(parents=True, exist_ok=True)
+        if archive.exists():
+            return archive
+        shutil.copy2(latest, archive)
+        return archive
+
+    def _snapshot_rows(self, symbol: str, expiry: date | None) -> list[dict[str, Any]]:
+        paths: list[tuple[Path, str]] = []
+        if expiry:
+            latest = self._latest_snapshot_path(symbol, expiry)
+            if latest.exists():
+                paths.append((latest, "latest"))
+            history_pattern = f"{symbol}_{expiry.isoformat()}_*.csv"
+        else:
+            history_pattern = f"{symbol}_*.csv"
+
+        history_dir = self._history_snapshot_dir()
+        if history_dir.exists():
+            paths.extend((path, "history") for path in history_dir.glob(history_pattern))
+
+        rows = [_snapshot_row(path, kind) for path, kind in paths]
+        rows = sorted(rows, key=lambda row: row["modified_at"] or "", reverse=True)
+        deduped = []
+        seen: set[str] = set()
+        for row in rows:
+            if row["path"] in seen:
+                continue
+            deduped.append(row)
+            seen.add(row["path"])
+        return deduped
 
     def _load_timeframe(self, symbol_or_stem: str, timeframe: str, window):
         candles, _summary = self._load_timeframe_with_summary(symbol_or_stem, timeframe, window)
@@ -678,7 +873,8 @@ class AnalysisService:
             return None
 
     def _load_timeframe_with_summary(self, symbol_or_stem: str, timeframe: str, window):
-        path = candle_path(self.daily_data_dir, timeframe, symbol_or_stem)
+        data_stem = self._data_stem(symbol_or_stem)
+        path = candle_path(self.daily_data_dir, timeframe, data_stem)
         raw = load_candles(path)
         prepared = prepare_candles(raw, timeframe, window)
         return prepared, _candle_source_summary(
@@ -693,7 +889,8 @@ class AnalysisService:
         try:
             return self._load_timeframe_with_summary(symbol_or_stem, timeframe, window)
         except FileNotFoundError:
-            return None, _missing_candle_source_summary(symbol_or_stem, timeframe, candle_path(self.daily_data_dir, timeframe, symbol_or_stem))
+            data_stem = self._data_stem(symbol_or_stem)
+            return None, _missing_candle_source_summary(symbol_or_stem, timeframe, candle_path(self.daily_data_dir, timeframe, data_stem))
 
     def _analysis_summary(
         self,
@@ -705,6 +902,7 @@ class AnalysisService:
         relative_strength,
         include_option_chain: bool,
         option_chain,
+        option_snapshot: dict[str, Any] | None,
         refresh_requested: bool,
         refresh_results: list[dict[str, Any]],
         refresh_error: str | None,
@@ -787,19 +985,29 @@ class AnalysisService:
                 "Multi-timeframe direction",
                 "analyzed" if multi_timeframe["analyzed_count"] else "missing",
                 multi_timeframe["summary"],
-                "Day, 1 hour, and 15 min candle CSVs",
+                "Monthly, Weekly, Daily, 1 hour, and 15 min candle CSVs",
             )
         )
 
         rows.extend(self._relative_strength_rows(symbol, timeframe, window, relative_strength))
 
         if include_option_chain and option_chain:
+            snapshot_detail = ""
+            if option_snapshot:
+                if option_snapshot.get("previous_snapshot_found"):
+                    snapshot_detail = f" Compared with {option_snapshot.get('previous_snapshot')}."
+                else:
+                    snapshot_detail = f" Previous snapshot was not found at {option_snapshot.get('previous_snapshot')}."
             rows.append(
                 _coverage_row(
                     "Option chain",
                     "analyzed",
-                    f"Nearest expiry {option_chain.expiry}; {option_chain.contract_count} contracts; PCR {option_chain.pcr_oi}; max pain {option_chain.max_pain}.",
-                    f"{self.nfo_instruments_path}",
+                    (
+                        f"Nearest expiry {option_chain.expiry}; {option_chain.contract_count} contracts; "
+                        f"PCR {option_chain.pcr_oi}; max pain {option_chain.max_pain}."
+                        f"{snapshot_detail}"
+                    ),
+                    option_snapshot.get("history_snapshot") if option_snapshot else f"{self.nfo_instruments_path}",
                 )
             )
         elif include_option_chain:
@@ -928,23 +1136,28 @@ class AnalysisService:
 
     def _multi_timeframe_analysis(self, symbol: str, window) -> dict[str, Any]:
         rows = []
-        for timeframe in ("day", "60minute", "15minute"):
+        for timeframe in MULTI_TIMEFRAMES:
             rows.append(self._multi_timeframe_row(symbol, timeframe, window))
         analyzed_rows = [row for row in rows if row["status"] == "analyzed"]
         alignment = _multi_timeframe_alignment(analyzed_rows)
+        lookback_summary = ", ".join(
+            f"{timeframe_label(timeframe)} {MULTI_TIMEFRAME_MIN_DAYS[timeframe]}d"
+            for timeframe in MULTI_TIMEFRAMES
+        )
         return {
             "symbol": symbol,
             "alignment": alignment["label"],
             "bias": alignment["bias"],
-            "summary": alignment["summary"],
+            "summary": f"{alignment['summary']} Minimum lookbacks: {lookback_summary}.",
             "analyzed_count": len(analyzed_rows),
             "rows": rows,
         }
 
     def _multi_timeframe_row(self, symbol: str, timeframe: str, window) -> dict[str, Any]:
-        path = candle_path(self.daily_data_dir, timeframe, symbol)
+        row_window = _multi_timeframe_window(window, timeframe)
+        path = candle_path(self.daily_data_dir, timeframe, self._data_stem(symbol))
         try:
-            candles, source = self._load_timeframe_with_summary(symbol, timeframe, window)
+            candles, source = self._load_timeframe_with_summary(symbol, timeframe, row_window)
         except FileNotFoundError:
             return {
                 "timeframe": timeframe,
@@ -952,6 +1165,9 @@ class AnalysisService:
                 "status": "missing",
                 "message": "Candle CSV not found.",
                 "path": str(path),
+                "lookback_days": row_window.days,
+                "from": row_window.from_time,
+                "to": row_window.to_time,
             }
         if len(candles) < 20:
             return {
@@ -961,6 +1177,9 @@ class AnalysisService:
                 "message": f"Only {len(candles)} candles available; at least 20 needed.",
                 "path": str(path),
                 "candle_count": len(candles),
+                "lookback_days": row_window.days,
+                "from": source.get("from"),
+                "to": source.get("to"),
             }
 
         technical = analyze_technical(candles)
@@ -975,6 +1194,7 @@ class AnalysisService:
             "candle_count": len(candles),
             "from": source["from"],
             "to": source["to"],
+            "lookback_days": row_window.days,
             "close": technical.close,
             "technical_trend": technical.trend,
             "structure_trend": structure.trend,
@@ -1092,6 +1312,18 @@ def _window_with_default_from(window, timeframe: str):
         to_time=window.to_time,
         days=days,
     )
+
+
+def _multi_timeframe_window(window, timeframe: str):
+    normalized = normalize_timeframe(timeframe)
+    minimum_days = MULTI_TIMEFRAME_MIN_DAYS[normalized]
+    to_time = window.to_time or datetime.now()
+    if window.days is not None:
+        days = max(window.days, minimum_days)
+        return type(window)(from_time=to_time - timedelta(days=days), to_time=to_time, days=days)
+    if window.from_time is not None:
+        return window
+    return type(window)(from_time=to_time - timedelta(days=minimum_days), to_time=to_time, days=minimum_days)
 
 
 def _coverage_row(name: str, status: str, detail: str, source: str) -> dict[str, str]:
@@ -1252,18 +1484,33 @@ def _refresh_timeframes_for_analysis(selected_timeframe: str) -> list[str]:
     return output
 
 
-def _normalize_bulk_timeframes(values: list[str]) -> list[str]:
+def _normalize_bulk_requested_timeframes(values: list[str]) -> list[str]:
     requested = values or ["day", "60minute", "15minute"]
-    order = ["day", "60minute", "15minute"]
-    normalized = {source_timeframe(normalize_timeframe(value)) for value in requested if str(value).strip()}
+    order = ["month", "week", "day", "60minute", "15minute"]
+    normalized = {normalize_timeframe(value) for value in requested if str(value).strip()}
     return [timeframe for timeframe in order if timeframe in normalized]
 
 
-def _dedupe_targets(targets: list[tuple[str, str]]) -> list[tuple[str, str]]:
+def _normalize_bulk_timeframes(values: list[str]) -> list[str]:
+    order = ["day", "60minute", "15minute"]
+    normalized = {source_timeframe(timeframe) for timeframe in _normalize_bulk_requested_timeframes(values)}
+    return [timeframe for timeframe in order if timeframe in normalized]
+
+
+def _bulk_window_days(requested_timeframes: list[str], days: int | None) -> int:
+    base_days = days or 90
+    derived_minimum = max(
+        (MULTI_TIMEFRAME_MIN_DAYS[timeframe] for timeframe in requested_timeframes if timeframe in {"month", "week"}),
+        default=0,
+    )
+    return max(base_days, derived_minimum)
+
+
+def _dedupe_targets(targets: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
     output = []
-    seen: set[tuple[str, str]] = set()
-    for tradingsymbol, file_stem in targets:
-        key = (tradingsymbol.upper(), file_stem)
+    seen: set[tuple[str, str, str]] = set()
+    for exchange, tradingsymbol, file_stem in targets:
+        key = (exchange.upper(), tradingsymbol.upper(), file_stem)
         if key in seen:
             continue
         output.append(key)
@@ -1271,11 +1518,61 @@ def _dedupe_targets(targets: list[tuple[str, str]]) -> list[tuple[str, str]]:
     return output
 
 
+def _index_lookup_key(value: str) -> str:
+    return " ".join(value.upper().replace("_", " ").split())
+
+
+def _index_symbol_for(value: str) -> str | None:
+    return INDEX_ALIASES.get(_index_lookup_key(value))
+
+
+def _index_definition_for(value: str) -> dict[str, Any] | None:
+    symbol = _index_symbol_for(value)
+    return INDEX_DEFINITIONS.get(symbol) if symbol else None
+
+
 def _read_csv_rows(path: Path) -> list[dict[str, str]]:
     if not path.exists() or not path.read_text(encoding="utf-8").strip():
         return []
     with path.open("r", encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+def _snapshot_time_from_file(path: Path) -> str | None:
+    try:
+        rows = _read_csv_rows(path)
+    except Exception:
+        return None
+    for row in rows:
+        value = row.get("snapshot_time")
+        if value:
+            return value
+    return None
+
+
+def _parse_snapshot_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _snapshot_row(path: Path, kind: str) -> dict[str, Any]:
+    stat = path.stat()
+    snapshot_time = _snapshot_time_from_file(path)
+    modified_at = datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds")
+    display_time = snapshot_time or modified_at
+    return {
+        "kind": kind,
+        "path": str(path),
+        "name": path.name,
+        "snapshot_time": snapshot_time,
+        "modified_at": modified_at,
+        "label": f"{display_time} ({kind})",
+        "size": stat.st_size,
+    }
 
 
 def _scan_option_zone(bucket: str, structure: dict[str, Any]) -> str:

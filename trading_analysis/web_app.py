@@ -14,6 +14,10 @@ ROOT = Path(__file__).resolve().parent.parent
 WEB_ROOT = ROOT / "web"
 
 
+class ReusableThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+
+
 class TradingRequestHandler(BaseHTTPRequestHandler):
     service = AnalysisService()
 
@@ -44,6 +48,14 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/option-expiries":
                 params = parse_qs(parsed.query)
                 self._send_json(self.service.option_expiries(_required(params, "symbol")))
+            elif parsed.path == "/api/option-snapshots":
+                params = parse_qs(parsed.query)
+                self._send_json(
+                    self.service.option_snapshots(
+                        _required(params, "symbol"),
+                        expiry=params.get("expiry", [None])[0] or None,
+                    )
+                )
             elif parsed.path == "/api/analyze":
                 params = parse_qs(parsed.query)
                 symbol = _required(params, "symbol")
@@ -187,8 +199,8 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
 
-    server = ThreadingHTTPServer((args.host, args.port), TradingRequestHandler)
-    print(f"Trading analysis UI running at http://{args.host}:{args.port}")
+    server = ReusableThreadingHTTPServer((args.host, args.port), TradingRequestHandler)
+    print(f"Trading analysis UI running at http://{args.host}:{args.port}", flush=True)
     server.serve_forever()
 
 

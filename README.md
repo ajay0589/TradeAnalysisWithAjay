@@ -183,10 +183,16 @@ python -m trading_analysis.cli trade-decision --symbol RELIANCE --skip-option-ch
 Start the local F&O decision dashboard:
 
 ```powershell
-python -m trading_analysis.web_app --host 127.0.0.1 --port 8765
+.\scripts\start_web_ui.ps1
 ```
 
 Then open `http://127.0.0.1:8765`.
+
+Use this same URL going forward. The script stops any older UI process already listening on port `8765` and starts the latest code on the same stable port. For foreground logs while debugging:
+
+```powershell
+.\scripts\start_web_ui.ps1 -Foreground
+```
 
 The dashboard supports:
 
@@ -215,7 +221,7 @@ Bulk-download candles for the F&O universe:
 python -m trading_analysis.cli bulk-fno-candles --timeframes day,60minute,15minute --days 90
 ```
 
-For monthly chart analysis, keep a longer daily history:
+The Web UI bulk downloader also offers Monthly and Weekly. Those frames are derived from daily candles, so selecting them downloads daily source candles with a longer lookback. For monthly chart analysis, keep a longer daily history:
 
 ```powershell
 python -m trading_analysis.cli bulk-fno-candles --timeframes day --days 1460

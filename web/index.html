@@ -86,8 +86,14 @@
                 </label>
               </div>
             </div>
-            <label for="previousSnapshot">Previous snapshot</label>
-            <input id="previousSnapshot" placeholder="data/raw/option_chain/RELIANCE_2026-06-30.csv" />
+            <label for="previousSnapshotSelect">Compare snapshot</label>
+            <select id="previousSnapshotSelect">
+              <option value="">Auto latest saved snapshot</option>
+            </select>
+            <button id="refreshSnapshotsBtn" class="full-btn">Refresh snapshots</button>
+            <label for="previousSnapshot">Manual snapshot path</label>
+            <input id="previousSnapshot" placeholder="Leave blank for auto latest" />
+            <div id="snapshotStatus" class="mini-status">Snapshot history not loaded</div>
           </div>
 
           <div class="panel">
@@ -152,10 +158,13 @@
               <div class="ops-body">
                 <label>Bulk F&O candles</label>
                 <div class="check-grid">
+                  <label class="check-row compact-check"><input id="bulkMonth" type="checkbox" /> Monthly</label>
+                  <label class="check-row compact-check"><input id="bulkWeek" type="checkbox" /> Weekly</label>
                   <label class="check-row compact-check"><input id="bulkDay" type="checkbox" checked /> Day</label>
                   <label class="check-row compact-check"><input id="bulkHour" type="checkbox" checked /> 1 hour</label>
                   <label class="check-row compact-check"><input id="bulk15" type="checkbox" checked /> 15 min</label>
                 </div>
+                <div class="field-hint">Monthly and weekly use daily candles; selecting them downloads longer daily history.</div>
                 <div class="date-grid">
                   <div>
                     <label for="bulkDays">Days</label>
@@ -204,6 +213,7 @@
                 <tr>
                   <th>Frame</th>
                   <th>Status</th>
+                  <th>Candles</th>
                   <th>Close</th>
                   <th>Trend</th>
                   <th>Structure</th>

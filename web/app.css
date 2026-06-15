@@ -229,9 +229,16 @@ label {
 
 .check-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(86px, 1fr));
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.field-hint {
+  margin: -4px 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .segmented {
@@ -375,6 +382,13 @@ td {
   text-align: left;
   vertical-align: top;
   overflow-wrap: anywhere;
+}
+
+.cell-note {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 th {
