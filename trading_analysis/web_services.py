@@ -437,6 +437,14 @@ class AnalysisService:
         )
         setup = classify_setup(decision.score, chart_technical.trend, chart_structure.trend)
         multi_timeframe = self._multi_timeframe_analysis(symbol, window)
+        option_trade_guide = _option_trade_guide(setup, chart_structure, option_chain)
+        entry_trigger = _entry_trigger_panel(
+            setup=setup,
+            chart_technical=chart_technical,
+            chart_structure=chart_structure,
+            multi_timeframe=multi_timeframe,
+            option_chain=option_chain,
+        )
         analysis_summary = self._analysis_summary(
             symbol=symbol,
             timeframe=normalized_timeframe,
@@ -447,6 +455,7 @@ class AnalysisService:
             include_option_chain=include_option_chain,
             option_chain=option_chain,
             option_snapshot=option_snapshot,
+            entry_trigger=entry_trigger,
             refresh_requested=refresh,
             refresh_results=refresh_results,
             refresh_error="; ".join(refresh_errors) if refresh_errors else None,
@@ -459,7 +468,8 @@ class AnalysisService:
             "setup": setup,
             "decision": asdict(decision),
             "multi_timeframe": multi_timeframe,
-            "option_trade_guide": _option_trade_guide(setup, chart_structure, option_chain),
+            "entry_trigger": entry_trigger,
+            "option_trade_guide": option_trade_guide,
             "option_snapshot": option_snapshot,
             "analysis_summary": analysis_summary,
             "chart": {
@@ -903,6 +913,7 @@ class AnalysisService:
         include_option_chain: bool,
         option_chain,
         option_snapshot: dict[str, Any] | None,
+        entry_trigger: dict[str, Any],
         refresh_requested: bool,
         refresh_results: list[dict[str, Any]],
         refresh_error: str | None,
@@ -937,6 +948,15 @@ class AnalysisService:
                     "",
                 )
             )
+
+        rows.append(
+            _coverage_row(
+                "Entry trigger",
+                "analyzed",
+                f"{entry_trigger['status']}: {entry_trigger['summary']}",
+                "MTF direction, 15-minute trigger, support/invalidation distance, option-chain build-up, OI/PCR/max pain, and volume",
+            )
+        )
 
         rows.extend(
             [
@@ -1575,6 +1595,12 @@ def _snapshot_row(path: Path, kind: str) -> dict[str, Any]:
     }
 
 
+ENTRY_ALLOWED = "Entry allowed"
+ENTRY_WAIT = "Wait"
+ENTRY_AVOID = "Avoid"
+ENTRY_EXIT = "Exit/Adjust"
+
+
 def _scan_option_zone(bucket: str, structure: dict[str, Any]) -> str:
     support = structure.get("support")
     resistance = structure.get("resistance")
@@ -1592,6 +1618,455 @@ def _scan_option_zone(bucket: str, structure: dict[str, Any]) -> str:
             parts.append(f"CE above {resistance:.2f}")
         return " / ".join(parts) if parts else "Outside range"
     return "-"
+
+
+def _entry_trigger_panel(
+    setup: dict[str, str],
+    chart_technical,
+    chart_structure,
+    multi_timeframe: dict[str, Any],
+    option_chain,
+) -> dict[str, Any]:
+    bucket = setup.get("bucket")
+    if bucket not in {"bullish", "bearish", "neutral"}:
+        return {
+            "status": ENTRY_AVOID,
+            "status_key": _entry_status_key(ENTRY_AVOID),
+            "summary": "No qualified options-selling setup yet.",
+            "rows": [
+                _entry_factor(
+                    "Setup quality",
+                    ENTRY_AVOID,
+                    "Current score/structure did not qualify for bullish, bearish, or neutral options selling.",
+                )
+            ],
+            "candidates": [],
+        }
+
+    spot = option_chain.spot_price if option_chain and option_chain.spot_price else chart_technical.close
+    candidates = _entry_candidates(bucket, chart_structure, option_chain)
+    common_rows = [
+        _entry_mtf_factor(bucket, multi_timeframe),
+        _entry_intraday_factor(bucket, multi_timeframe),
+        _entry_distance_factor(bucket, chart_structure, spot),
+        _entry_option_context_factor(bucket, option_chain),
+        _entry_volume_factor(multi_timeframe),
+    ]
+
+    candidate_rows = [
+        _entry_candidate_row(bucket, candidate, chart_structure, spot, common_rows, option_chain)
+        for candidate in candidates
+    ]
+    if option_chain and not candidate_rows:
+        candidate_rows.append(
+            {
+                "action": _entry_action(bucket),
+                "strike": None,
+                "option_type": "-",
+                "status": ENTRY_WAIT,
+                "status_key": _entry_status_key(ENTRY_WAIT),
+                "score": 0,
+                "entry_trigger": "No option-chain strike matched the support/resistance rule.",
+                "risk_trigger": "Wait for a strike outside the invalidation zone with usable OI and volume.",
+                "reasons": [],
+                "blockers": ["No qualifying strike"],
+            }
+        )
+
+    panel_status = _panel_entry_status(common_rows, candidate_rows)
+    return {
+        "status": panel_status,
+        "status_key": _entry_status_key(panel_status),
+        "summary": _entry_summary(panel_status, bucket, candidate_rows),
+        "rows": common_rows,
+        "candidates": candidate_rows,
+    }
+
+
+def _entry_candidates(bucket: str, structure, option_chain) -> list:
+    if not option_chain:
+        return []
+    if bucket == "bullish":
+        anchor = structure.invalidation or structure.support
+        candidates = [
+            row for row in option_chain.rows
+            if row.option_type == "PE" and (anchor is None or row.strike <= anchor)
+        ]
+        return sorted(candidates, key=_option_liquidity_score, reverse=True)[:3]
+    if bucket == "bearish":
+        resistance = structure.resistance
+        candidates = [
+            row for row in option_chain.rows
+            if row.option_type == "CE" and (resistance is None or row.strike >= resistance)
+        ]
+        return sorted(candidates, key=_option_liquidity_score, reverse=True)[:3]
+
+    candidates = []
+    if structure.support is not None:
+        put_rows = [
+            row for row in option_chain.rows
+            if row.option_type == "PE" and row.strike <= structure.support
+        ]
+        candidates.extend(sorted(put_rows, key=_option_liquidity_score, reverse=True)[:1])
+    if structure.resistance is not None:
+        call_rows = [
+            row for row in option_chain.rows
+            if row.option_type == "CE" and row.strike >= structure.resistance
+        ]
+        candidates.extend(sorted(call_rows, key=_option_liquidity_score, reverse=True)[:1])
+    return candidates
+
+
+def _entry_mtf_factor(bucket: str, multi_timeframe: dict[str, Any]) -> dict[str, str]:
+    bias = multi_timeframe.get("bias") or "unknown"
+    expected = {"bullish": "bullish", "bearish": "bearish", "neutral": "neutral"}[bucket]
+    if bias == expected:
+        return _entry_factor("MTF direction", ENTRY_ALLOWED, f"Multi-timeframe bias is {bias}.")
+    if bucket == "neutral" and bias in {"neutral", "unknown"}:
+        return _entry_factor("MTF direction", ENTRY_ALLOWED, f"Multi-timeframe bias is {bias}.")
+    if bias in {"neutral", "unknown"}:
+        return _entry_factor("MTF direction", ENTRY_WAIT, f"Multi-timeframe bias is {bias}; wait for alignment.")
+    return _entry_factor("MTF direction", ENTRY_AVOID, f"Multi-timeframe bias is {bias}, opposite of the {expected} setup.")
+
+
+def _entry_intraday_factor(bucket: str, multi_timeframe: dict[str, Any]) -> dict[str, str]:
+    row = _mtf_row(multi_timeframe, "15minute")
+    if not row or row.get("status") != "analyzed":
+        return _entry_factor("15-min price trigger", ENTRY_WAIT, "15-minute candles are missing or insufficient.")
+    technical = row.get("technical_trend")
+    structure = row.get("structure_trend")
+    close = row.get("close")
+    support = row.get("support")
+    resistance = row.get("resistance")
+    invalidation = row.get("invalidation")
+
+    if bucket == "bullish":
+        floor = invalidation or support
+        if floor is not None and close is not None and close <= floor:
+            return _entry_factor("15-min price trigger", ENTRY_EXIT, f"15-min close {close:.2f} is below trigger floor {floor:.2f}.")
+        if technical == "bullish" and structure in {"uptrend", "range"}:
+            return _entry_factor("15-min price trigger", ENTRY_ALLOWED, "15-min trend is bullish and price is holding above support.")
+        if technical == "bearish" or structure == "downtrend":
+            return _entry_factor("15-min price trigger", ENTRY_AVOID, "15-min structure is bearish; do not sell puts into downside momentum.")
+        return _entry_factor("15-min price trigger", ENTRY_WAIT, "Wait for a bullish 15-min close/retest before selling puts.")
+
+    if bucket == "bearish":
+        ceiling = invalidation or resistance
+        if ceiling is not None and close is not None and close >= ceiling:
+            return _entry_factor("15-min price trigger", ENTRY_EXIT, f"15-min close {close:.2f} is above trigger ceiling {ceiling:.2f}.")
+        if technical == "bearish" and structure in {"downtrend", "range"}:
+            return _entry_factor("15-min price trigger", ENTRY_ALLOWED, "15-min trend is bearish and price is holding below resistance.")
+        if technical == "bullish" or structure == "uptrend":
+            return _entry_factor("15-min price trigger", ENTRY_AVOID, "15-min structure is bullish; do not sell calls into upside momentum.")
+        return _entry_factor("15-min price trigger", ENTRY_WAIT, "Wait for a bearish 15-min close/rejection before selling calls.")
+
+    if structure == "range" and support is not None and resistance is not None and close is not None and support < close < resistance:
+        return _entry_factor("15-min price trigger", ENTRY_ALLOWED, "15-min price is inside the range.")
+    if close is not None and ((resistance is not None and close >= resistance) or (support is not None and close <= support)):
+        return _entry_factor("15-min price trigger", ENTRY_EXIT, "15-min price is breaking out of the range.")
+    return _entry_factor("15-min price trigger", ENTRY_WAIT, "Wait for 15-min range confirmation before selling both sides.")
+
+
+def _entry_distance_factor(bucket: str, structure, spot: float | None) -> dict[str, str]:
+    if spot is None:
+        return _entry_factor("Support/invalidation distance", ENTRY_WAIT, "Spot price is not available.")
+    threshold_percent = 0.25
+    if bucket == "bullish":
+        anchor = structure.invalidation or structure.support
+        if anchor is None:
+            return _entry_factor("Support/invalidation distance", ENTRY_WAIT, "Support/invalidation is not available.")
+        distance = ((spot - anchor) / spot) * 100
+        if spot <= anchor:
+            return _entry_factor("Support/invalidation distance", ENTRY_EXIT, f"Spot {spot:.2f} is below invalidation/support {anchor:.2f}.")
+        if distance < threshold_percent:
+            return _entry_factor("Support/invalidation distance", ENTRY_WAIT, f"Only {distance:.2f}% above invalidation/support {anchor:.2f}; too close for a fresh short put.")
+        return _entry_factor("Support/invalidation distance", ENTRY_ALLOWED, f"Spot is {distance:.2f}% above invalidation/support {anchor:.2f}.")
+
+    if bucket == "bearish":
+        anchor = structure.invalidation or structure.resistance
+        if anchor is None:
+            return _entry_factor("Support/invalidation distance", ENTRY_WAIT, "Resistance/invalidation is not available.")
+        distance = ((anchor - spot) / spot) * 100
+        if spot >= anchor:
+            return _entry_factor("Support/invalidation distance", ENTRY_EXIT, f"Spot {spot:.2f} is above invalidation/resistance {anchor:.2f}.")
+        if distance < threshold_percent:
+            return _entry_factor("Support/invalidation distance", ENTRY_WAIT, f"Only {distance:.2f}% below invalidation/resistance {anchor:.2f}; too close for a fresh short call.")
+        return _entry_factor("Support/invalidation distance", ENTRY_ALLOWED, f"Spot is {distance:.2f}% below invalidation/resistance {anchor:.2f}.")
+
+    support = structure.support
+    resistance = structure.resistance
+    if support is None or resistance is None:
+        return _entry_factor("Support/invalidation distance", ENTRY_WAIT, "Range support/resistance is not available.")
+    lower_distance = ((spot - support) / spot) * 100
+    upper_distance = ((resistance - spot) / spot) * 100
+    if spot <= support or spot >= resistance:
+        return _entry_factor("Support/invalidation distance", ENTRY_EXIT, f"Spot {spot:.2f} is outside the {support:.2f}-{resistance:.2f} range.")
+    if min(lower_distance, upper_distance) < threshold_percent:
+        return _entry_factor("Support/invalidation distance", ENTRY_WAIT, f"Spot is too close to a range edge: {lower_distance:.2f}% lower room, {upper_distance:.2f}% upper room.")
+    return _entry_factor("Support/invalidation distance", ENTRY_ALLOWED, f"Spot has room inside range: {lower_distance:.2f}% lower, {upper_distance:.2f}% upper.")
+
+
+def _entry_option_context_factor(bucket: str, option_chain) -> dict[str, str]:
+    if not option_chain:
+        return _entry_factor("OI/PCR/max pain", ENTRY_WAIT, "Option chain was not loaded; enable Option chain before entry.")
+    pcr = option_chain.pcr_oi
+    spot = option_chain.spot_price
+    max_pain = option_chain.max_pain
+    pieces = [
+        f"PCR {_fmt_decimal(pcr)}",
+        f"max pain {_fmt_decimal(max_pain)}",
+        f"highest PE OI {_fmt_decimal(option_chain.highest_put_oi_strike)}",
+        f"highest CE OI {_fmt_decimal(option_chain.highest_call_oi_strike)}",
+    ]
+    detail = "; ".join(pieces) + "."
+    if pcr is None:
+        return _entry_factor("OI/PCR/max pain", ENTRY_WAIT, f"{detail} PCR is unavailable.")
+    if bucket == "bullish":
+        if pcr < 0.8:
+            return _entry_factor("OI/PCR/max pain", ENTRY_AVOID, f"{detail} PCR is weak for put selling.")
+        if pcr < 1.0:
+            return _entry_factor("OI/PCR/max pain", ENTRY_WAIT, f"{detail} PCR is not strongly supportive yet.")
+        if spot and max_pain and max_pain > spot * 1.01:
+            return _entry_factor("OI/PCR/max pain", ENTRY_WAIT, f"{detail} Max pain is above spot; wait for confirmation.")
+        return _entry_factor("OI/PCR/max pain", ENTRY_ALLOWED, f"{detail} Put-side context is supportive.")
+    if bucket == "bearish":
+        if pcr > 1.3:
+            return _entry_factor("OI/PCR/max pain", ENTRY_AVOID, f"{detail} PCR is too put-heavy for fresh call selling.")
+        if pcr > 1.1:
+            return _entry_factor("OI/PCR/max pain", ENTRY_WAIT, f"{detail} PCR is not strongly bearish yet.")
+        if spot and max_pain and max_pain < spot * 0.99:
+            return _entry_factor("OI/PCR/max pain", ENTRY_WAIT, f"{detail} Max pain is below spot; wait for confirmation.")
+        return _entry_factor("OI/PCR/max pain", ENTRY_ALLOWED, f"{detail} Call-side context is supportive.")
+    if 0.8 <= pcr <= 1.2:
+        return _entry_factor("OI/PCR/max pain", ENTRY_ALLOWED, f"{detail} PCR is range-friendly.")
+    return _entry_factor("OI/PCR/max pain", ENTRY_WAIT, f"{detail} PCR is directional, so avoid forcing a strangle.")
+
+
+def _entry_volume_factor(multi_timeframe: dict[str, Any]) -> dict[str, str]:
+    row = _mtf_row(multi_timeframe, "15minute") or _mtf_row(multi_timeframe, "60minute") or _mtf_row(multi_timeframe, "day")
+    if not row or row.get("status") != "analyzed":
+        return _entry_factor("Volume confirmation", ENTRY_WAIT, "No analyzed intraday volume data available.")
+    signal = row.get("volume_signal") or "unknown"
+    ratio = row.get("volume_ratio20")
+    label = row.get("label") or timeframe_label(row.get("timeframe") or "day")
+    detail = f"{label} volume is {signal}; Vol x20 {_fmt_decimal(ratio)}."
+    if signal in {"expansion", "strong expansion"}:
+        return _entry_factor("Volume confirmation", ENTRY_ALLOWED, detail)
+    if signal == "dry-up":
+        return _entry_factor("Volume confirmation", ENTRY_WAIT, f"{detail} Wait for participation on the trigger candle.")
+    return _entry_factor("Volume confirmation", ENTRY_WAIT, f"{detail} Volume is acceptable but not a trigger yet.")
+
+
+def _entry_candidate_row(
+    bucket: str,
+    candidate,
+    structure,
+    spot: float | None,
+    common_rows: list[dict[str, str]],
+    option_chain,
+) -> dict[str, Any]:
+    strike_status = _entry_strike_status(bucket, candidate, structure, spot)
+    buildup_status = _entry_buildup_status(bucket, candidate)
+    liquidity_status = _entry_liquidity_status(candidate, option_chain)
+    statuses = [row["status"] for row in common_rows] + [
+        strike_status["status"],
+        buildup_status["status"],
+        liquidity_status["status"],
+    ]
+    status = _combined_entry_status(statuses)
+    blockers = [
+        item["detail"] for item in (strike_status, buildup_status, liquidity_status)
+        if item["status"] in {ENTRY_AVOID, ENTRY_EXIT}
+    ]
+    if status == ENTRY_WAIT:
+        blockers.extend(
+            item["detail"] for item in (strike_status, buildup_status, liquidity_status)
+            if item["status"] == ENTRY_WAIT
+        )
+    return {
+        "action": _entry_action_for_option(candidate.option_type),
+        "strike": candidate.strike,
+        "option_type": candidate.option_type,
+        "status": status,
+        "status_key": _entry_status_key(status),
+        "score": _entry_score(statuses),
+        "entry_trigger": _entry_trigger_text(bucket, candidate, structure),
+        "risk_trigger": _entry_risk_text(bucket, candidate, structure),
+        "reasons": [
+            strike_status["detail"],
+            buildup_status["detail"],
+            liquidity_status["detail"],
+        ],
+        "blockers": blockers[:4],
+    }
+
+
+def _entry_strike_status(bucket: str, candidate, structure, spot: float | None) -> dict[str, str]:
+    if spot is None:
+        return _entry_factor("Strike placement", ENTRY_WAIT, "Spot price is unavailable.")
+    if candidate.option_type == "PE":
+        anchor = structure.invalidation or structure.support
+        if candidate.strike >= spot:
+            return _entry_factor("Strike placement", ENTRY_AVOID, f"{candidate.strike:.2f} PE is not OTM below spot {spot:.2f}.")
+        if anchor is not None and candidate.strike > anchor:
+            return _entry_factor("Strike placement", ENTRY_AVOID, f"{candidate.strike:.2f} PE is above invalidation/support {anchor:.2f}.")
+        distance = ((spot - candidate.strike) / spot) * 100
+        if bucket == "bullish" and distance < 0.25:
+            return _entry_factor("Strike placement", ENTRY_WAIT, f"{candidate.strike:.2f} PE is only {distance:.2f}% below spot.")
+        return _entry_factor("Strike placement", ENTRY_ALLOWED, f"{candidate.strike:.2f} PE is {distance:.2f}% below spot.")
+
+    anchor = structure.invalidation or structure.resistance
+    if candidate.strike <= spot:
+        return _entry_factor("Strike placement", ENTRY_AVOID, f"{candidate.strike:.2f} CE is not OTM above spot {spot:.2f}.")
+    if anchor is not None and candidate.strike < anchor:
+        return _entry_factor("Strike placement", ENTRY_AVOID, f"{candidate.strike:.2f} CE is below invalidation/resistance {anchor:.2f}.")
+    distance = ((candidate.strike - spot) / spot) * 100
+    if bucket == "bearish" and distance < 0.25:
+        return _entry_factor("Strike placement", ENTRY_WAIT, f"{candidate.strike:.2f} CE is only {distance:.2f}% above spot.")
+    return _entry_factor("Strike placement", ENTRY_ALLOWED, f"{candidate.strike:.2f} CE is {distance:.2f}% above spot.")
+
+
+def _entry_buildup_status(bucket: str, candidate) -> dict[str, str]:
+    label = candidate.buildup
+    option = candidate.option_type
+    if label == "Needs previous OI snapshot":
+        return _entry_factor("Option-chain build-up", ENTRY_WAIT, f"{option} build-up needs a previous snapshot.")
+    if label in {"Short build-up", "Long unwinding"}:
+        return _entry_factor("Option-chain build-up", ENTRY_ALLOWED, f"{candidate.strike:.2f} {option} shows {label}.")
+    if label == "Neutral":
+        return _entry_factor("Option-chain build-up", ENTRY_WAIT, f"{candidate.strike:.2f} {option} build-up is neutral.")
+    if option == "PE" and bucket == "bullish":
+        return _entry_factor("Option-chain build-up", ENTRY_EXIT, f"{candidate.strike:.2f} PE shows {label}; put writers are not in control.")
+    if option == "CE" and bucket == "bearish":
+        return _entry_factor("Option-chain build-up", ENTRY_EXIT, f"{candidate.strike:.2f} CE shows {label}; call writers are not in control.")
+    return _entry_factor("Option-chain build-up", ENTRY_AVOID, f"{candidate.strike:.2f} {option} shows {label}.")
+
+
+def _entry_liquidity_status(candidate, option_chain) -> dict[str, str]:
+    side_rows = [row for row in option_chain.rows if row.option_type == candidate.option_type] if option_chain else []
+    highest_side_oi = max((row.oi for row in side_rows), default=0)
+    oi_ratio = (candidate.oi / highest_side_oi) if highest_side_oi else 0
+    if candidate.oi <= 0 or candidate.volume <= 0:
+        return _entry_factor("Strike OI/volume", ENTRY_WAIT, f"OI {candidate.oi}, volume {candidate.volume}; liquidity confirmation is weak.")
+    if oi_ratio < 0.25:
+        return _entry_factor("Strike OI/volume", ENTRY_WAIT, f"OI {candidate.oi}, volume {candidate.volume}; strike is below 25% of top same-side OI.")
+    return _entry_factor("Strike OI/volume", ENTRY_ALLOWED, f"OI {candidate.oi}, volume {candidate.volume}; same-side OI strength {oi_ratio:.0%}.")
+
+
+def _entry_factor(factor: str, status: str, detail: str) -> dict[str, str]:
+    return {
+        "factor": factor,
+        "status": status,
+        "status_key": _entry_status_key(status),
+        "detail": detail,
+    }
+
+
+def _panel_entry_status(common_rows: list[dict[str, str]], candidate_rows: list[dict[str, Any]]) -> str:
+    statuses = [row["status"] for row in common_rows] + [row["status"] for row in candidate_rows]
+    if ENTRY_EXIT in statuses:
+        return ENTRY_EXIT
+    if ENTRY_AVOID in statuses:
+        return ENTRY_AVOID
+    if any(row["status"] == ENTRY_ALLOWED for row in candidate_rows):
+        return ENTRY_ALLOWED
+    return ENTRY_WAIT
+
+
+def _combined_entry_status(statuses: list[str]) -> str:
+    if ENTRY_EXIT in statuses:
+        return ENTRY_EXIT
+    if ENTRY_AVOID in statuses:
+        return ENTRY_AVOID
+    if statuses and all(status == ENTRY_ALLOWED for status in statuses):
+        return ENTRY_ALLOWED
+    return ENTRY_WAIT
+
+
+def _entry_score(statuses: list[str]) -> int:
+    points = 50
+    for status in statuses:
+        if status == ENTRY_ALLOWED:
+            points += 8
+        elif status == ENTRY_WAIT:
+            points -= 3
+        elif status == ENTRY_AVOID:
+            points -= 18
+        elif status == ENTRY_EXIT:
+            points -= 30
+    return max(0, min(100, points))
+
+
+def _entry_summary(status: str, bucket: str, candidates: list[dict[str, Any]]) -> str:
+    allowed = [candidate for candidate in candidates if candidate["status"] == ENTRY_ALLOWED]
+    if status == ENTRY_ALLOWED and allowed:
+        best = max(allowed, key=lambda row: row["score"])
+        return f"{_entry_bias_label(bucket)} entry trigger is active; best candidate {best['strike']:.2f} {best['option_type']}."
+    if status == ENTRY_EXIT:
+        return "Invalidation or adverse option-chain evidence is active; avoid fresh entry and adjust any open position."
+    if status == ENTRY_AVOID:
+        return "Setup exists, but one or more entry filters are against the trade."
+    return "Setup is on watch; wait for price, volume, and option-chain confirmation before entry."
+
+
+def _entry_trigger_text(bucket: str, candidate, structure) -> str:
+    if candidate.option_type == "PE":
+        anchor = structure.invalidation or structure.support
+        if anchor:
+            return f"Sell only after a bullish 15-min close/retest holds above {anchor:.2f} and {candidate.strike:.2f} PE build-up is supportive."
+        return "Sell only after a bullish 15-min close/retest and supportive PE build-up."
+    if candidate.option_type == "CE":
+        anchor = structure.invalidation or structure.resistance
+        if anchor:
+            return f"Sell only after a bearish 15-min close/rejection holds below {anchor:.2f} and {candidate.strike:.2f} CE build-up is supportive."
+        return "Sell only after a bearish 15-min close/rejection and supportive CE build-up."
+    return "Wait for range confirmation and supportive build-up on both legs."
+
+
+def _entry_risk_text(bucket: str, candidate, structure) -> str:
+    if candidate.option_type == "PE":
+        anchor = structure.invalidation or structure.support
+        return f"Exit/adjust if spot closes below {anchor:.2f} or PE build-up turns adverse." if anchor else "Exit/adjust if support breaks or PE build-up turns adverse."
+    if candidate.option_type == "CE":
+        anchor = structure.invalidation or structure.resistance
+        return f"Exit/adjust if spot closes above {anchor:.2f} or CE build-up turns adverse." if anchor else "Exit/adjust if resistance breaks or CE build-up turns adverse."
+    return "Exit/adjust on range breakout or adverse build-up."
+
+
+def _entry_status_key(status: str) -> str:
+    return status.lower().replace("/", "_").replace(" ", "_")
+
+
+def _entry_action(bucket: str) -> str:
+    return {
+        "bullish": "Sell put",
+        "bearish": "Sell call",
+        "neutral": "Sell strangle",
+    }.get(bucket, "Wait")
+
+
+def _entry_action_for_option(option_type: str) -> str:
+    if option_type == "PE":
+        return "Sell put"
+    if option_type == "CE":
+        return "Sell call"
+    return "Wait"
+
+
+def _entry_bias_label(bucket: str) -> str:
+    return {
+        "bullish": "Bullish put-sell",
+        "bearish": "Bearish call-sell",
+        "neutral": "Neutral strangle",
+    }.get(bucket, "Options-selling")
+
+
+def _mtf_row(multi_timeframe: dict[str, Any], timeframe: str) -> dict[str, Any] | None:
+    return next((row for row in multi_timeframe.get("rows", []) if row.get("timeframe") == timeframe), None)
+
+
+def _fmt_decimal(value: float | None) -> str:
+    return "-" if value is None else f"{value:.2f}"
 
 
 def _option_trade_guide(setup: dict[str, str], structure, option_chain) -> dict[str, Any]:

@@ -3,8 +3,9 @@ from __future__ import annotations
 import unittest
 import os
 import tempfile
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 from trading_analysis.candles import normalize_timeframe, prepare_candles, candle_window
 from trading_analysis.analysis.fundamental import analyze_fundamentals
@@ -41,6 +42,7 @@ from trading_analysis.models import Candle, FundamentalSnapshot
 from trading_analysis.web_services import (
     AnalysisService,
     _bulk_window_days,
+    _entry_trigger_panel,
     _normalize_bulk_requested_timeframes,
     _normalize_bulk_timeframes,
     classify_setup,
@@ -214,6 +216,13 @@ class AnalysisTests(unittest.TestCase):
 
         self.assertIn(rs.label, {"outperforming", "underperforming", "neutral", "insufficient data"})
         self.assertIn(decision.bias, {"bullish", "bearish", "neutral"})
+        self.assertEqual(decision.score_breakdown.base_score, 50)
+        self.assertEqual(decision.score_breakdown.final_score, decision.score)
+        self.assertEqual(
+            decision.score_breakdown.raw_score,
+            decision.score_breakdown.base_score + sum(component.points for component in decision.score_breakdown.components),
+        )
+        self.assertIn("Daily direction", {component.name for component in decision.score_breakdown.components})
 
     def test_sector_map_prefers_zerodha_index_aliases(self) -> None:
         metadata = {
@@ -366,6 +375,34 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(_bulk_window_days(["week"], 90), 730)
         self.assertEqual(_bulk_window_days(["day", "60minute"], 90), 90)
 
+    def test_entry_trigger_allows_bullish_put_after_confirmations(self) -> None:
+        option_chain = self._entry_option_chain(spot_price=105)
+        panel = _entry_trigger_panel(
+            setup={"bucket": "bullish"},
+            chart_technical=SimpleNamespace(close=105),
+            chart_structure=SimpleNamespace(support=102, resistance=110, invalidation=102),
+            multi_timeframe=self._entry_mtf(close=105),
+            option_chain=option_chain,
+        )
+
+        self.assertEqual(panel["status"], "Entry allowed")
+        self.assertEqual(panel["candidates"][0]["strike"], 100)
+        self.assertEqual(panel["candidates"][0]["option_type"], "PE")
+        self.assertEqual(panel["candidates"][0]["status"], "Entry allowed")
+
+    def test_entry_trigger_exits_when_price_breaches_invalidation(self) -> None:
+        option_chain = self._entry_option_chain(spot_price=101)
+        panel = _entry_trigger_panel(
+            setup={"bucket": "bullish"},
+            chart_technical=SimpleNamespace(close=101),
+            chart_structure=SimpleNamespace(support=102, resistance=110, invalidation=102),
+            multi_timeframe=self._entry_mtf(close=101),
+            option_chain=option_chain,
+        )
+
+        self.assertEqual(panel["status"], "Exit/Adjust")
+        self.assertTrue(any("below invalidation" in row["detail"] for row in panel["rows"]))
+
     def test_timeframe_aliases_and_weekly_resample(self) -> None:
         candles = [
             Candle(datetime(2026, 6, 1), 10, 12, 9, 11, 100),
@@ -397,6 +434,41 @@ class AnalysisTests(unittest.TestCase):
                 os.environ.pop("ZERODHA_ACCESS_TOKEN", None)
             else:
                 os.environ["ZERODHA_ACCESS_TOKEN"] = original
+
+    def _entry_option_chain(self, spot_price: float):
+        contracts = [
+            OptionContract("ABC26JUN100PE", "ABC", date(2026, 6, 30), 100, "PE", 100),
+            OptionContract("ABC26JUN110CE", "ABC", date(2026, 6, 30), 110, "CE", 100),
+        ]
+        quotes = {
+            "NFO:ABC26JUN100PE": {"last_price": 3, "volume": 1000, "oi": 1200, "ohlc": {"close": 4}},
+            "NFO:ABC26JUN110CE": {"last_price": 2, "volume": 500, "oi": 500, "ohlc": {"close": 2}},
+        }
+        previous = {
+            "ABC26JUN100PE": {"last_price": "4", "oi": "1000"},
+            "ABC26JUN110CE": {"last_price": "2", "oi": "500"},
+        }
+        return analyze_option_chain("ABC", date(2026, 6, 30), contracts, quotes, spot_price, previous)
+
+    def _entry_mtf(self, close: float):
+        return {
+            "bias": "bullish",
+            "rows": [
+                {
+                    "timeframe": "15minute",
+                    "label": "15 min",
+                    "status": "analyzed",
+                    "technical_trend": "bullish",
+                    "structure_trend": "uptrend",
+                    "close": close,
+                    "support": 102,
+                    "resistance": 108,
+                    "invalidation": 102,
+                    "volume_signal": "expansion",
+                    "volume_ratio20": 1.35,
+                }
+            ],
+        }
 
 
 if __name__ == "__main__":

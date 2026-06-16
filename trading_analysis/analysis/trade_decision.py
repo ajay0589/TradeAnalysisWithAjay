@@ -9,12 +9,28 @@ from trading_analysis.models import TechnicalSignal
 
 
 @dataclass(frozen=True)
+class ScoreComponent:
+    name: str
+    points: int
+    detail: str
+
+
+@dataclass(frozen=True)
+class ScoreBreakdown:
+    base_score: int
+    raw_score: int
+    final_score: int
+    components: tuple[ScoreComponent, ...]
+
+
+@dataclass(frozen=True)
 class TradeDecision:
     symbol: str
     bias: str
     decision: str
     preferred_strategy: str
     score: int
+    score_breakdown: ScoreBreakdown
     reasons: tuple[str, ...]
     warnings: tuple[str, ...]
 
@@ -31,44 +47,95 @@ def build_trade_decision(
     score = 50
     reasons: list[str] = []
     warnings: list[str] = []
+    components: list[ScoreComponent] = []
 
-    score += _bias_points(daily_technical.trend, daily_structure.trend, reasons)
+    daily_points, daily_details = _bias_component(daily_technical.trend, daily_structure.trend)
+    score += daily_points
+    reasons.extend(daily_details)
+    components.append(
+        ScoreComponent(
+            "Daily direction",
+            daily_points,
+            "; ".join(daily_details) or "Daily trend/structure neutral",
+        )
+    )
 
     if hourly_technical and hourly_structure:
-        score += _bias_points(hourly_technical.trend, hourly_structure.trend, reasons, prefix="60m ")
+        hourly_points, hourly_details = _bias_component(hourly_technical.trend, hourly_structure.trend, prefix="60m ")
+        score += hourly_points
+        reasons.extend(hourly_details)
+        components.append(
+            ScoreComponent(
+                "60-minute confirmation",
+                hourly_points,
+                "; ".join(hourly_details) or "60-minute trend/structure neutral",
+            )
+        )
     else:
         warnings.append("60-minute data not available")
+        components.append(ScoreComponent("60-minute confirmation", 0, "60-minute data not available"))
 
     rs_signal = relative_strength.stock_vs_nifty if relative_strength else None
     if rs_signal:
+        points = 0
         if rs_signal.label == "outperforming":
-            score += 10
+            points = 10
             reasons.append("Stock outperforming Nifty")
         elif rs_signal.label == "underperforming":
-            score -= 10
+            points = -10
             reasons.append("Stock underperforming Nifty")
+        score += points
+        components.append(
+            ScoreComponent(
+                "Stock vs Nifty RS",
+                points,
+                f"{rs_signal.label}; relative return {_fmt_percent(rs_signal.relative_return_percent)}",
+            )
+        )
     else:
         warnings.append("Nifty relative strength not available")
+        components.append(ScoreComponent("Stock vs Nifty RS", 0, "Nifty relative strength not available"))
 
     sector_signal = relative_strength.stock_vs_sector if relative_strength else None
     if sector_signal:
+        points = 0
         if sector_signal.label == "outperforming":
-            score += 5
+            points = 5
             reasons.append("Stock outperforming sector")
         elif sector_signal.label == "underperforming":
-            score -= 5
+            points = -5
             reasons.append("Stock underperforming sector")
+        score += points
+        components.append(
+            ScoreComponent(
+                "Stock vs Sector RS",
+                points,
+                f"{sector_signal.label}; relative return {_fmt_percent(sector_signal.relative_return_percent)}",
+            )
+        )
     else:
         warnings.append("Sector relative strength not available")
+        components.append(ScoreComponent("Stock vs Sector RS", 0, "Sector relative strength not available"))
 
     if option_chain:
-        score += _option_chain_points(option_chain, reasons, warnings)
+        option_points, option_details = _option_chain_component(option_chain, warnings)
+        score += option_points
+        reasons.extend(option_details)
+        components.append(
+            ScoreComponent(
+                "Option-chain context",
+                option_points,
+                "; ".join(option_details) or "Option chain neutral",
+            )
+        )
     else:
         warnings.append("Option-chain context not available")
+        components.append(ScoreComponent("Option-chain context", 0, "Option-chain context not available"))
 
-    score = max(0, min(100, score))
-    bias = _bias_from_score(score)
-    decision = _decision_from_score(score, has_hourly=bool(hourly_technical and hourly_structure), has_option_chain=bool(option_chain))
+    raw_score = score
+    final_score = max(0, min(100, raw_score))
+    bias = _bias_from_score(final_score)
+    decision = _decision_from_score(final_score, has_hourly=bool(hourly_technical and hourly_structure), has_option_chain=bool(option_chain))
     strategy = _strategy_from_context(bias, daily_structure.trend, option_chain)
 
     return TradeDecision(
@@ -76,65 +143,72 @@ def build_trade_decision(
         bias=bias,
         decision=decision,
         preferred_strategy=strategy,
-        score=score,
+        score=final_score,
+        score_breakdown=ScoreBreakdown(
+            base_score=50,
+            raw_score=raw_score,
+            final_score=final_score,
+            components=tuple(components),
+        ),
         reasons=tuple(reasons[:8]),
         warnings=tuple(warnings),
     )
 
 
-def _bias_points(technical_trend: str, structure_trend: str, reasons: list[str], prefix: str = "") -> int:
+def _bias_component(technical_trend: str, structure_trend: str, prefix: str = "") -> tuple[int, list[str]]:
     points = 0
+    details: list[str] = []
     if technical_trend == "bullish":
         points += 10
-        reasons.append(f"{prefix}technical trend bullish")
+        details.append(f"{prefix}technical trend bullish")
     elif technical_trend == "bearish":
         points -= 10
-        reasons.append(f"{prefix}technical trend bearish")
+        details.append(f"{prefix}technical trend bearish")
 
     if structure_trend == "uptrend":
         points += 15
-        reasons.append(f"{prefix}market structure uptrend")
+        details.append(f"{prefix}market structure uptrend")
     elif structure_trend == "downtrend":
         points -= 15
-        reasons.append(f"{prefix}market structure downtrend")
+        details.append(f"{prefix}market structure downtrend")
     else:
-        reasons.append(f"{prefix}market structure range")
-    return points
+        details.append(f"{prefix}market structure range")
+    return points, details
 
 
-def _option_chain_points(
+def _option_chain_component(
     option_chain: OptionChainAnalysis,
-    reasons: list[str],
     warnings: list[str],
-) -> int:
+) -> tuple[int, list[str]]:
     points = 0
+    details: list[str] = []
     spot = option_chain.spot_price
     pcr = option_chain.pcr_oi
     if pcr is not None:
         if pcr >= 1.1:
             points += 5
-            reasons.append("Option chain PCR supportive")
+            details.append("Option chain PCR supportive")
         elif pcr <= 0.8:
             points -= 5
-            reasons.append("Option chain PCR weak")
+            details.append("Option chain PCR weak")
 
     if spot and option_chain.highest_call_oi_strike and option_chain.highest_call_oi_strike <= spot * 1.01:
         points -= 5
-        reasons.append("High call OI near spot")
+        details.append("High call OI near spot")
     if spot and option_chain.highest_put_oi_strike and option_chain.highest_put_oi_strike >= spot * 0.99:
         points += 5
-        reasons.append("High put OI near spot")
+        details.append("High put OI near spot")
 
     buildup_labels = {row.buildup for row in option_chain.rows}
     if "Needs previous OI snapshot" in buildup_labels:
         warnings.append("Build-up classification needs a previous option snapshot")
     if "Short build-up" in buildup_labels:
         points -= 5
-        reasons.append("Short build-up present")
+        details.append("Short build-up present")
     if "Long build-up" in buildup_labels:
         points += 5
-        reasons.append("Long build-up present")
-    return points
+        details.append("Long build-up present")
+    return points, details
 
 
 def _bias_from_score(score: int) -> str:
@@ -143,6 +217,10 @@ def _bias_from_score(score: int) -> str:
     if score <= 40:
         return "bearish"
     return "neutral"
+
+
+def _fmt_percent(value: float | None) -> str:
+    return "-" if value is None else f"{value:.2f}%"
 
 
 def _decision_from_score(score: int, has_hourly: bool, has_option_chain: bool) -> str:

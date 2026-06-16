@@ -149,6 +149,41 @@
             <span id="reportStatus">No report saved</span>
           </section>
 
+          <section class="table-panel">
+            <div class="panel-head">
+              <h2>Score Breakdown</h2>
+              <span id="scoreBreakdownMeta"></span>
+            </div>
+            <div class="score-strip">
+              <div>
+                <span>Base</span>
+                <strong id="scoreBase">-</strong>
+              </div>
+              <div>
+                <span>Component Total</span>
+                <strong id="scoreComponentTotal">-</strong>
+              </div>
+              <div>
+                <span>Raw</span>
+                <strong id="scoreRaw">-</strong>
+              </div>
+              <div>
+                <span>Final</span>
+                <strong id="scoreFinal">-</strong>
+              </div>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Component</th>
+                  <th>Points</th>
+                  <th>Basis</th>
+                </tr>
+              </thead>
+              <tbody id="scoreBreakdownBody"></tbody>
+            </table>
+          </section>
+
           <section class="ops-grid">
             <div class="table-panel ops-panel">
               <div class="panel-head">
@@ -227,6 +262,41 @@
                 </tr>
               </thead>
               <tbody id="mtfBody"></tbody>
+            </table>
+          </section>
+
+          <section class="table-panel">
+            <div class="panel-head">
+              <h2>Entry Trigger</h2>
+              <span id="entryTriggerMeta"></span>
+            </div>
+            <div class="entry-trigger-summary">
+              <span id="entryTriggerStatus" class="status-badge status-wait">Wait</span>
+              <span id="entryTriggerSummary">Run analysis to load entry triggers.</span>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Factor</th>
+                  <th>Status</th>
+                  <th>Trigger Check</th>
+                </tr>
+              </thead>
+              <tbody id="entryTriggerBody"></tbody>
+            </table>
+            <div class="subsection-title">Candidate strikes</div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Action</th>
+                  <th>Strike</th>
+                  <th>Status</th>
+                  <th>Entry Trigger</th>
+                  <th>Exit / Adjust</th>
+                  <th>Score</th>
+                </tr>
+              </thead>
+              <tbody id="entryCandidateBody"></tbody>
             </table>
           </section>
 

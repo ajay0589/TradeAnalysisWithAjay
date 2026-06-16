@@ -402,7 +402,9 @@ function renderAnalysis(data) {
   $("decisionValue").textContent = data.decision.decision;
   $("structureMeta").textContent = `${data.chart.label} / ${data.chart.candle_count} candles`;
 
+  renderScoreBreakdown(data.decision.score_breakdown);
   renderMultiTimeframe(data.multi_timeframe);
+  renderEntryTrigger(data.entry_trigger);
   renderOptionGuide(data.option_trade_guide);
   renderCoverage(data.analysis_summary);
   $("structureBody").innerHTML = [
@@ -413,6 +415,84 @@ function renderAnalysis(data) {
   renderRelativeStrength(data.relative_strength);
   renderOptionChain(data.option_chain);
   renderSnapshotStatus(data.option_snapshot);
+}
+
+function renderScoreBreakdown(breakdown) {
+  if (!breakdown) {
+    $("scoreBreakdownMeta").textContent = "-";
+    $("scoreBase").textContent = "-";
+    $("scoreComponentTotal").textContent = "-";
+    $("scoreRaw").textContent = "-";
+    $("scoreFinal").textContent = "-";
+    $("scoreBreakdownBody").innerHTML = "";
+    return;
+  }
+  const components = breakdown.components || [];
+  const componentTotal = components.reduce((total, component) => total + Number(component.points || 0), 0);
+  $("scoreBreakdownMeta").textContent = `Base ${breakdown.base_score} + components ${fmtSigned(componentTotal)} = ${breakdown.raw_score}, capped to ${breakdown.final_score}`;
+  $("scoreBase").textContent = fmtInt(breakdown.base_score);
+  $("scoreComponentTotal").textContent = fmtSigned(componentTotal);
+  $("scoreComponentTotal").className = pointsClass(componentTotal);
+  $("scoreRaw").textContent = fmtInt(breakdown.raw_score);
+  $("scoreFinal").textContent = fmtInt(breakdown.final_score);
+  $("scoreBreakdownBody").innerHTML = components
+    .map(
+      (component) => `
+        <tr>
+          <td>${component.name}</td>
+          <td class="${pointsClass(component.points)}">${fmtSigned(component.points)}</td>
+          <td>${component.detail || "-"}</td>
+        </tr>
+      `
+    )
+    .join("");
+}
+
+function renderEntryTrigger(trigger) {
+  if (!trigger) {
+    $("entryTriggerMeta").textContent = "-";
+    $("entryTriggerStatus").textContent = "Wait";
+    $("entryTriggerStatus").className = "status-badge status-wait";
+    $("entryTriggerSummary").textContent = "Run analysis to load entry triggers.";
+    $("entryTriggerBody").innerHTML = "";
+    $("entryCandidateBody").innerHTML = "";
+    return;
+  }
+  $("entryTriggerMeta").textContent = `${trigger.candidates.length} candidate(s)`;
+  $("entryTriggerStatus").textContent = trigger.status;
+  $("entryTriggerStatus").className = `status-badge status-${trigger.status_key || statusKey(trigger.status)}`;
+  $("entryTriggerSummary").textContent = trigger.summary || "-";
+  $("entryTriggerBody").innerHTML = (trigger.rows || [])
+    .map(
+      (row) => `
+        <tr>
+          <td>${row.factor}</td>
+          <td><span class="status-badge status-${row.status_key || statusKey(row.status)}">${row.status}</span></td>
+          <td>${row.detail || "-"}</td>
+        </tr>
+      `
+    )
+    .join("");
+  $("entryCandidateBody").innerHTML = (trigger.candidates || [])
+    .map((candidate) => {
+      const strike = candidate.strike === null || candidate.strike === undefined
+        ? "-"
+        : `${fmt(candidate.strike)} ${candidate.option_type}`;
+      const blockers = (candidate.blockers || []).length
+        ? `<div class="cell-note">${candidate.blockers.join(" | ")}</div>`
+        : "";
+      return `
+        <tr>
+          <td>${candidate.action}</td>
+          <td>${strike}</td>
+          <td><span class="status-badge status-${candidate.status_key || statusKey(candidate.status)}">${candidate.status}</span></td>
+          <td>${candidate.entry_trigger || "-"}${blockers}</td>
+          <td>${candidate.risk_trigger || "-"}</td>
+          <td>${fmtInt(candidate.score)}</td>
+        </tr>
+      `;
+    })
+    .join("");
 }
 
 function renderMultiTimeframe(mtf) {
@@ -624,6 +704,23 @@ function capitalize(value) {
 
 function statusLabel(value) {
   return value.replaceAll("_", " ");
+}
+
+function statusKey(value) {
+  return String(value || "wait").toLowerCase().replaceAll("/", "_").replaceAll(" ", "_");
+}
+
+function fmtSigned(value) {
+  const number = Number(value || 0);
+  if (number > 0) return `+${number}`;
+  return String(number);
+}
+
+function pointsClass(value) {
+  const number = Number(value || 0);
+  if (number > 0) return "points-positive";
+  if (number < 0) return "points-negative";
+  return "points-zero";
 }
 
 $("analyzeBtn").addEventListener("click", analyze);

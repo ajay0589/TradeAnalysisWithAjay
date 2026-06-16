@@ -280,6 +280,52 @@ label {
   overflow-wrap: anywhere;
 }
 
+.entry-trigger-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.subsection-title {
+  padding: 12px 12px 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.score-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+}
+
+.score-strip div {
+  padding: 10px 12px;
+  border-right: 1px solid var(--line);
+}
+
+.score-strip div:last-child {
+  border-right: 0;
+}
+
+.score-strip span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.score-strip strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 18px;
+}
+
 .ops-grid {
   display: grid;
   grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
@@ -425,14 +471,17 @@ tr:last-child td {
 }
 
 .status-analyzed,
-.status-pulled {
+.status-pulled,
+.status-entry_allowed {
   border-color: #9bd8c3;
   color: var(--green);
   background: #effaf5;
 }
 
 .status-missing,
-.status-failed {
+.status-failed,
+.status-avoid,
+.status-exit_adjust {
   border-color: #f0b8b3;
   color: var(--red);
   background: #fff5f4;
@@ -440,7 +489,8 @@ tr:last-child td {
 
 .status-not_requested,
 .status-not_analyzed,
-.status-insufficient {
+.status-insufficient,
+.status-wait {
   border-color: #e5d29a;
   color: var(--amber);
   background: #fff9e8;
@@ -458,6 +508,21 @@ tr:last-child td {
   color: var(--amber);
 }
 
+.points-positive {
+  color: var(--green);
+  font-weight: 650;
+}
+
+.points-negative {
+  color: var(--red);
+  font-weight: 650;
+}
+
+.points-zero {
+  color: var(--muted);
+  font-weight: 650;
+}
+
 .error {
   color: var(--red);
 }
@@ -466,6 +531,7 @@ tr:last-child td {
   .workspace,
   .report-grid,
   .ops-grid,
+  .score-strip,
   .summary-grid {
     grid-template-columns: 1fr;
   }
