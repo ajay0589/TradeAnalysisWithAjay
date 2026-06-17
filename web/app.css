@@ -8,6 +8,8 @@
   --red: #b42318;
   --amber: #9a6700;
   --blue: #1d4ed8;
+  --soft: #eef2f6;
+  --shadow: 0 10px 24px rgba(22, 32, 42, 0.06);
 }
 
 * {
@@ -21,6 +23,7 @@ body {
   font-family: "Segoe UI", Arial, sans-serif;
   font-size: 14px;
   letter-spacing: 0;
+  line-height: 1.4;
 }
 
 button,
@@ -37,6 +40,7 @@ button {
   min-height: 36px;
   padding: 0 12px;
   cursor: pointer;
+  border-radius: 6px;
 }
 
 button:hover {
@@ -51,6 +55,7 @@ select {
   border: 1px solid #aab4c0;
   background: #ffffff;
   padding: 0 10px;
+  border-radius: 6px;
 }
 
 textarea {
@@ -104,6 +109,50 @@ label {
   border: 1px solid var(--line);
   background: #f9fafb;
   padding: 6px 10px;
+  border-radius: 999px;
+}
+
+.activity-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 12px 24px 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.tab-btn {
+  min-height: 42px;
+  border-color: transparent;
+  border-bottom: 0;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.tab-btn:hover {
+  background: #f4f7fb;
+}
+
+.tab-btn.active {
+  color: var(--ink);
+  background: var(--bg);
+  border-color: var(--line);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.tab-panes {
+  min-width: 0;
+}
+
+.tab-pane {
+  display: none;
+}
+
+.tab-pane.active {
+  display: block;
 }
 
 .workspace {
@@ -125,6 +174,8 @@ label {
 .notes {
   background: var(--panel);
   border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
 }
 
 .panel {
@@ -154,6 +205,7 @@ label {
   color: var(--ink);
   background: #ffffff;
   text-decoration: none;
+  border-radius: 6px;
 }
 
 .button-link:hover {
@@ -263,6 +315,76 @@ label {
   gap: 12px;
 }
 
+.full-content {
+  padding: 16px 24px 24px;
+}
+
+.activity-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 72px;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.activity-hero h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.activity-hero p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.activity-hero span {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.analysis-banner {
+  display: grid;
+  grid-template-columns: 1.35fr 0.85fr 1fr 1fr 1.15fr;
+  gap: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.analysis-banner div {
+  min-height: 64px;
+  padding: 10px 12px;
+  border-right: 1px solid var(--line);
+}
+
+.analysis-banner div:last-child {
+  border-right: 0;
+}
+
+.analysis-banner span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.analysis-banner strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+
 .action-strip {
   display: flex;
   align-items: center;
@@ -270,6 +392,8 @@ label {
   background: var(--panel);
   border: 1px solid var(--line);
   padding: 10px 12px;
+  border-radius: 8px;
+  box-shadow: var(--shadow);
 }
 
 .action-strip span,
@@ -346,6 +470,8 @@ label {
   margin: 12px 0 8px;
   border: 1px solid var(--line);
   background: #f4f6f8;
+  border-radius: 999px;
+  overflow: hidden;
 }
 
 .progress-bar {
@@ -355,10 +481,42 @@ label {
   transition: width 180ms ease;
 }
 
+.progress-bar.active {
+  width: 55%;
+}
+
 .mini-list {
   margin-top: 8px;
   max-height: 90px;
   overflow: auto;
+}
+
+.compact-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.compact-metric {
+  border: 1px solid var(--line);
+  background: #fbfcfd;
+  padding: 8px;
+  border-radius: 6px;
+}
+
+.compact-metric span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.compact-metric strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 15px;
 }
 
 .summary-grid {
@@ -400,6 +558,26 @@ label {
   min-height: 40px;
   padding: 0 12px;
   border-bottom: 1px solid var(--line);
+  background: #fbfcfd;
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
+
+.panel-head-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.collapse-btn {
+  min-height: 28px;
+  width: 30px;
+  padding: 0;
+  font-weight: 700;
+}
+
+.table-panel.collapsed > :not(.panel-head) {
+  display: none;
 }
 
 .panel-head h2 {
@@ -449,9 +627,23 @@ tr:last-child td {
 }
 
 .notes {
-  min-height: 64px;
+  margin: 12px 24px 0;
+  min-height: 44px;
   padding: 12px;
   color: var(--muted);
+}
+
+.linkBtn {
+  width: 100%;
+  min-height: 32px;
+  border-color: #b8c4d2;
+  background: #f9fbfd;
+  font-weight: 600;
+}
+
+.linkBtn:hover {
+  background: #edf4ff;
+  border-color: #93b4e8;
 }
 
 .tag {
@@ -472,7 +664,11 @@ tr:last-child td {
 
 .status-analyzed,
 .status-pulled,
-.status-entry_allowed {
+.status-entry_allowed,
+.status-supportive,
+.status-completed,
+.status-sleeping,
+.status-stopped {
   border-color: #9bd8c3;
   color: var(--green);
   background: #effaf5;
@@ -489,8 +685,14 @@ tr:last-child td {
 
 .status-not_requested,
 .status-not_analyzed,
+.status-not_applicable,
 .status-insufficient,
-.status-wait {
+.status-wait,
+.status-watch,
+.status-caution,
+.status-running,
+.status-queued,
+.status-stopping {
   border-color: #e5d29a;
   color: var(--amber);
   background: #fff9e8;
@@ -532,12 +734,35 @@ tr:last-child td {
   .report-grid,
   .ops-grid,
   .score-strip,
+  .analysis-banner,
   .summary-grid {
     grid-template-columns: 1fr;
+  }
+
+  .workspace,
+  .full-content {
+    padding: 12px;
+  }
+
+  .activity-tabs {
+    padding: 10px 12px 0;
+  }
+
+  .activity-hero {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .activity-hero span {
+    text-align: left;
   }
 
   .topbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .notes {
+    margin: 12px 12px 0;
   }
 }

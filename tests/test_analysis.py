@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from trading_analysis.candles import normalize_timeframe, prepare_candles, candle_window
+from trading_analysis.analysis.entry_context import build_entry_context
 from trading_analysis.analysis.fundamental import analyze_fundamentals
 from trading_analysis.analysis.market_structure import analyze_market_structure
 from trading_analysis.analysis.options import (
@@ -34,6 +35,7 @@ from trading_analysis.data_sources.fno_universe import build_fno_watchlist, fno_
 from trading_analysis.data_sources.nse_equity import (
     build_sector_map_from_csv_rows,
     build_sector_map_from_metadata,
+    build_sector_map_from_symbol_overrides,
     choose_sector_index,
 )
 from trading_analysis.data_sources.csv_loader import load_candles
@@ -41,10 +43,12 @@ from trading_analysis.config import upsert_env_value
 from trading_analysis.models import Candle, FundamentalSnapshot
 from trading_analysis.web_services import (
     AnalysisService,
+    _analysis_header,
     _bulk_window_days,
     _entry_trigger_panel,
     _normalize_bulk_requested_timeframes,
     _normalize_bulk_timeframes,
+    _refresh_window_for_analysis,
     classify_setup,
 )
 
@@ -268,6 +272,51 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(sector_map["symbols"]["TCS"]["index_symbol"], "NIFTY IT")
         self.assertIn("ABB", sector_map["unmapped"])
 
+    def test_sector_map_from_symbol_overrides_marks_unknown_as_na(self) -> None:
+        nse_instruments = [
+            {"exchange": "NSE", "segment": "INDICES", "tradingsymbol": "NIFTY OIL AND GAS"},
+            {"exchange": "NSE", "segment": "INDICES", "tradingsymbol": "NIFTY IT"},
+        ]
+
+        sector_map = build_sector_map_from_symbol_overrides(["RELIANCE", "TCS", "UNKNOWN"], nse_instruments)
+
+        self.assertEqual(sector_map["symbols"]["RELIANCE"]["index_symbol"], "NIFTY OIL AND GAS")
+        self.assertEqual(sector_map["symbols"]["TCS"]["index_symbol"], "NIFTY IT")
+        self.assertEqual(sector_map["unmapped"]["UNKNOWN"]["sector"], "NA")
+        self.assertTrue(sector_map["sector_source_catalog"])
+
+    def test_web_fundamental_context_uses_watchlist_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            watchlist = root / "watchlist.json"
+            watchlist.write_text(
+                """
+                {
+                  "symbols": [
+                    {
+                      "symbol": "ABC",
+                      "fundamentals": {
+                        "roe_percent": 22,
+                        "debt_to_equity": 0.2,
+                        "sales_growth_yoy_percent": 12,
+                        "profit_growth_yoy_percent": 14,
+                        "pledged_percent": 0
+                      }
+                    },
+                    {"symbol": "XYZ", "fundamentals": {}}
+                  ]
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            service = AnalysisService(watchlist_path=watchlist)
+
+            self.assertEqual(service._fundamental_context("ABC")["status"], "analyzed")
+            self.assertGreater(service._fundamental_context("ABC")["score"], 50)
+            self.assertEqual(service._fundamental_context("XYZ")["status"], "missing")
+            self.assertEqual(service._fundamental_context("NIFTY")["status"], "not_applicable")
+
     def test_web_setup_classification_matches_options_action(self) -> None:
         self.assertEqual(classify_setup(70, "bullish", "uptrend")["strategy"], "Sell put option")
         self.assertEqual(classify_setup(30, "bearish", "downtrend")["strategy"], "Sell call option")
@@ -375,6 +424,13 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(_bulk_window_days(["week"], 90), 730)
         self.assertEqual(_bulk_window_days(["day", "60minute"], 90), 90)
 
+    def test_analyze_refresh_preserves_monthly_daily_source_window(self) -> None:
+        window = candle_window(days=200, now=datetime(2026, 6, 17))
+
+        refresh_window = _refresh_window_for_analysis(window, "day")
+
+        self.assertEqual(refresh_window.days, 1460)
+
     def test_entry_trigger_allows_bullish_put_after_confirmations(self) -> None:
         option_chain = self._entry_option_chain(spot_price=105)
         panel = _entry_trigger_panel(
@@ -402,6 +458,66 @@ class AnalysisTests(unittest.TestCase):
 
         self.assertEqual(panel["status"], "Exit/Adjust")
         self.assertTrue(any("below invalidation" in row["detail"] for row in panel["rows"]))
+
+    def test_analysis_header_shows_symbol_time_price_and_source(self) -> None:
+        candles = [Candle(datetime(2026, 6, 17, 9, 15), 100, 105, 99, 104, 1000)]
+        header = _analysis_header(
+            "NIFTY",
+            "day",
+            candles,
+            SimpleNamespace(close=104),
+            SimpleNamespace(spot_price=105.5),
+        )
+
+        self.assertEqual(header["symbol"], "NIFTY")
+        self.assertEqual(header["instrument_type"], "index")
+        self.assertEqual(header["latest_price"], 105.5)
+        self.assertEqual(header["latest_price_source"], "Zerodha spot quote")
+        self.assertIn("analyzed_at", header)
+
+    def test_entry_context_includes_pullback_tools(self) -> None:
+        candles = [
+            Candle(datetime(2026, 6, 1, 9, 15) + timedelta(minutes=15 * index), 100 + index, 102 + index, 99 + index, 101 + index, 1000 + index)
+            for index in range(60)
+        ]
+
+        context = build_entry_context(
+            chart_candles=candles,
+            daily_candles=candles,
+            intraday_candles=candles,
+            bucket="bullish",
+        )
+
+        zones = {row["zone"] for row in context["rows"]}
+        self.assertIn("Fibonacci retracement", zones)
+        self.assertIn("VWAP", zones)
+        self.assertIn("20 EMA / 50 EMA pullback", zones)
+        self.assertIn("Previous day high/low", zones)
+        self.assertIn("Opening range", zones)
+        self.assertIn("Volume confirmation", zones)
+        self.assertIn(context["status"], {"supportive", "watch", "caution"})
+
+    def test_option_chain_history_prunes_to_latest_five(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            history = root / "option_chain" / "history"
+            buildup = root / "option_chain" / "buildup"
+            history.mkdir(parents=True)
+            buildup.mkdir(parents=True)
+            service = AnalysisService(option_chain_dir=root / "option_chain")
+            for index in range(7):
+                csv_path = history / f"NIFTY_2026-06-30_20260617_09150{index}.csv"
+                json_path = buildup / f"NIFTY_2026-06-30_20260617_09150{index}.json"
+                csv_path.write_text("snapshot_time,symbol\n", encoding="utf-8")
+                json_path.write_text("{}", encoding="utf-8")
+                timestamp = datetime(2026, 6, 17, 9, 15, index).timestamp()
+                os.utime(csv_path, (timestamp, timestamp))
+                os.utime(json_path, (timestamp, timestamp))
+
+            service._prune_option_chain_history("NIFTY", date(2026, 6, 30), 5)
+
+            self.assertEqual(len(list(history.glob("NIFTY_2026-06-30_*.csv"))), 5)
+            self.assertEqual(len(list(buildup.glob("NIFTY_2026-06-30_*.json"))), 5)
 
     def test_timeframe_aliases_and_weekly_resample(self) -> None:
         candles = [

@@ -96,6 +96,10 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         from_date=params.get("from_date", [None])[0] or None,
                         to_date=params.get("to_date", [None])[0] or None,
                         days=_optional_int(params.get("days", [None])[0]),
+                        include_option_chain=params.get("option_chain", ["false"])[0].lower() == "true",
+                        option_chain_limit=_optional_int(params.get("option_chain_limit", [None])[0]) or 5,
+                        expiry=params.get("expiry", [None])[0] or None,
+                        strikes_around=_optional_int(params.get("strikes_around", [None])[0]) or 10,
                     )
                 )
             else:
@@ -136,6 +140,27 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(self.service.fii_dii_activity(refresh=True))
             elif parsed.path == "/api/export-report":
                 self._send_json(self.service.export_report(self._read_json()))
+            elif parsed.path == "/api/option-chain-monitor/start":
+                payload = self._read_json()
+                raw_symbols = payload.get("symbols") or []
+                if isinstance(raw_symbols, str):
+                    symbols = [part.strip() for part in raw_symbols.split(",")]
+                else:
+                    symbols = [str(part).strip() for part in raw_symbols]
+                self._send_json(
+                    self.service.start_option_chain_monitor(
+                        symbols=symbols,
+                        expiry=payload.get("expiry") or None,
+                        interval_minutes=_optional_int(payload.get("interval_minutes")) or 15,
+                        strikes_around=_optional_int(payload.get("strikes_around")) or 10,
+                        all_strikes=bool(payload.get("all_strikes")),
+                        max_snapshots=_optional_int(payload.get("max_snapshots")) or 5,
+                        run_once=bool(payload.get("run_once")),
+                    )
+                )
+            elif parsed.path == "/api/option-chain-monitor/stop":
+                payload = self._read_json()
+                self._send_json(self.service.stop_job(str(payload.get("job_id") or "")))
             else:
                 self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
         except Exception as exc:

@@ -19,414 +19,578 @@
         </div>
       </section>
 
-      <section class="workspace">
-        <aside class="sidebar">
-          <div class="panel auth-panel">
-            <div class="auth-head">
-              <label>Zerodha</label>
-              <span id="zerodhaStatus" class="token-status">checking</span>
-            </div>
-            <div class="auth-actions">
-              <button id="checkZerodhaBtn">Check</button>
-              <a id="zerodhaLoginLink" class="button-link" href="#" target="_blank" rel="noreferrer">Login</a>
-            </div>
-            <label for="zerodhaRedirectUrl">Redirected URL or request token</label>
-            <textarea id="zerodhaRedirectUrl" rows="3" placeholder="Paste the URL containing request_token=..."></textarea>
-            <button id="updateZerodhaTokenBtn" class="full-btn">Update access token</button>
-          </div>
+      <nav class="activity-tabs" aria-label="Decision desk activities">
+        <button class="tab-btn active" data-tab-target="analyze" type="button">Analyze</button>
+        <button class="tab-btn" data-tab-target="scans" type="button">Scans</button>
+        <button class="tab-btn" data-tab-target="data" type="button">Data Ops</button>
+        <button class="tab-btn" data-tab-target="reports" type="button">Reports</button>
+      </nav>
 
-          <div class="panel">
-            <label for="symbolInput">Stock</label>
-            <div class="search-row">
-              <input id="symbolInput" list="symbolList" placeholder="RELIANCE" autocomplete="off" />
-              <button id="analyzeBtn">Analyze</button>
-            </div>
-            <datalist id="symbolList"></datalist>
-            <label for="timeframeSelect">Timeframe</label>
-            <select id="timeframeSelect">
-              <option value="month">Monthly</option>
-              <option value="week">Weekly</option>
-              <option value="day" selected>Daily</option>
-              <option value="60minute">1 hour</option>
-              <option value="15minute">15 min</option>
-            </select>
-            <div class="date-grid">
-              <div>
-                <label for="daysBack">Days</label>
-                <input id="daysBack" type="number" min="1" step="1" placeholder="90" />
-              </div>
-              <div>
-                <label for="toDate">To</label>
-                <input id="toDate" type="date" />
-              </div>
-            </div>
-            <label for="fromDate">From</label>
-            <input id="fromDate" type="date" />
-            <label class="check-row">
-              <input id="refreshToggle" type="checkbox" />
-              Pull latest candles
-            </label>
-            <label class="check-row">
-              <input id="optionChainToggle" type="checkbox" />
-              Option chain
-            </label>
-            <div class="option-controls">
-              <label for="expirySelect">Expiry</label>
-              <select id="expirySelect">
-                <option value="">Nearest expiry</option>
-              </select>
-              <div class="date-grid">
-                <div>
-                  <label for="strikesAround">Strikes</label>
-                  <input id="strikesAround" type="number" min="0" step="1" value="10" />
+      <section class="notes" id="notes"></section>
+
+      <section class="tab-panes">
+        <section id="tab-analyze" class="tab-pane active" data-tab-panel="analyze">
+          <section class="workspace">
+            <aside class="sidebar">
+              <div class="panel">
+                <label for="symbolInput">Stock / Index</label>
+                <div class="search-row">
+                  <input id="symbolInput" list="symbolList" placeholder="NIFTY" autocomplete="off" />
+                  <button id="analyzeBtn">Analyze</button>
                 </div>
-                <label class="check-row compact-check">
-                  <input id="allStrikesToggle" type="checkbox" />
-                  All strikes
-                </label>
-              </div>
-            </div>
-            <label for="previousSnapshotSelect">Compare snapshot</label>
-            <select id="previousSnapshotSelect">
-              <option value="">Auto latest saved snapshot</option>
-            </select>
-            <button id="refreshSnapshotsBtn" class="full-btn">Refresh snapshots</button>
-            <label for="previousSnapshot">Manual snapshot path</label>
-            <input id="previousSnapshot" placeholder="Leave blank for auto latest" />
-            <div id="snapshotStatus" class="mini-status">Snapshot history not loaded</div>
-          </div>
-
-          <div class="panel">
-            <label>Scan</label>
-            <label for="scanTimeframeSelect">Scan timeframe</label>
-            <select id="scanTimeframeSelect">
-              <option value="day" selected>Daily</option>
-              <option value="60minute">1 hour</option>
-              <option value="15minute">15 min</option>
-              <option value="week">Weekly</option>
-              <option value="month">Monthly</option>
-            </select>
-            <div class="date-grid">
-              <div>
-                <label for="scanDays">Days</label>
-                <input id="scanDays" type="number" min="1" step="1" value="90" />
-              </div>
-              <div>
-                <label for="scanLimit">Show</label>
-                <input id="scanLimit" placeholder="all" />
-              </div>
-            </div>
-            <div class="segmented">
-              <button data-scan="bullish">Bullish</button>
-              <button data-scan="bearish">Bearish</button>
-              <button data-scan="neutral">Neutral</button>
-            </div>
-          </div>
-        </aside>
-
-        <section class="content">
-          <section class="summary-grid" id="summaryGrid">
-            <div class="metric">
-              <span>Bias</span>
-              <strong id="biasValue">-</strong>
-            </div>
-            <div class="metric">
-              <span>Score</span>
-              <strong id="scoreValue">-</strong>
-            </div>
-            <div class="metric">
-              <span>Strategy</span>
-              <strong id="strategyValue">-</strong>
-            </div>
-            <div class="metric">
-              <span>Decision</span>
-              <strong id="decisionValue">-</strong>
-            </div>
-          </section>
-
-          <section class="action-strip">
-            <button id="saveReportBtn">Save JSON report</button>
-            <span id="reportStatus">No report saved</span>
-          </section>
-
-          <section class="table-panel">
-            <div class="panel-head">
-              <h2>Score Breakdown</h2>
-              <span id="scoreBreakdownMeta"></span>
-            </div>
-            <div class="score-strip">
-              <div>
-                <span>Base</span>
-                <strong id="scoreBase">-</strong>
-              </div>
-              <div>
-                <span>Component Total</span>
-                <strong id="scoreComponentTotal">-</strong>
-              </div>
-              <div>
-                <span>Raw</span>
-                <strong id="scoreRaw">-</strong>
-              </div>
-              <div>
-                <span>Final</span>
-                <strong id="scoreFinal">-</strong>
-              </div>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Component</th>
-                  <th>Points</th>
-                  <th>Basis</th>
-                </tr>
-              </thead>
-              <tbody id="scoreBreakdownBody"></tbody>
-            </table>
-          </section>
-
-          <section class="ops-grid">
-            <div class="table-panel ops-panel">
-              <div class="panel-head">
-                <h2>Data Maintenance</h2>
-                <span id="bulkMeta"></span>
-              </div>
-              <div class="ops-body">
-                <label>Bulk F&O candles</label>
-                <div class="check-grid">
-                  <label class="check-row compact-check"><input id="bulkMonth" type="checkbox" /> Monthly</label>
-                  <label class="check-row compact-check"><input id="bulkWeek" type="checkbox" /> Weekly</label>
-                  <label class="check-row compact-check"><input id="bulkDay" type="checkbox" checked /> Day</label>
-                  <label class="check-row compact-check"><input id="bulkHour" type="checkbox" checked /> 1 hour</label>
-                  <label class="check-row compact-check"><input id="bulk15" type="checkbox" checked /> 15 min</label>
-                </div>
-                <div class="field-hint">Monthly and weekly use daily candles; selecting them downloads longer daily history.</div>
+                <datalist id="symbolList"></datalist>
+                <label for="timeframeSelect">Timeframe</label>
+                <select id="timeframeSelect">
+                  <option value="month">Monthly</option>
+                  <option value="week">Weekly</option>
+                  <option value="day" selected>Daily</option>
+                  <option value="60minute">1 hour</option>
+                  <option value="15minute">15 min</option>
+                </select>
                 <div class="date-grid">
                   <div>
-                    <label for="bulkDays">Days</label>
-                    <input id="bulkDays" type="number" min="1" step="1" value="90" />
+                    <label for="daysBack">Days</label>
+                    <input id="daysBack" type="number" min="1" step="1" placeholder="90" />
                   </div>
                   <div>
-                    <label for="bulkLimit">Limit</label>
-                    <input id="bulkLimit" type="number" min="1" step="1" placeholder="all" />
+                    <label for="toDate">To</label>
+                    <input id="toDate" type="date" />
                   </div>
                 </div>
-                <button id="bulkDownloadBtn" class="full-btn">Download all F&O candles</button>
-                <div class="progress-shell">
-                  <div id="bulkProgressBar" class="progress-bar"></div>
+                <label for="fromDate">From</label>
+                <input id="fromDate" type="date" />
+                <label class="check-row">
+                  <input id="refreshToggle" type="checkbox" />
+                  Pull latest candles
+                </label>
+                <label class="check-row">
+                  <input id="optionChainToggle" type="checkbox" />
+                  Option chain
+                </label>
+                <div class="option-controls">
+                  <label for="expirySelect">Expiry</label>
+                  <select id="expirySelect">
+                    <option value="">Nearest expiry</option>
+                  </select>
+                  <div class="date-grid">
+                    <div>
+                      <label for="strikesAround">Strikes</label>
+                      <input id="strikesAround" type="number" min="0" step="1" value="10" />
+                    </div>
+                    <label class="check-row compact-check">
+                      <input id="allStrikesToggle" type="checkbox" />
+                      All strikes
+                    </label>
+                  </div>
                 </div>
-                <div id="bulkStatus" class="mini-status">Idle</div>
-                <div id="bulkErrors" class="mini-list"></div>
-
-                <div class="divider"></div>
-                <label for="sectorCsvFile">Sector map CSV</label>
-                <input id="sectorCsvFile" type="file" accept=".csv,text/csv" />
-                <button id="sectorUploadBtn" class="full-btn">Generate sector map</button>
-                <div id="sectorStatus" class="mini-status">Sector map status not loaded</div>
+                <label for="previousSnapshotSelect">Compare snapshot</label>
+                <select id="previousSnapshotSelect">
+                  <option value="">Auto latest saved snapshot</option>
+                </select>
+                <button id="refreshSnapshotsBtn" class="full-btn">Refresh snapshots</button>
+                <label for="previousSnapshot">Manual snapshot path</label>
+                <input id="previousSnapshot" placeholder="Leave blank for auto latest" />
+                <div id="snapshotStatus" class="mini-status">Snapshot history not loaded</div>
               </div>
-            </div>
+            </aside>
 
-            <div class="table-panel ops-panel">
-              <div class="panel-head">
-                <h2>FII/DII Market Flow</h2>
-                <button id="refreshFiiDiiBtn">Refresh</button>
+            <section class="content">
+              <section class="analysis-banner">
+                <div>
+                  <span>Instrument</span>
+                  <strong id="analysisInstrument">-</strong>
+                </div>
+                <div>
+                  <span>Latest Price</span>
+                  <strong id="analysisPrice">-</strong>
+                </div>
+                <div>
+                  <span>Price Time</span>
+                  <strong id="analysisPriceTime">-</strong>
+                </div>
+                <div>
+                  <span>Analyzed At</span>
+                  <strong id="analysisRunTime">-</strong>
+                </div>
+                <div>
+                  <span>Source</span>
+                  <strong id="analysisPriceSource">-</strong>
+                </div>
+              </section>
+
+              <section class="summary-grid" id="summaryGrid">
+                <div class="metric">
+                  <span>Bias</span>
+                  <strong id="biasValue">-</strong>
+                </div>
+                <div class="metric">
+                  <span>Score</span>
+                  <strong id="scoreValue">-</strong>
+                </div>
+                <div class="metric">
+                  <span>Strategy</span>
+                  <strong id="strategyValue">-</strong>
+                </div>
+                <div class="metric">
+                  <span>Decision</span>
+                  <strong id="decisionValue">-</strong>
+                </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Score Breakdown</h2>
+                  <span id="scoreBreakdownMeta"></span>
+                </div>
+                <div class="score-strip">
+                  <div>
+                    <span>Base</span>
+                    <strong id="scoreBase">-</strong>
+                  </div>
+                  <div>
+                    <span>Component Total</span>
+                    <strong id="scoreComponentTotal">-</strong>
+                  </div>
+                  <div>
+                    <span>Raw</span>
+                    <strong id="scoreRaw">-</strong>
+                  </div>
+                  <div>
+                    <span>Final</span>
+                    <strong id="scoreFinal">-</strong>
+                  </div>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Component</th>
+                      <th>Points</th>
+                      <th>Basis</th>
+                    </tr>
+                  </thead>
+                  <tbody id="scoreBreakdownBody"></tbody>
+                </table>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Multi-Timeframe Direction</h2>
+                  <span id="mtfMeta"></span>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Frame</th>
+                      <th>Status</th>
+                      <th>Candles</th>
+                      <th>Close</th>
+                      <th>Trend</th>
+                      <th>Structure</th>
+                      <th>Score</th>
+                      <th>RSI</th>
+                      <th>Volume</th>
+                      <th>Vol x20</th>
+                      <th>Support</th>
+                      <th>Resistance</th>
+                      <th>Invalidation</th>
+                    </tr>
+                  </thead>
+                  <tbody id="mtfBody"></tbody>
+                </table>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Entry Trigger</h2>
+                  <span id="entryTriggerMeta"></span>
+                </div>
+                <div class="entry-trigger-summary">
+                  <span id="entryTriggerStatus" class="status-badge status-wait">Wait</span>
+                  <span id="entryTriggerSummary">Run analysis to load entry triggers.</span>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Factor</th>
+                      <th>Status</th>
+                      <th>Trigger Check</th>
+                    </tr>
+                  </thead>
+                  <tbody id="entryTriggerBody"></tbody>
+                </table>
+                <div class="subsection-title">Candidate strikes</div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Action</th>
+                      <th>Strike</th>
+                      <th>Status</th>
+                      <th>Entry Trigger</th>
+                      <th>Exit / Adjust</th>
+                      <th>Score</th>
+                    </tr>
+                  </thead>
+                  <tbody id="entryCandidateBody"></tbody>
+                </table>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Entry Context</h2>
+                  <span id="entryContextMeta"></span>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Zone</th>
+                      <th>Status</th>
+                      <th>Signal</th>
+                      <th>Level</th>
+                      <th>Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody id="entryContextBody"></tbody>
+                </table>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Option Trade Guide</h2>
+                  <span id="optionGuideMeta"></span>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Action</th>
+                      <th>Strike Zone</th>
+                      <th>Why</th>
+                      <th>Risk Check</th>
+                    </tr>
+                  </thead>
+                  <tbody id="optionGuideBody"></tbody>
+                </table>
+              </section>
+
+              <section class="report-grid">
+                <div class="table-panel">
+                  <div class="panel-head">
+                    <h2>Structure</h2>
+                    <span id="structureMeta"></span>
+                  </div>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Frame</th>
+                        <th>Close</th>
+                        <th>Trend</th>
+                        <th>Structure</th>
+                        <th>Support</th>
+                        <th>Resistance</th>
+                        <th>Invalidation</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody id="structureBody"></tbody>
+                  </table>
+                </div>
+
+                <div class="table-panel">
+                  <div class="panel-head">
+                    <h2>Relative Strength</h2>
+                  </div>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Comparison</th>
+                        <th>Subject</th>
+                        <th>Benchmark</th>
+                        <th>Relative</th>
+                        <th>Label</th>
+                      </tr>
+                    </thead>
+                    <tbody id="rsBody"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Option Chain</h2>
+                  <span id="optionMeta"></span>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Strike</th>
+                      <th>Type</th>
+                      <th>LTP</th>
+                      <th>IV</th>
+                      <th>IV Chg</th>
+                      <th>OI</th>
+                      <th>OI Chg</th>
+                      <th>OI Chg %</th>
+                      <th>Build-up</th>
+                    </tr>
+                  </thead>
+                  <tbody id="optionBody"></tbody>
+                </table>
+              </section>
+            </section>
+          </section>
+        </section>
+
+        <section id="tab-scans" class="tab-pane" data-tab-panel="scans">
+          <section class="workspace">
+            <aside class="sidebar">
+              <div class="panel">
+                <label>Scan</label>
+                <label for="scanTimeframeSelect">Scan timeframe</label>
+                <select id="scanTimeframeSelect">
+                  <option value="day" selected>Daily</option>
+                  <option value="60minute">1 hour</option>
+                  <option value="15minute">15 min</option>
+                  <option value="week">Weekly</option>
+                  <option value="month">Monthly</option>
+                </select>
+                <div class="date-grid">
+                  <div>
+                    <label for="scanDays">Days</label>
+                    <input id="scanDays" type="number" min="1" step="1" value="90" />
+                  </div>
+                  <div>
+                    <label for="scanLimit">Show</label>
+                    <input id="scanLimit" placeholder="all" />
+                  </div>
+                </div>
+                <label class="check-row">
+                  <input id="scanRefreshToggle" type="checkbox" />
+                  Pull latest candles before scan
+                </label>
+                <label class="check-row">
+                  <input id="scanOptionChainToggle" type="checkbox" />
+                  Option chain for top candidates
+                </label>
+                <div class="date-grid">
+                  <div>
+                    <label for="scanOptionChainLimit">OC top</label>
+                    <input id="scanOptionChainLimit" type="number" min="1" step="1" value="5" />
+                  </div>
+                  <div>
+                    <label for="scanStrikesAround">Strikes</label>
+                    <input id="scanStrikesAround" type="number" min="0" step="1" value="10" />
+                  </div>
+                </div>
+                <label for="scanExpiry">Option expiry</label>
+                <input id="scanExpiry" type="date" />
+                <div class="segmented">
+                  <button data-scan="bullish">Bullish</button>
+                  <button data-scan="bearish">Bearish</button>
+                  <button data-scan="neutral">Neutral</button>
+                </div>
               </div>
-              <table>
-                <thead id="fiiDiiHead"></thead>
-                <tbody id="fiiDiiBody"></tbody>
-              </table>
-              <div id="fiiDiiStatus" class="mini-status">No market-flow data loaded</div>
-            </div>
-          </section>
+            </aside>
 
-          <section class="table-panel">
-            <div class="panel-head">
-              <h2>Multi-Timeframe Direction</h2>
-              <span id="mtfMeta"></span>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Frame</th>
-                  <th>Status</th>
-                  <th>Candles</th>
-                  <th>Close</th>
-                  <th>Trend</th>
-                  <th>Structure</th>
-                  <th>Score</th>
-                  <th>RSI</th>
-                  <th>Volume</th>
-                  <th>Vol x20</th>
-                  <th>Support</th>
-                  <th>Resistance</th>
-                  <th>Invalidation</th>
-                </tr>
-              </thead>
-              <tbody id="mtfBody"></tbody>
-            </table>
-          </section>
+            <section class="content">
+              <section class="activity-hero">
+                <div>
+                  <h2>Opportunity Scans</h2>
+                  <p>Review bullish, bearish, and neutral candidates from the F&O universe.</p>
+                </div>
+                <span id="scanMeta"></span>
+              </section>
 
-          <section class="table-panel">
-            <div class="panel-head">
-              <h2>Entry Trigger</h2>
-              <span id="entryTriggerMeta"></span>
-            </div>
-            <div class="entry-trigger-summary">
-              <span id="entryTriggerStatus" class="status-badge status-wait">Wait</span>
-              <span id="entryTriggerSummary">Run analysis to load entry triggers.</span>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Factor</th>
-                  <th>Status</th>
-                  <th>Trigger Check</th>
-                </tr>
-              </thead>
-              <tbody id="entryTriggerBody"></tbody>
-            </table>
-            <div class="subsection-title">Candidate strikes</div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Action</th>
-                  <th>Strike</th>
-                  <th>Status</th>
-                  <th>Entry Trigger</th>
-                  <th>Exit / Adjust</th>
-                  <th>Score</th>
-                </tr>
-              </thead>
-              <tbody id="entryCandidateBody"></tbody>
-            </table>
-          </section>
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Scan Progress & Data Used</h2>
+                  <span id="scanProgressMeta">Idle</span>
+                </div>
+                <div class="ops-body">
+                  <div class="progress-shell">
+                    <div id="scanProgressBar" class="progress-bar"></div>
+                  </div>
+                  <div id="scanProgressStatus" class="mini-status">Choose Bullish, Bearish, or Neutral to scan cached F&O candle data.</div>
+                  <div id="scanSummaryCards" class="compact-metrics"></div>
+                  <div id="scanSummaryPoints" class="mini-list"></div>
+                </div>
+              </section>
 
-          <section class="table-panel">
-            <div class="panel-head">
-              <h2>Option Trade Guide</h2>
-              <span id="optionGuideMeta"></span>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Action</th>
-                  <th>Strike Zone</th>
-                  <th>Why</th>
-                  <th>Risk Check</th>
-                </tr>
-              </thead>
-              <tbody id="optionGuideBody"></tbody>
-            </table>
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2 id="scanTitle">Candidates</h2>
+                  <span></span>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Symbol</th>
+                      <th>Score</th>
+                      <th>Bias</th>
+                      <th>Strategy</th>
+                      <th>Close</th>
+                      <th>Trend</th>
+                      <th>Support</th>
+                      <th>Resistance</th>
+                      <th>Option Zone</th>
+                      <th>Option Chain</th>
+                      <th>RS</th>
+                    </tr>
+                  </thead>
+                  <tbody id="scanBody"></tbody>
+                </table>
+              </section>
+            </section>
           </section>
+        </section>
 
-          <section class="table-panel">
-            <div class="panel-head">
-              <h2>Analysis Coverage</h2>
-              <span id="coverageMeta"></span>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Data</th>
-                  <th>Status</th>
-                  <th>What happened</th>
-                  <th>Source</th>
-                </tr>
-              </thead>
-              <tbody id="coverageBody"></tbody>
-            </table>
+        <section id="tab-data" class="tab-pane" data-tab-panel="data">
+          <section class="workspace">
+            <aside class="sidebar">
+              <div class="panel auth-panel">
+                <div class="auth-head">
+                  <label>Zerodha</label>
+                  <span id="zerodhaStatus" class="token-status">checking</span>
+                </div>
+                <div class="auth-actions">
+                  <button id="checkZerodhaBtn">Check</button>
+                  <a id="zerodhaLoginLink" class="button-link" href="#" target="_blank" rel="noreferrer">Login</a>
+                </div>
+                <label for="zerodhaRedirectUrl">Redirected URL or request token</label>
+                <textarea id="zerodhaRedirectUrl" rows="3" placeholder="Paste the URL containing request_token=..."></textarea>
+                <button id="updateZerodhaTokenBtn" class="full-btn">Update access token</button>
+              </div>
+            </aside>
+
+            <section class="content">
+              <section class="ops-grid">
+                <div class="table-panel ops-panel">
+                  <div class="panel-head">
+                    <h2>Data Maintenance</h2>
+                    <span id="bulkMeta"></span>
+                  </div>
+                  <div class="ops-body">
+                    <label>Bulk F&O candles</label>
+                    <div class="check-grid">
+                      <label class="check-row compact-check"><input id="bulkMonth" type="checkbox" checked /> Monthly</label>
+                      <label class="check-row compact-check"><input id="bulkWeek" type="checkbox" checked /> Weekly</label>
+                      <label class="check-row compact-check"><input id="bulkDay" type="checkbox" checked /> Day</label>
+                      <label class="check-row compact-check"><input id="bulkHour" type="checkbox" checked /> 1 hour</label>
+                      <label class="check-row compact-check"><input id="bulk15" type="checkbox" checked /> 15 min</label>
+                    </div>
+                    <div class="field-hint">Monthly and weekly are derived from daily candles. Keep 1460 days selected for valid monthly MTF analysis.</div>
+                    <div class="date-grid">
+                      <div>
+                        <label for="bulkDays">Days</label>
+                        <input id="bulkDays" type="number" min="1" step="1" value="1460" />
+                      </div>
+                      <div>
+                        <label for="bulkLimit">Limit</label>
+                        <input id="bulkLimit" type="number" min="1" step="1" placeholder="all" />
+                      </div>
+                    </div>
+                    <button id="bulkDownloadBtn" class="full-btn">Download all F&O candles</button>
+                    <div class="progress-shell">
+                      <div id="bulkProgressBar" class="progress-bar"></div>
+                    </div>
+                    <div id="bulkStatus" class="mini-status">Idle</div>
+                    <div id="bulkErrors" class="mini-list"></div>
+
+                    <div class="divider"></div>
+                    <label for="sectorCsvFile">Sector map CSV</label>
+                    <input id="sectorCsvFile" type="file" accept=".csv,text/csv" />
+                    <button id="sectorUploadBtn" class="full-btn">Generate sector map</button>
+                    <div id="sectorStatus" class="mini-status">Sector map status not loaded</div>
+                  </div>
+                </div>
+
+                <div class="table-panel ops-panel">
+                  <div class="panel-head">
+                    <h2>FII/DII Market Flow</h2>
+                    <button id="refreshFiiDiiBtn">Refresh</button>
+                  </div>
+                  <table>
+                    <thead id="fiiDiiHead"></thead>
+                    <tbody id="fiiDiiBody"></tbody>
+                  </table>
+                  <div id="fiiDiiStatus" class="mini-status">No market-flow data loaded</div>
+                </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>15-min Option Chain Monitor</h2>
+                  <span id="optionMonitorMeta">Idle</span>
+                </div>
+                <div class="ops-body">
+                  <div class="date-grid">
+                    <div>
+                      <label for="optionMonitorSymbols">Stocks / indexes</label>
+                      <input id="optionMonitorSymbols" placeholder="NIFTY, BANKNIFTY, RELIANCE" />
+                    </div>
+                    <div>
+                      <label for="optionMonitorExpiry">Expiry</label>
+                      <input id="optionMonitorExpiry" type="date" />
+                    </div>
+                  </div>
+                  <div class="date-grid">
+                    <div>
+                      <label for="optionMonitorInterval">Interval minutes</label>
+                      <input id="optionMonitorInterval" type="number" min="1" step="1" value="15" />
+                    </div>
+                    <div>
+                      <label for="optionMonitorKeep">Keep snapshots</label>
+                      <input id="optionMonitorKeep" type="number" min="1" step="1" value="5" />
+                    </div>
+                  </div>
+                  <div class="date-grid">
+                    <div>
+                      <label for="optionMonitorStrikes">Strikes around spot</label>
+                      <input id="optionMonitorStrikes" type="number" min="0" step="1" value="10" />
+                    </div>
+                    <label class="check-row compact-check">
+                      <input id="optionMonitorRunOnce" type="checkbox" />
+                      Pull once now
+                    </label>
+                  </div>
+                  <div class="auth-actions">
+                    <button id="startOptionMonitorBtn">Start monitor</button>
+                    <button id="stopOptionMonitorBtn">Stop monitor</button>
+                  </div>
+                  <div id="optionMonitorStatus" class="mini-status">Stores timestamped snapshots and build-up analysis under data\raw\option_chain.</div>
+                  <div id="optionMonitorResults" class="mini-list"></div>
+                </div>
+              </section>
+            </section>
           </section>
+        </section>
 
-          <section class="report-grid">
-            <div class="table-panel">
+        <section id="tab-reports" class="tab-pane" data-tab-panel="reports">
+          <section class="content full-content">
+            <section class="action-strip">
+              <button id="saveReportBtn">Save JSON report</button>
+              <span id="reportStatus">No report saved</span>
+            </section>
+
+            <section class="table-panel">
               <div class="panel-head">
-                <h2>Structure</h2>
-                <span id="structureMeta"></span>
+                <h2>Analysis Coverage</h2>
+                <span id="coverageMeta"></span>
               </div>
               <table>
                 <thead>
                   <tr>
-                  <th>Frame</th>
-                  <th>Close</th>
-                    <th>Trend</th>
-                    <th>Structure</th>
-                    <th>Support</th>
-                    <th>Resistance</th>
-                    <th>Invalidation</th>
+                    <th>Data</th>
+                    <th>Status</th>
+                    <th>What happened</th>
+                    <th>Source</th>
                   </tr>
                 </thead>
-                <tbody id="structureBody"></tbody>
+                <tbody id="coverageBody"></tbody>
               </table>
-            </div>
-
-            <div class="table-panel">
-              <div class="panel-head">
-                <h2>Relative Strength</h2>
-              </div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Comparison</th>
-                    <th>Subject</th>
-                    <th>Benchmark</th>
-                    <th>Relative</th>
-                    <th>Label</th>
-                  </tr>
-                </thead>
-                <tbody id="rsBody"></tbody>
-              </table>
-            </div>
+            </section>
           </section>
-
-          <section class="table-panel">
-            <div class="panel-head">
-              <h2 id="scanTitle">Candidates</h2>
-              <span id="scanMeta"></span>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th>Score</th>
-                  <th>Bias</th>
-                  <th>Strategy</th>
-                  <th>Close</th>
-                  <th>Trend</th>
-                  <th>Support</th>
-                  <th>Resistance</th>
-                  <th>Option Zone</th>
-                  <th>RS</th>
-                </tr>
-              </thead>
-              <tbody id="scanBody"></tbody>
-            </table>
-          </section>
-
-          <section class="table-panel">
-            <div class="panel-head">
-              <h2>Option Chain</h2>
-              <span id="optionMeta"></span>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Strike</th>
-                  <th>Type</th>
-                  <th>LTP</th>
-                  <th>IV</th>
-                  <th>IV Chg</th>
-                  <th>OI</th>
-                  <th>OI Chg</th>
-                  <th>OI Chg %</th>
-                  <th>Build-up</th>
-                </tr>
-              </thead>
-              <tbody id="optionBody"></tbody>
-            </table>
-          </section>
-
-          <section class="notes" id="notes"></section>
         </section>
       </section>
+
     </main>
     <script src="/app.js"></script>
   </body>

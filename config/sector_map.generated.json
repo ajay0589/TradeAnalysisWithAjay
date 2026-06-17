@@ -1,0 +1,1724 @@
+{
+  "generated_on": "2026-06-17",
+  "source": "Nifty Indices sectoral catalog + built-in F&O symbol overrides + built-in missing-symbol fallback",
+  "sector_source_catalog": [
+    {
+      "index_symbol": "NIFTY AUTO",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    {
+      "index_symbol": "NIFTY BANK",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-bank"
+    },
+    {
+      "index_symbol": "NIFTY INFRA",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    {
+      "index_symbol": "NIFTY INFRA",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-capital-goods"
+    },
+    {
+      "index_symbol": "NIFTY CHEMICALS",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-chemicals"
+    },
+    {
+      "index_symbol": "NIFTY TRANS LOGIS",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-commercial-transport-services"
+    },
+    {
+      "index_symbol": "NIFTY INFRA",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-construction"
+    },
+    {
+      "index_symbol": "NIFTY CONSUMPTION",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-services"
+    },
+    {
+      "index_symbol": "NIFTY FIN SERVICE",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    {
+      "index_symbol": "NIFTY FINSRV25 50",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services-25-50-index"
+    },
+    {
+      "index_symbol": "NIFTY FINSEREXBNK",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services-ex-bank"
+    },
+    {
+      "index_symbol": "NIFTY FMCG",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-fmcg"
+    },
+    {
+      "index_symbol": "NIFTY HEALTHCARE",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-healthcare-index"
+    },
+    {
+      "index_symbol": "NIFTY HEALTHCARE",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-hospitals"
+    },
+    {
+      "index_symbol": "NIFTY HOUSING",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-housing-finance"
+    },
+    {
+      "index_symbol": "NIFTY FIN SERVICE",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-insurance"
+    },
+    {
+      "index_symbol": "NIFTY IT",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-it"
+    },
+    {
+      "index_symbol": "NIFTY MEDIA",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-media"
+    },
+    {
+      "index_symbol": "NIFTY METAL",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-metal"
+    },
+    {
+      "index_symbol": "NIFTY FIN SERVICE",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-nbfc"
+    },
+    {
+      "index_symbol": "NIFTY PHARMA",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-pharma"
+    },
+    {
+      "index_symbol": "NIFTY ENERGY",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-power"
+    },
+    {
+      "index_symbol": "NIFTY PVT BANK",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-private-bank"
+    },
+    {
+      "index_symbol": "NIFTY PSU BANK",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-psu-bank"
+    },
+    {
+      "index_symbol": "NIFTY REALTY",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-realty"
+    },
+    {
+      "index_symbol": "NIFTY REALTY",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-reits-realty"
+    },
+    {
+      "index_symbol": "NIFTY CONSUMPTION",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-retail"
+    },
+    {
+      "index_symbol": "NIFTY SERV SECTOR",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-telecommunications"
+    },
+    {
+      "index_symbol": "NIFTY CONSR DURBL",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-durables-index"
+    },
+    {
+      "index_symbol": "NIFTY OIL AND GAS",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-oil-and-gas-index"
+    },
+    {
+      "index_symbol": "NIFTY500 HEALTH",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty500-healthcare"
+    },
+    {
+      "index_symbol": "NIFTY MS FIN SERV",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-midsmall-financial-services"
+    },
+    {
+      "index_symbol": "NIFTY MIDSML HLTH",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-midsmall-healthcare"
+    },
+    {
+      "index_symbol": "NIFTY MS IT TELCM",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-midsmall-it-telecom"
+    }
+  ],
+  "sectors": {
+    "NIFTY AUTO": {
+      "index_symbol": "NIFTY AUTO",
+      "data_file": "NIFTY_AUTO.csv",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    "NIFTY CAPITAL MKT": {
+      "index_symbol": "NIFTY CAPITAL MKT",
+      "data_file": "NIFTY_CAPITAL_MKT.csv",
+      "source_url": ""
+    },
+    "NIFTY CHEMICALS": {
+      "index_symbol": "NIFTY CHEMICALS",
+      "data_file": "NIFTY_CHEMICALS.csv",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-chemicals"
+    },
+    "NIFTY COMMODITIES": {
+      "index_symbol": "NIFTY COMMODITIES",
+      "data_file": "NIFTY_COMMODITIES.csv",
+      "source_url": ""
+    },
+    "NIFTY CONSR DURBL": {
+      "index_symbol": "NIFTY CONSR DURBL",
+      "data_file": "NIFTY_CONSR_DURBL.csv",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-durables-index"
+    },
+    "NIFTY CONSUMPTION": {
+      "index_symbol": "NIFTY CONSUMPTION",
+      "data_file": "NIFTY_CONSUMPTION.csv",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-services"
+    },
+    "NIFTY ENERGY": {
+      "index_symbol": "NIFTY ENERGY",
+      "data_file": "NIFTY_ENERGY.csv",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-power"
+    },
+    "NIFTY FIN SERVICE": {
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "NIFTY FMCG": {
+      "index_symbol": "NIFTY FMCG",
+      "data_file": "NIFTY_FMCG.csv",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-fmcg"
+    },
+    "NIFTY HEALTHCARE": {
+      "index_symbol": "NIFTY HEALTHCARE",
+      "data_file": "NIFTY_HEALTHCARE.csv",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-healthcare-index"
+    },
+    "NIFTY INFRA": {
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "NIFTY IT": {
+      "index_symbol": "NIFTY IT",
+      "data_file": "NIFTY_IT.csv",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-it"
+    },
+    "NIFTY METAL": {
+      "index_symbol": "NIFTY METAL",
+      "data_file": "NIFTY_METAL.csv",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-metal"
+    },
+    "NIFTY OIL AND GAS": {
+      "index_symbol": "NIFTY OIL AND GAS",
+      "data_file": "NIFTY_OIL_AND_GAS.csv",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-oil-and-gas-index"
+    },
+    "NIFTY PHARMA": {
+      "index_symbol": "NIFTY PHARMA",
+      "data_file": "NIFTY_PHARMA.csv",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-pharma"
+    },
+    "NIFTY PSU BANK": {
+      "index_symbol": "NIFTY PSU BANK",
+      "data_file": "NIFTY_PSU_BANK.csv",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-psu-bank"
+    },
+    "NIFTY PVT BANK": {
+      "index_symbol": "NIFTY PVT BANK",
+      "data_file": "NIFTY_PVT_BANK.csv",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-private-bank"
+    },
+    "NIFTY REALTY": {
+      "index_symbol": "NIFTY REALTY",
+      "data_file": "NIFTY_REALTY.csv",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-realty"
+    },
+    "NIFTY SERV SECTOR": {
+      "index_symbol": "NIFTY SERV SECTOR",
+      "data_file": "NIFTY_SERV_SECTOR.csv",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-telecommunications"
+    },
+    "NIFTY TRANS LOGIS": {
+      "index_symbol": "NIFTY TRANS LOGIS",
+      "data_file": "NIFTY_TRANS_LOGIS.csv",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-commercial-transport-services"
+    }
+  },
+  "symbols": {
+    "360ONE": {
+      "sector": "NIFTY CAPITAL MKT",
+      "index_symbol": "NIFTY CAPITAL MKT",
+      "data_file": "NIFTY_CAPITAL_MKT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": ""
+    },
+    "ABB": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "ABCAPITAL": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "ADANIENSOL": {
+      "sector": "NIFTY ENERGY",
+      "index_symbol": "NIFTY ENERGY",
+      "data_file": "NIFTY_ENERGY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-power"
+    },
+    "ADANIENT": {
+      "sector": "NIFTY COMMODITIES",
+      "index_symbol": "NIFTY COMMODITIES",
+      "data_file": "NIFTY_COMMODITIES.csv",
+      "source": "built-in F&O sector override",
+      "source_url": ""
+    },
+    "ADANIGREEN": {
+      "sector": "NIFTY ENERGY",
+      "index_symbol": "NIFTY ENERGY",
+      "data_file": "NIFTY_ENERGY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-power"
+    },
+    "ADANIPORTS": {
+      "sector": "NIFTY TRANS LOGIS",
+      "index_symbol": "NIFTY TRANS LOGIS",
+      "data_file": "NIFTY_TRANS_LOGIS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-commercial-transport-services"
+    },
+    "ADANIPOWER": {
+      "sector": "NIFTY ENERGY",
+      "index_symbol": "NIFTY ENERGY",
+      "data_file": "NIFTY_ENERGY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-power"
+    },
+    "ALKEM": {
+      "sector": "NIFTY PHARMA",
+      "index_symbol": "NIFTY PHARMA",
+      "data_file": "NIFTY_PHARMA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-pharma"
+    },
+    "AMBER": {
+      "sector": "NIFTY CONSR DURBL",
+      "index_symbol": "NIFTY CONSR DURBL",
+      "data_file": "NIFTY_CONSR_DURBL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-durables-index"
+    },
+    "AMBUJACEM": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "ANGELONE": {
+      "sector": "NIFTY CAPITAL MKT",
+      "index_symbol": "NIFTY CAPITAL MKT",
+      "data_file": "NIFTY_CAPITAL_MKT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": ""
+    },
+    "APLAPOLLO": {
+      "sector": "NIFTY METAL",
+      "index_symbol": "NIFTY METAL",
+      "data_file": "NIFTY_METAL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-metal"
+    },
+    "APOLLOHOSP": {
+      "sector": "NIFTY HEALTHCARE",
+      "index_symbol": "NIFTY HEALTHCARE",
+      "data_file": "NIFTY_HEALTHCARE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-healthcare-index"
+    },
+    "ASHOKLEY": {
+      "sector": "NIFTY AUTO",
+      "index_symbol": "NIFTY AUTO",
+      "data_file": "NIFTY_AUTO.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    "ASIANPAINT": {
+      "sector": "NIFTY CONSR DURBL",
+      "index_symbol": "NIFTY CONSR DURBL",
+      "data_file": "NIFTY_CONSR_DURBL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-durables-index"
+    },
+    "ASTRAL": {
+      "sector": "NIFTY CHEMICALS",
+      "index_symbol": "NIFTY CHEMICALS",
+      "data_file": "NIFTY_CHEMICALS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-chemicals"
+    },
+    "AUBANK": {
+      "sector": "NIFTY PVT BANK",
+      "index_symbol": "NIFTY PVT BANK",
+      "data_file": "NIFTY_PVT_BANK.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-private-bank"
+    },
+    "AUROPHARMA": {
+      "sector": "NIFTY PHARMA",
+      "index_symbol": "NIFTY PHARMA",
+      "data_file": "NIFTY_PHARMA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-pharma"
+    },
+    "AXISBANK": {
+      "sector": "NIFTY PVT BANK",
+      "index_symbol": "NIFTY PVT BANK",
+      "data_file": "NIFTY_PVT_BANK.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-private-bank"
+    },
+    "BAJAJ-AUTO": {
+      "sector": "NIFTY AUTO",
+      "index_symbol": "NIFTY AUTO",
+      "data_file": "NIFTY_AUTO.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    "BAJAJFINSV": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "BAJAJHLDNG": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "BAJFINANCE": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "BANDHANBNK": {
+      "sector": "NIFTY PVT BANK",
+      "index_symbol": "NIFTY PVT BANK",
+      "data_file": "NIFTY_PVT_BANK.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-private-bank"
+    },
+    "BANKBARODA": {
+      "sector": "NIFTY PSU BANK",
+      "index_symbol": "NIFTY PSU BANK",
+      "data_file": "NIFTY_PSU_BANK.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-psu-bank"
+    },
+    "BANKINDIA": {
+      "sector": "NIFTY PSU BANK",
+      "index_symbol": "NIFTY PSU BANK",
+      "data_file": "NIFTY_PSU_BANK.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-psu-bank"
+    },
+    "BDL": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "BEL": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "BHARATFORG": {
+      "sector": "NIFTY AUTO",
+      "index_symbol": "NIFTY AUTO",
+      "data_file": "NIFTY_AUTO.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    "BHARTIARTL": {
+      "sector": "NIFTY SERV SECTOR",
+      "index_symbol": "NIFTY SERV SECTOR",
+      "data_file": "NIFTY_SERV_SECTOR.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-telecommunications"
+    },
+    "BHEL": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "BIOCON": {
+      "sector": "NIFTY PHARMA",
+      "index_symbol": "NIFTY PHARMA",
+      "data_file": "NIFTY_PHARMA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-pharma"
+    },
+    "BLUESTARCO": {
+      "sector": "NIFTY CONSR DURBL",
+      "index_symbol": "NIFTY CONSR DURBL",
+      "data_file": "NIFTY_CONSR_DURBL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-durables-index"
+    },
+    "BOSCHLTD": {
+      "sector": "NIFTY AUTO",
+      "index_symbol": "NIFTY AUTO",
+      "data_file": "NIFTY_AUTO.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    "BPCL": {
+      "sector": "NIFTY OIL AND GAS",
+      "index_symbol": "NIFTY OIL AND GAS",
+      "data_file": "NIFTY_OIL_AND_GAS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-oil-and-gas-index"
+    },
+    "BRITANNIA": {
+      "sector": "NIFTY FMCG",
+      "index_symbol": "NIFTY FMCG",
+      "data_file": "NIFTY_FMCG.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-fmcg"
+    },
+    "BSE": {
+      "sector": "NIFTY CAPITAL MKT",
+      "index_symbol": "NIFTY CAPITAL MKT",
+      "data_file": "NIFTY_CAPITAL_MKT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": ""
+    },
+    "CAMS": {
+      "sector": "NIFTY CAPITAL MKT",
+      "index_symbol": "NIFTY CAPITAL MKT",
+      "data_file": "NIFTY_CAPITAL_MKT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": ""
+    },
+    "CANBK": {
+      "sector": "NIFTY PSU BANK",
+      "index_symbol": "NIFTY PSU BANK",
+      "data_file": "NIFTY_PSU_BANK.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-psu-bank"
+    },
+    "CDSL": {
+      "sector": "NIFTY CAPITAL MKT",
+      "index_symbol": "NIFTY CAPITAL MKT",
+      "data_file": "NIFTY_CAPITAL_MKT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": ""
+    },
+    "CGPOWER": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "CHOLAFIN": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "CIPLA": {
+      "sector": "NIFTY PHARMA",
+      "index_symbol": "NIFTY PHARMA",
+      "data_file": "NIFTY_PHARMA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-pharma"
+    },
+    "COALINDIA": {
+      "sector": "NIFTY COMMODITIES",
+      "index_symbol": "NIFTY COMMODITIES",
+      "data_file": "NIFTY_COMMODITIES.csv",
+      "source": "built-in F&O sector override",
+      "source_url": ""
+    },
+    "COCHINSHIP": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "COFORGE": {
+      "sector": "NIFTY IT",
+      "index_symbol": "NIFTY IT",
+      "data_file": "NIFTY_IT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-it"
+    },
+    "COLPAL": {
+      "sector": "NIFTY FMCG",
+      "index_symbol": "NIFTY FMCG",
+      "data_file": "NIFTY_FMCG.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-fmcg"
+    },
+    "CONCOR": {
+      "sector": "NIFTY TRANS LOGIS",
+      "index_symbol": "NIFTY TRANS LOGIS",
+      "data_file": "NIFTY_TRANS_LOGIS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-commercial-transport-services"
+    },
+    "CROMPTON": {
+      "sector": "NIFTY CONSR DURBL",
+      "index_symbol": "NIFTY CONSR DURBL",
+      "data_file": "NIFTY_CONSR_DURBL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-durables-index"
+    },
+    "CUMMINSIND": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "DABUR": {
+      "sector": "NIFTY FMCG",
+      "index_symbol": "NIFTY FMCG",
+      "data_file": "NIFTY_FMCG.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-fmcg"
+    },
+    "DALBHARAT": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "DELHIVERY": {
+      "sector": "NIFTY TRANS LOGIS",
+      "index_symbol": "NIFTY TRANS LOGIS",
+      "data_file": "NIFTY_TRANS_LOGIS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-commercial-transport-services"
+    },
+    "DIVISLAB": {
+      "sector": "NIFTY PHARMA",
+      "index_symbol": "NIFTY PHARMA",
+      "data_file": "NIFTY_PHARMA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-pharma"
+    },
+    "DIXON": {
+      "sector": "NIFTY CONSR DURBL",
+      "index_symbol": "NIFTY CONSR DURBL",
+      "data_file": "NIFTY_CONSR_DURBL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-durables-index"
+    },
+    "DLF": {
+      "sector": "NIFTY REALTY",
+      "index_symbol": "NIFTY REALTY",
+      "data_file": "NIFTY_REALTY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-realty"
+    },
+    "DMART": {
+      "sector": "NIFTY CONSUMPTION",
+      "index_symbol": "NIFTY CONSUMPTION",
+      "data_file": "NIFTY_CONSUMPTION.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-services"
+    },
+    "DRREDDY": {
+      "sector": "NIFTY PHARMA",
+      "index_symbol": "NIFTY PHARMA",
+      "data_file": "NIFTY_PHARMA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-pharma"
+    },
+    "EICHERMOT": {
+      "sector": "NIFTY AUTO",
+      "index_symbol": "NIFTY AUTO",
+      "data_file": "NIFTY_AUTO.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    "ETERNAL": {
+      "sector": "NIFTY CONSUMPTION",
+      "index_symbol": "NIFTY CONSUMPTION",
+      "data_file": "NIFTY_CONSUMPTION.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-services"
+    },
+    "EXIDEIND": {
+      "sector": "NIFTY AUTO",
+      "index_symbol": "NIFTY AUTO",
+      "data_file": "NIFTY_AUTO.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    "FEDERALBNK": {
+      "sector": "NIFTY PVT BANK",
+      "index_symbol": "NIFTY PVT BANK",
+      "data_file": "NIFTY_PVT_BANK.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-private-bank"
+    },
+    "FORCEMOT": {
+      "sector": "NIFTY AUTO",
+      "index_symbol": "NIFTY AUTO",
+      "data_file": "NIFTY_AUTO.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    "FORTIS": {
+      "sector": "NIFTY HEALTHCARE",
+      "index_symbol": "NIFTY HEALTHCARE",
+      "data_file": "NIFTY_HEALTHCARE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-healthcare-index"
+    },
+    "GAIL": {
+      "sector": "NIFTY OIL AND GAS",
+      "index_symbol": "NIFTY OIL AND GAS",
+      "data_file": "NIFTY_OIL_AND_GAS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-oil-and-gas-index"
+    },
+    "GLENMARK": {
+      "sector": "NIFTY PHARMA",
+      "index_symbol": "NIFTY PHARMA",
+      "data_file": "NIFTY_PHARMA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-pharma"
+    },
+    "GMRAIRPORT": {
+      "sector": "NIFTY TRANS LOGIS",
+      "index_symbol": "NIFTY TRANS LOGIS",
+      "data_file": "NIFTY_TRANS_LOGIS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-commercial-transport-services"
+    },
+    "GODFRYPHLP": {
+      "sector": "NIFTY FMCG",
+      "index_symbol": "NIFTY FMCG",
+      "data_file": "NIFTY_FMCG.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-fmcg"
+    },
+    "GODREJCP": {
+      "sector": "NIFTY FMCG",
+      "index_symbol": "NIFTY FMCG",
+      "data_file": "NIFTY_FMCG.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-fmcg"
+    },
+    "GODREJPROP": {
+      "sector": "NIFTY REALTY",
+      "index_symbol": "NIFTY REALTY",
+      "data_file": "NIFTY_REALTY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-realty"
+    },
+    "GRASIM": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "GVT&D": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "HAL": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "HAVELLS": {
+      "sector": "NIFTY CONSR DURBL",
+      "index_symbol": "NIFTY CONSR DURBL",
+      "data_file": "NIFTY_CONSR_DURBL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-durables-index"
+    },
+    "HCLTECH": {
+      "sector": "NIFTY IT",
+      "index_symbol": "NIFTY IT",
+      "data_file": "NIFTY_IT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-it"
+    },
+    "HDFCAMC": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "HDFCBANK": {
+      "sector": "NIFTY PVT BANK",
+      "index_symbol": "NIFTY PVT BANK",
+      "data_file": "NIFTY_PVT_BANK.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-private-bank"
+    },
+    "HDFCLIFE": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "HEROMOTOCO": {
+      "sector": "NIFTY AUTO",
+      "index_symbol": "NIFTY AUTO",
+      "data_file": "NIFTY_AUTO.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    "HINDALCO": {
+      "sector": "NIFTY METAL",
+      "index_symbol": "NIFTY METAL",
+      "data_file": "NIFTY_METAL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-metal"
+    },
+    "HINDPETRO": {
+      "sector": "NIFTY OIL AND GAS",
+      "index_symbol": "NIFTY OIL AND GAS",
+      "data_file": "NIFTY_OIL_AND_GAS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-oil-and-gas-index"
+    },
+    "HINDUNILVR": {
+      "sector": "NIFTY FMCG",
+      "index_symbol": "NIFTY FMCG",
+      "data_file": "NIFTY_FMCG.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-fmcg"
+    },
+    "HINDZINC": {
+      "sector": "NIFTY METAL",
+      "index_symbol": "NIFTY METAL",
+      "data_file": "NIFTY_METAL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-metal"
+    },
+    "HYUNDAI": {
+      "sector": "NIFTY AUTO",
+      "index_symbol": "NIFTY AUTO",
+      "data_file": "NIFTY_AUTO.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    "ICICIBANK": {
+      "sector": "NIFTY PVT BANK",
+      "index_symbol": "NIFTY PVT BANK",
+      "data_file": "NIFTY_PVT_BANK.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-private-bank"
+    },
+    "ICICIGI": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "ICICIPRULI": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "IDEA": {
+      "sector": "NIFTY SERV SECTOR",
+      "index_symbol": "NIFTY SERV SECTOR",
+      "data_file": "NIFTY_SERV_SECTOR.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-telecommunications"
+    },
+    "IDFCFIRSTB": {
+      "sector": "NIFTY PVT BANK",
+      "index_symbol": "NIFTY PVT BANK",
+      "data_file": "NIFTY_PVT_BANK.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-private-bank"
+    },
+    "IEX": {
+      "sector": "NIFTY CAPITAL MKT",
+      "index_symbol": "NIFTY CAPITAL MKT",
+      "data_file": "NIFTY_CAPITAL_MKT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": ""
+    },
+    "INDHOTEL": {
+      "sector": "NIFTY CONSUMPTION",
+      "index_symbol": "NIFTY CONSUMPTION",
+      "data_file": "NIFTY_CONSUMPTION.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-services"
+    },
+    "INDIANB": {
+      "sector": "NIFTY PSU BANK",
+      "index_symbol": "NIFTY PSU BANK",
+      "data_file": "NIFTY_PSU_BANK.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-psu-bank"
+    },
+    "INDIGO": {
+      "sector": "NIFTY TRANS LOGIS",
+      "index_symbol": "NIFTY TRANS LOGIS",
+      "data_file": "NIFTY_TRANS_LOGIS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-commercial-transport-services"
+    },
+    "INDUSINDBK": {
+      "sector": "NIFTY PVT BANK",
+      "index_symbol": "NIFTY PVT BANK",
+      "data_file": "NIFTY_PVT_BANK.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-private-bank"
+    },
+    "INDUSTOWER": {
+      "sector": "NIFTY SERV SECTOR",
+      "index_symbol": "NIFTY SERV SECTOR",
+      "data_file": "NIFTY_SERV_SECTOR.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-telecommunications"
+    },
+    "INFY": {
+      "sector": "NIFTY IT",
+      "index_symbol": "NIFTY IT",
+      "data_file": "NIFTY_IT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-it"
+    },
+    "INOXWIND": {
+      "sector": "NIFTY ENERGY",
+      "index_symbol": "NIFTY ENERGY",
+      "data_file": "NIFTY_ENERGY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-power"
+    },
+    "IOC": {
+      "sector": "NIFTY OIL AND GAS",
+      "index_symbol": "NIFTY OIL AND GAS",
+      "data_file": "NIFTY_OIL_AND_GAS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-oil-and-gas-index"
+    },
+    "IREDA": {
+      "sector": "NIFTY ENERGY",
+      "index_symbol": "NIFTY ENERGY",
+      "data_file": "NIFTY_ENERGY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-power"
+    },
+    "ITC": {
+      "sector": "NIFTY FMCG",
+      "index_symbol": "NIFTY FMCG",
+      "data_file": "NIFTY_FMCG.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-fmcg"
+    },
+    "JINDALSTEL": {
+      "sector": "NIFTY METAL",
+      "index_symbol": "NIFTY METAL",
+      "data_file": "NIFTY_METAL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-metal"
+    },
+    "JIOFIN": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "JSWENERGY": {
+      "sector": "NIFTY ENERGY",
+      "index_symbol": "NIFTY ENERGY",
+      "data_file": "NIFTY_ENERGY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-power"
+    },
+    "JSWSTEEL": {
+      "sector": "NIFTY METAL",
+      "index_symbol": "NIFTY METAL",
+      "data_file": "NIFTY_METAL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-metal"
+    },
+    "JUBLFOOD": {
+      "sector": "NIFTY CONSUMPTION",
+      "index_symbol": "NIFTY CONSUMPTION",
+      "data_file": "NIFTY_CONSUMPTION.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-services"
+    },
+    "KALYANKJIL": {
+      "sector": "NIFTY CONSR DURBL",
+      "index_symbol": "NIFTY CONSR DURBL",
+      "data_file": "NIFTY_CONSR_DURBL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-durables-index"
+    },
+    "KAYNES": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "KEI": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "KFINTECH": {
+      "sector": "NIFTY CAPITAL MKT",
+      "index_symbol": "NIFTY CAPITAL MKT",
+      "data_file": "NIFTY_CAPITAL_MKT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": ""
+    },
+    "KOTAKBANK": {
+      "sector": "NIFTY PVT BANK",
+      "index_symbol": "NIFTY PVT BANK",
+      "data_file": "NIFTY_PVT_BANK.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-private-bank"
+    },
+    "KPITTECH": {
+      "sector": "NIFTY IT",
+      "index_symbol": "NIFTY IT",
+      "data_file": "NIFTY_IT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-it"
+    },
+    "LAURUSLABS": {
+      "sector": "NIFTY PHARMA",
+      "index_symbol": "NIFTY PHARMA",
+      "data_file": "NIFTY_PHARMA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-pharma"
+    },
+    "LICHSGFIN": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "LICI": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "LODHA": {
+      "sector": "NIFTY REALTY",
+      "index_symbol": "NIFTY REALTY",
+      "data_file": "NIFTY_REALTY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-realty"
+    },
+    "LT": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "LTF": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "LTM": {
+      "sector": "NIFTY IT",
+      "index_symbol": "NIFTY IT",
+      "data_file": "NIFTY_IT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-it"
+    },
+    "LUPIN": {
+      "sector": "NIFTY PHARMA",
+      "index_symbol": "NIFTY PHARMA",
+      "data_file": "NIFTY_PHARMA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-pharma"
+    },
+    "M&M": {
+      "sector": "NIFTY AUTO",
+      "index_symbol": "NIFTY AUTO",
+      "data_file": "NIFTY_AUTO.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    "MANAPPURAM": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "MANKIND": {
+      "sector": "NIFTY PHARMA",
+      "index_symbol": "NIFTY PHARMA",
+      "data_file": "NIFTY_PHARMA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-pharma"
+    },
+    "MARICO": {
+      "sector": "NIFTY FMCG",
+      "index_symbol": "NIFTY FMCG",
+      "data_file": "NIFTY_FMCG.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-fmcg"
+    },
+    "MARUTI": {
+      "sector": "NIFTY AUTO",
+      "index_symbol": "NIFTY AUTO",
+      "data_file": "NIFTY_AUTO.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    "MAXHEALTH": {
+      "sector": "NIFTY HEALTHCARE",
+      "index_symbol": "NIFTY HEALTHCARE",
+      "data_file": "NIFTY_HEALTHCARE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-healthcare-index"
+    },
+    "MAZDOCK": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "MCX": {
+      "sector": "NIFTY CAPITAL MKT",
+      "index_symbol": "NIFTY CAPITAL MKT",
+      "data_file": "NIFTY_CAPITAL_MKT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": ""
+    },
+    "MFSL": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "MOTHERSON": {
+      "sector": "NIFTY AUTO",
+      "index_symbol": "NIFTY AUTO",
+      "data_file": "NIFTY_AUTO.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    "MOTILALOFS": {
+      "sector": "NIFTY CAPITAL MKT",
+      "index_symbol": "NIFTY CAPITAL MKT",
+      "data_file": "NIFTY_CAPITAL_MKT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": ""
+    },
+    "MPHASIS": {
+      "sector": "NIFTY IT",
+      "index_symbol": "NIFTY IT",
+      "data_file": "NIFTY_IT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-it"
+    },
+    "MUTHOOTFIN": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "NAM-INDIA": {
+      "sector": "NIFTY CAPITAL MKT",
+      "index_symbol": "NIFTY CAPITAL MKT",
+      "data_file": "NIFTY_CAPITAL_MKT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": ""
+    },
+    "NATIONALUM": {
+      "sector": "NIFTY METAL",
+      "index_symbol": "NIFTY METAL",
+      "data_file": "NIFTY_METAL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-metal"
+    },
+    "NAUKRI": {
+      "sector": "NIFTY CONSUMPTION",
+      "index_symbol": "NIFTY CONSUMPTION",
+      "data_file": "NIFTY_CONSUMPTION.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-services"
+    },
+    "NBCC": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "NESTLEIND": {
+      "sector": "NIFTY FMCG",
+      "index_symbol": "NIFTY FMCG",
+      "data_file": "NIFTY_FMCG.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-fmcg"
+    },
+    "NHPC": {
+      "sector": "NIFTY ENERGY",
+      "index_symbol": "NIFTY ENERGY",
+      "data_file": "NIFTY_ENERGY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-power"
+    },
+    "NMDC": {
+      "sector": "NIFTY METAL",
+      "index_symbol": "NIFTY METAL",
+      "data_file": "NIFTY_METAL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-metal"
+    },
+    "NTPC": {
+      "sector": "NIFTY ENERGY",
+      "index_symbol": "NIFTY ENERGY",
+      "data_file": "NIFTY_ENERGY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-power"
+    },
+    "NUVAMA": {
+      "sector": "NIFTY CAPITAL MKT",
+      "index_symbol": "NIFTY CAPITAL MKT",
+      "data_file": "NIFTY_CAPITAL_MKT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": ""
+    },
+    "NYKAA": {
+      "sector": "NIFTY CONSUMPTION",
+      "index_symbol": "NIFTY CONSUMPTION",
+      "data_file": "NIFTY_CONSUMPTION.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-services"
+    },
+    "OBEROIRLTY": {
+      "sector": "NIFTY REALTY",
+      "index_symbol": "NIFTY REALTY",
+      "data_file": "NIFTY_REALTY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-realty"
+    },
+    "OFSS": {
+      "sector": "NIFTY IT",
+      "index_symbol": "NIFTY IT",
+      "data_file": "NIFTY_IT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-it"
+    },
+    "OIL": {
+      "sector": "NIFTY OIL AND GAS",
+      "index_symbol": "NIFTY OIL AND GAS",
+      "data_file": "NIFTY_OIL_AND_GAS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-oil-and-gas-index"
+    },
+    "ONGC": {
+      "sector": "NIFTY OIL AND GAS",
+      "index_symbol": "NIFTY OIL AND GAS",
+      "data_file": "NIFTY_OIL_AND_GAS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-oil-and-gas-index"
+    },
+    "PAGEIND": {
+      "sector": "NIFTY CONSR DURBL",
+      "index_symbol": "NIFTY CONSR DURBL",
+      "data_file": "NIFTY_CONSR_DURBL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-durables-index"
+    },
+    "PATANJALI": {
+      "sector": "NIFTY FMCG",
+      "index_symbol": "NIFTY FMCG",
+      "data_file": "NIFTY_FMCG.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-fmcg"
+    },
+    "PAYTM": {
+      "sector": "NIFTY CONSUMPTION",
+      "index_symbol": "NIFTY CONSUMPTION",
+      "data_file": "NIFTY_CONSUMPTION.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-services"
+    },
+    "PERSISTENT": {
+      "sector": "NIFTY IT",
+      "index_symbol": "NIFTY IT",
+      "data_file": "NIFTY_IT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-it"
+    },
+    "PETRONET": {
+      "sector": "NIFTY OIL AND GAS",
+      "index_symbol": "NIFTY OIL AND GAS",
+      "data_file": "NIFTY_OIL_AND_GAS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-oil-and-gas-index"
+    },
+    "PFC": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "PGEL": {
+      "sector": "NIFTY CONSR DURBL",
+      "index_symbol": "NIFTY CONSR DURBL",
+      "data_file": "NIFTY_CONSR_DURBL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-durables-index"
+    },
+    "PHOENIXLTD": {
+      "sector": "NIFTY REALTY",
+      "index_symbol": "NIFTY REALTY",
+      "data_file": "NIFTY_REALTY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-realty"
+    },
+    "PIDILITIND": {
+      "sector": "NIFTY CHEMICALS",
+      "index_symbol": "NIFTY CHEMICALS",
+      "data_file": "NIFTY_CHEMICALS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-chemicals"
+    },
+    "PIIND": {
+      "sector": "NIFTY CHEMICALS",
+      "index_symbol": "NIFTY CHEMICALS",
+      "data_file": "NIFTY_CHEMICALS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-chemicals"
+    },
+    "PNB": {
+      "sector": "NIFTY PSU BANK",
+      "index_symbol": "NIFTY PSU BANK",
+      "data_file": "NIFTY_PSU_BANK.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-psu-bank"
+    },
+    "PNBHOUSING": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "POLICYBZR": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "POLYCAB": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "POWERGRID": {
+      "sector": "NIFTY ENERGY",
+      "index_symbol": "NIFTY ENERGY",
+      "data_file": "NIFTY_ENERGY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-power"
+    },
+    "POWERINDIA": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "PREMIERENE": {
+      "sector": "NIFTY ENERGY",
+      "index_symbol": "NIFTY ENERGY",
+      "data_file": "NIFTY_ENERGY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-power"
+    },
+    "PRESTIGE": {
+      "sector": "NIFTY REALTY",
+      "index_symbol": "NIFTY REALTY",
+      "data_file": "NIFTY_REALTY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-realty"
+    },
+    "RADICO": {
+      "sector": "NIFTY FMCG",
+      "index_symbol": "NIFTY FMCG",
+      "data_file": "NIFTY_FMCG.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-fmcg"
+    },
+    "RBLBANK": {
+      "sector": "NIFTY PVT BANK",
+      "index_symbol": "NIFTY PVT BANK",
+      "data_file": "NIFTY_PVT_BANK.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-private-bank"
+    },
+    "RECLTD": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "RELIANCE": {
+      "sector": "NIFTY OIL AND GAS",
+      "index_symbol": "NIFTY OIL AND GAS",
+      "data_file": "NIFTY_OIL_AND_GAS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-oil-and-gas-index"
+    },
+    "RVNL": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "SAIL": {
+      "sector": "NIFTY METAL",
+      "index_symbol": "NIFTY METAL",
+      "data_file": "NIFTY_METAL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-metal"
+    },
+    "SAMMAANCAP": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "SBICARD": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "SBILIFE": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "SBIN": {
+      "sector": "NIFTY PSU BANK",
+      "index_symbol": "NIFTY PSU BANK",
+      "data_file": "NIFTY_PSU_BANK.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-psu-bank"
+    },
+    "SHREECEM": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "SHRIRAMFIN": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    },
+    "SIEMENS": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "SOLARINDS": {
+      "sector": "NIFTY CHEMICALS",
+      "index_symbol": "NIFTY CHEMICALS",
+      "data_file": "NIFTY_CHEMICALS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-chemicals"
+    },
+    "SONACOMS": {
+      "sector": "NIFTY AUTO",
+      "index_symbol": "NIFTY AUTO",
+      "data_file": "NIFTY_AUTO.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    "SRF": {
+      "sector": "NIFTY CHEMICALS",
+      "index_symbol": "NIFTY CHEMICALS",
+      "data_file": "NIFTY_CHEMICALS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-chemicals"
+    },
+    "SUNPHARMA": {
+      "sector": "NIFTY PHARMA",
+      "index_symbol": "NIFTY PHARMA",
+      "data_file": "NIFTY_PHARMA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-pharma"
+    },
+    "SUPREMEIND": {
+      "sector": "NIFTY CHEMICALS",
+      "index_symbol": "NIFTY CHEMICALS",
+      "data_file": "NIFTY_CHEMICALS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-chemicals"
+    },
+    "SUZLON": {
+      "sector": "NIFTY ENERGY",
+      "index_symbol": "NIFTY ENERGY",
+      "data_file": "NIFTY_ENERGY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-power"
+    },
+    "SWIGGY": {
+      "sector": "NIFTY CONSUMPTION",
+      "index_symbol": "NIFTY CONSUMPTION",
+      "data_file": "NIFTY_CONSUMPTION.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-services"
+    },
+    "TATACONSUM": {
+      "sector": "NIFTY FMCG",
+      "index_symbol": "NIFTY FMCG",
+      "data_file": "NIFTY_FMCG.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-fmcg"
+    },
+    "TATAELXSI": {
+      "sector": "NIFTY IT",
+      "index_symbol": "NIFTY IT",
+      "data_file": "NIFTY_IT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-it"
+    },
+    "TATAPOWER": {
+      "sector": "NIFTY ENERGY",
+      "index_symbol": "NIFTY ENERGY",
+      "data_file": "NIFTY_ENERGY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-power"
+    },
+    "TATASTEEL": {
+      "sector": "NIFTY METAL",
+      "index_symbol": "NIFTY METAL",
+      "data_file": "NIFTY_METAL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-metal"
+    },
+    "TCS": {
+      "sector": "NIFTY IT",
+      "index_symbol": "NIFTY IT",
+      "data_file": "NIFTY_IT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-it"
+    },
+    "TECHM": {
+      "sector": "NIFTY IT",
+      "index_symbol": "NIFTY IT",
+      "data_file": "NIFTY_IT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-it"
+    },
+    "TIINDIA": {
+      "sector": "NIFTY AUTO",
+      "index_symbol": "NIFTY AUTO",
+      "data_file": "NIFTY_AUTO.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    "TITAN": {
+      "sector": "NIFTY CONSR DURBL",
+      "index_symbol": "NIFTY CONSR DURBL",
+      "data_file": "NIFTY_CONSR_DURBL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-durables-index"
+    },
+    "TMPV": {
+      "sector": "NIFTY AUTO",
+      "index_symbol": "NIFTY AUTO",
+      "data_file": "NIFTY_AUTO.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    "TORNTPHARM": {
+      "sector": "NIFTY PHARMA",
+      "index_symbol": "NIFTY PHARMA",
+      "data_file": "NIFTY_PHARMA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-pharma"
+    },
+    "TRENT": {
+      "sector": "NIFTY CONSUMPTION",
+      "index_symbol": "NIFTY CONSUMPTION",
+      "data_file": "NIFTY_CONSUMPTION.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-services"
+    },
+    "TVSMOTOR": {
+      "sector": "NIFTY AUTO",
+      "index_symbol": "NIFTY AUTO",
+      "data_file": "NIFTY_AUTO.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    "ULTRACEMCO": {
+      "sector": "NIFTY INFRA",
+      "index_symbol": "NIFTY INFRA",
+      "data_file": "NIFTY_INFRA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"
+    },
+    "UNIONBANK": {
+      "sector": "NIFTY PSU BANK",
+      "index_symbol": "NIFTY PSU BANK",
+      "data_file": "NIFTY_PSU_BANK.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-psu-bank"
+    },
+    "UNITDSPR": {
+      "sector": "NIFTY FMCG",
+      "index_symbol": "NIFTY FMCG",
+      "data_file": "NIFTY_FMCG.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-fmcg"
+    },
+    "UNOMINDA": {
+      "sector": "NIFTY AUTO",
+      "index_symbol": "NIFTY AUTO",
+      "data_file": "NIFTY_AUTO.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"
+    },
+    "UPL": {
+      "sector": "NIFTY CHEMICALS",
+      "index_symbol": "NIFTY CHEMICALS",
+      "data_file": "NIFTY_CHEMICALS.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-chemicals"
+    },
+    "VBL": {
+      "sector": "NIFTY FMCG",
+      "index_symbol": "NIFTY FMCG",
+      "data_file": "NIFTY_FMCG.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-fmcg"
+    },
+    "VEDL": {
+      "sector": "NIFTY METAL",
+      "index_symbol": "NIFTY METAL",
+      "data_file": "NIFTY_METAL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-metal"
+    },
+    "VMM": {
+      "sector": "NIFTY CONSUMPTION",
+      "index_symbol": "NIFTY CONSUMPTION",
+      "data_file": "NIFTY_CONSUMPTION.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-services"
+    },
+    "VOLTAS": {
+      "sector": "NIFTY CONSR DURBL",
+      "index_symbol": "NIFTY CONSR DURBL",
+      "data_file": "NIFTY_CONSR_DURBL.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-durables-index"
+    },
+    "WAAREEENER": {
+      "sector": "NIFTY ENERGY",
+      "index_symbol": "NIFTY ENERGY",
+      "data_file": "NIFTY_ENERGY.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://niftyindices.com/indices/equity/sectoral-indices/nifty-power"
+    },
+    "WIPRO": {
+      "sector": "NIFTY IT",
+      "index_symbol": "NIFTY IT",
+      "data_file": "NIFTY_IT.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-it"
+    },
+    "YESBANK": {
+      "sector": "NIFTY PVT BANK",
+      "index_symbol": "NIFTY PVT BANK",
+      "data_file": "NIFTY_PVT_BANK.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-private-bank"
+    },
+    "ZYDUSLIFE": {
+      "sector": "NIFTY PHARMA",
+      "index_symbol": "NIFTY PHARMA",
+      "data_file": "NIFTY_PHARMA.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-pharma"
+    },
+    "IRFC": {
+      "sector": "NIFTY FIN SERVICE",
+      "index_symbol": "NIFTY FIN SERVICE",
+      "data_file": "NIFTY_FIN_SERVICE.csv",
+      "source": "built-in F&O sector override",
+      "source_url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"
+    }
+  },
+  "unmapped": {}
+}

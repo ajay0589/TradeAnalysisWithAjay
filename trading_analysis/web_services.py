@@ -6,6 +6,7 @@ import shutil
 import threading
 import time
 import uuid
+from collections import Counter
 from dataclasses import asdict
 from datetime import date, datetime
 from datetime import timedelta
@@ -14,6 +15,8 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 
+from trading_analysis.analysis.entry_context import build_entry_context
+from trading_analysis.analysis.fundamental import analyze_fundamentals
 from trading_analysis.analysis.market_structure import analyze_market_structure
 from trading_analysis.analysis.options import (
     analyze_option_chain,
@@ -50,7 +53,10 @@ from trading_analysis.candles import (
 )
 from trading_analysis.config import load_settings, load_watchlist, upsert_env_value
 from trading_analysis.data_sources.csv_loader import load_candles
-from trading_analysis.data_sources.nse_equity import build_sector_map_from_csv_rows
+from trading_analysis.data_sources.nse_equity import (
+    build_sector_map_from_csv_rows,
+    build_sector_map_from_symbol_overrides,
+)
 from trading_analysis.data_sources.nse_fii_dii import fetch_fii_dii_activity, write_fii_dii_csv
 
 
@@ -264,7 +270,8 @@ class AnalysisService:
             return dict(job)
 
     def sector_map_status(self) -> dict[str, Any]:
-        if not self.sector_map_path.exists():
+        payload = self._load_or_create_sector_map()
+        if not payload:
             return {
                 "exists": False,
                 "path": str(self.sector_map_path),
@@ -273,7 +280,6 @@ class AnalysisService:
                 "sectors": 0,
                 "generated_on": None,
             }
-        payload = json.loads(self.sector_map_path.read_text(encoding="utf-8"))
         return {
             "exists": True,
             "path": str(self.sector_map_path),
@@ -298,6 +304,7 @@ class AnalysisService:
             source="web upload",
             symbols_filter=symbols_filter,
         )
+        sector_map = self._merge_missing_sector_overrides(sector_map)
         self.sector_map_path.parent.mkdir(parents=True, exist_ok=True)
         self.sector_map_path.write_text(json.dumps(sector_map, indent=2), encoding="utf-8")
         return self.sector_map_status()
@@ -355,6 +362,64 @@ class AnalysisService:
             "path": str(output),
         }
 
+    def start_option_chain_monitor(
+        self,
+        symbols: list[str],
+        expiry: str | None = None,
+        interval_minutes: int = 15,
+        strikes_around: int = 10,
+        all_strikes: bool = False,
+        max_snapshots: int = 5,
+        run_once: bool = False,
+    ) -> dict[str, Any]:
+        normalized_symbols = [self.resolve_symbol(symbol) for symbol in symbols if str(symbol).strip()]
+        if not normalized_symbols:
+            raise ValueError("Enter at least one stock/index symbol for option-chain monitoring.")
+        interval_minutes = max(1, int(interval_minutes or 15))
+        max_snapshots = max(1, int(max_snapshots or 5))
+        job_id = uuid.uuid4().hex
+        job = {
+            "job_id": job_id,
+            "type": "option_chain_monitor",
+            "status": "queued",
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "started_at": None,
+            "finished_at": None,
+            "symbols": normalized_symbols,
+            "expiry": expiry,
+            "interval_minutes": interval_minutes,
+            "strikes_around": strikes_around,
+            "all_strikes": all_strikes,
+            "max_snapshots": max_snapshots,
+            "run_once": run_once,
+            "completed": 0,
+            "successes": 0,
+            "failures": 0,
+            "current": "",
+            "results": [],
+            "errors": [],
+            "stop_requested": False,
+            "next_run_at": None,
+        }
+        with self._jobs_lock:
+            self._jobs[job_id] = job
+        thread = threading.Thread(
+            target=self._run_option_chain_monitor,
+            args=(job_id,),
+            daemon=True,
+        )
+        thread.start()
+        return self.job_status(job_id)
+
+    def stop_job(self, job_id: str) -> dict[str, Any]:
+        with self._jobs_lock:
+            if job_id not in self._jobs:
+                raise ValueError(f"Unknown job id: {job_id}")
+            self._jobs[job_id]["stop_requested"] = True
+            if self._jobs[job_id].get("status") in {"queued", "running", "sleeping"}:
+                self._jobs[job_id]["status"] = "stopping"
+        return self.job_status(job_id)
+
     def symbols(self) -> dict[str, Any]:
         watchlist = self._watchlist_symbols()
         names = self._symbol_names()
@@ -393,7 +458,7 @@ class AnalysisService:
         if refresh:
             for refresh_timeframe in _refresh_timeframes_for_analysis(normalized_timeframe):
                 try:
-                    refresh_results.extend(self.refresh_candles(symbol, refresh_timeframe, window))
+                    refresh_results.extend(self.refresh_candles(symbol, refresh_timeframe, _refresh_window_for_analysis(window, refresh_timeframe)))
                 except Exception as exc:
                     refresh_errors.append(f"{timeframe_label(refresh_timeframe)}: {exc}")
 
@@ -405,6 +470,7 @@ class AnalysisService:
             )
         chart_technical = analyze_technical(chart_candles)
         chart_structure = analyze_market_structure(chart_candles)
+        fundamentals = self._fundamental_context(symbol)
 
         if normalized_timeframe == "60minute":
             hourly = chart_candles
@@ -437,6 +503,14 @@ class AnalysisService:
         )
         setup = classify_setup(decision.score, chart_technical.trend, chart_structure.trend)
         multi_timeframe = self._multi_timeframe_analysis(symbol, window)
+        daily_context = chart_candles if normalized_timeframe == "day" else self._load_optional_timeframe(symbol, "day", window)
+        intraday_context = self._load_optional_timeframe(symbol, "15minute", window)
+        entry_context = build_entry_context(
+            chart_candles=chart_candles,
+            daily_candles=daily_context,
+            intraday_candles=intraday_context,
+            bucket=setup["bucket"],
+        )
         option_trade_guide = _option_trade_guide(setup, chart_structure, option_chain)
         entry_trigger = _entry_trigger_panel(
             setup=setup,
@@ -444,6 +518,7 @@ class AnalysisService:
             chart_structure=chart_structure,
             multi_timeframe=multi_timeframe,
             option_chain=option_chain,
+            entry_context=entry_context,
         )
         analysis_summary = self._analysis_summary(
             symbol=symbol,
@@ -456,6 +531,8 @@ class AnalysisService:
             option_chain=option_chain,
             option_snapshot=option_snapshot,
             entry_trigger=entry_trigger,
+            entry_context=entry_context,
+            fundamentals=fundamentals,
             refresh_requested=refresh,
             refresh_results=refresh_results,
             refresh_error="; ".join(refresh_errors) if refresh_errors else None,
@@ -465,13 +542,16 @@ class AnalysisService:
 
         return {
             "symbol": symbol,
+            "analysis_header": _analysis_header(symbol, normalized_timeframe, chart_candles, chart_technical, option_chain),
             "setup": setup,
             "decision": asdict(decision),
             "multi_timeframe": multi_timeframe,
             "entry_trigger": entry_trigger,
+            "entry_context": entry_context,
             "option_trade_guide": option_trade_guide,
             "option_snapshot": option_snapshot,
             "analysis_summary": analysis_summary,
+            "fundamentals": fundamentals,
             "chart": {
                 "timeframe": normalized_timeframe,
                 "label": timeframe_label(normalized_timeframe),
@@ -489,6 +569,7 @@ class AnalysisService:
                 "technical": asdict(hourly_technical) if hourly_technical else None,
                 "structure": asdict(hourly_structure) if hourly_structure else None,
             },
+            "structure_timeframes": _structure_timeframe_rows(multi_timeframe),
             "relative_strength": asdict(relative_strength),
             "option_chain": asdict(option_chain) if option_chain else None,
             "warnings": warnings,
@@ -504,7 +585,7 @@ class AnalysisService:
         benchmark_symbol = self.benchmark_file.replace("_", " ").removesuffix(".csv")
         targets.append(("NSE", benchmark_symbol.upper(), Path(self.benchmark_file).stem))
 
-        sector_config = sector_config_for_symbol(load_sector_map(self.sector_map_path), symbol)
+        sector_config = sector_config_for_symbol(self._load_or_create_sector_map(), symbol)
         if sector_config:
             targets.append(("NSE", sector_config["index_symbol"].upper(), Path(sector_config["data_file"]).stem))
 
@@ -575,10 +656,64 @@ class AnalysisService:
             self._append_job_error(job_id, str(exc))
             self._update_job(job_id, status="failed", finished_at=datetime.now().isoformat(timespec="seconds"), current="")
 
+    def _run_option_chain_monitor(self, job_id: str) -> None:
+        self._update_job(job_id, status="running", started_at=datetime.now().isoformat(timespec="seconds"))
+        while True:
+            job = self.job_status(job_id)
+            if job.get("stop_requested"):
+                self._update_job(job_id, status="stopped", finished_at=datetime.now().isoformat(timespec="seconds"), current="")
+                return
+
+            for symbol in job["symbols"]:
+                if self.job_status(job_id).get("stop_requested"):
+                    self._update_job(job_id, status="stopped", finished_at=datetime.now().isoformat(timespec="seconds"), current="")
+                    return
+                current = f"{symbol} option chain"
+                self._update_job(job_id, status="running", current=current)
+                try:
+                    analysis, snapshot = self._option_chain(
+                        symbol=symbol,
+                        previous_snapshot=None,
+                        strikes_around=int(job["strikes_around"]),
+                        expiry=job.get("expiry"),
+                        all_strikes=bool(job["all_strikes"]),
+                        max_snapshots=int(job["max_snapshots"]),
+                    )
+                    self._append_job_result(
+                        job_id,
+                        {
+                            "symbol": symbol,
+                            "expiry": analysis.expiry.isoformat(),
+                            "contracts": analysis.contract_count,
+                            "pcr_oi": analysis.pcr_oi,
+                            "max_pain": analysis.max_pain,
+                            "history_snapshot": snapshot.get("history_snapshot"),
+                            "buildup_analysis": snapshot.get("buildup_analysis"),
+                            "previous_snapshot_found": snapshot.get("previous_snapshot_found"),
+                        },
+                    )
+                except Exception as exc:
+                    self._append_job_error(job_id, f"{symbol}: {exc}")
+                finally:
+                    self._increment_job(job_id)
+
+            if job.get("run_once"):
+                self._update_job(job_id, status="completed", finished_at=datetime.now().isoformat(timespec="seconds"), current="", next_run_at=None)
+                return
+
+            next_run_at = datetime.now() + timedelta(minutes=int(job["interval_minutes"]))
+            self._update_job(job_id, status="sleeping", current="", next_run_at=next_run_at.isoformat(timespec="seconds"))
+            sleep_seconds = max(1, int(job["interval_minutes"]) * 60)
+            for _ in range(sleep_seconds):
+                if self.job_status(job_id).get("stop_requested"):
+                    self._update_job(job_id, status="stopped", finished_at=datetime.now().isoformat(timespec="seconds"), current="")
+                    return
+                time.sleep(1)
+
     def _bulk_targets(self, symbols: list[str]) -> list[tuple[str, str, str]]:
         targets = [self._candle_target(symbol) for symbol in symbols]
         targets.extend(self._candle_target(symbol) for symbol in INDEX_DEFINITIONS)
-        sector_map = load_sector_map(self.sector_map_path)
+        sector_map = self._load_or_create_sector_map()
         for symbol in symbols:
             sector_config = sector_config_for_symbol(sector_map, symbol)
             if sector_config:
@@ -642,6 +777,10 @@ class AnalysisService:
         from_date: str | None = None,
         to_date: str | None = None,
         days: int | None = None,
+        include_option_chain: bool = False,
+        option_chain_limit: int = 5,
+        expiry: str | None = None,
+        strikes_around: int = 10,
     ) -> dict[str, Any]:
         scan_type = scan_type.lower()
         if scan_type not in {"bullish", "bearish", "neutral"}:
@@ -674,23 +813,150 @@ class AnalysisService:
             reverse=(scan_type in {"bullish", "neutral"}),
         )
         limited_rows = rows if limit is None else rows[:limit]
+        option_chain_attempts = 0
+        option_chain_successes = 0
+        option_chain_errors = []
+        if include_option_chain:
+            option_chain_limit = max(0, option_chain_limit)
+            for row in limited_rows[:option_chain_limit]:
+                option_chain_attempts += 1
+                try:
+                    row["option_chain_context"] = self._scan_option_chain_context(
+                        symbol=row["symbol"],
+                        expiry=expiry,
+                        strikes_around=strikes_around,
+                    )
+                    option_chain_successes += 1
+                except Exception as exc:
+                    row["option_chain_context"] = {
+                        "status": "failed",
+                        "summary": str(exc),
+                    }
+                    option_chain_errors.append({"symbol": row["symbol"], "error": str(exc)})
+        available_symbols = self._available_count(normalized_timeframe)
         return {
             "type": scan_type,
             "strategy": _strategy_for_scan(scan_type),
             "timeframe": normalized_timeframe,
             "timeframe_label": timeframe_label(normalized_timeframe),
-            "available_symbols": self._available_count(normalized_timeframe),
-            "total_fno_symbols": self.symbols()["total"],
+            "available_symbols": available_symbols,
+            "total_fno_symbols": len(self._watchlist_symbols()),
             "matched_symbols": len(rows),
             "limit": limit,
             "results": limited_rows,
-            "errors": errors[:20],
+            "errors": (errors + option_chain_errors)[:20],
+            "summary": {
+                "candle_source": "local cached candle CSV files",
+                "latest_candles_pulled": False,
+                "option_chain_pulled": option_chain_successes > 0,
+                "option_chain_requested": include_option_chain,
+                "option_chain_attempts": option_chain_attempts,
+                "option_chain_successes": option_chain_successes,
+                "analyzed_symbols": available_symbols,
+                "matched_symbols": len(rows),
+                "shown_symbols": len(limited_rows),
+                "error_count": len(errors) + len(option_chain_errors),
+                "points": [
+                    f"Scanned F&O symbols with {timeframe_label(normalized_timeframe)} candle files available.",
+                    "Latest candle refresh is handled before the scan when the UI checkbox is enabled.",
+                    (
+                        f"Pulled option chain for {option_chain_successes}/{option_chain_attempts} top shown candidate(s)."
+                        if include_option_chain
+                        else "Did not pull option chain during scan; enable Option chain for top candidates to enrich scan rows."
+                    ),
+                    "Ranking used price trend, market structure, relative strength, support/resistance, and cached volume from candle CSVs.",
+                ],
+            },
         }
 
     def _watchlist_symbols(self) -> list[str]:
         if not self.watchlist_path.exists():
             return []
         return [item.symbol for item in load_watchlist(self.watchlist_path)]
+
+    def _watchlist_items_by_symbol(self) -> dict[str, Any]:
+        if not self.watchlist_path.exists():
+            return {}
+        return {item.symbol.upper(): item for item in load_watchlist(self.watchlist_path)}
+
+    def _load_or_create_sector_map(self) -> dict[str, Any]:
+        sector_map = load_sector_map(self.sector_map_path)
+        if sector_map:
+            merged = self._merge_missing_sector_overrides(sector_map)
+            if merged != sector_map:
+                self.sector_map_path.parent.mkdir(parents=True, exist_ok=True)
+                self.sector_map_path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+            return merged
+
+        symbols = self._watchlist_symbols()
+        if not symbols:
+            return {}
+        sector_map = build_sector_map_from_symbol_overrides(symbols, self._nse_instruments())
+        self.sector_map_path.parent.mkdir(parents=True, exist_ok=True)
+        self.sector_map_path.write_text(json.dumps(sector_map, indent=2), encoding="utf-8")
+        return sector_map
+
+    def _merge_missing_sector_overrides(self, sector_map: dict[str, Any]) -> dict[str, Any]:
+        symbols = self._watchlist_symbols()
+        if not symbols:
+            return sector_map
+        mapped = set(sector_map.get("symbols", {}))
+        candidates = [symbol for symbol in symbols if symbol.upper() not in mapped]
+        if not candidates:
+            return sector_map
+
+        fallback = build_sector_map_from_symbol_overrides(
+            candidates,
+            self._nse_instruments(),
+            source="Missing-symbol fallback from Nifty Indices sectoral catalog + built-in F&O symbol overrides",
+        )
+        merged = dict(sector_map)
+        merged["sectors"] = {**sector_map.get("sectors", {}), **fallback.get("sectors", {})}
+        merged["symbols"] = {**sector_map.get("symbols", {}), **fallback.get("symbols", {})}
+        merged_unmapped = {
+            symbol: value
+            for symbol, value in sector_map.get("unmapped", {}).items()
+            if symbol not in fallback.get("symbols", {})
+        }
+        merged["unmapped"] = {**merged_unmapped, **fallback.get("unmapped", {})}
+        if "sector_source_catalog" not in merged and fallback.get("sector_source_catalog"):
+            merged["sector_source_catalog"] = fallback["sector_source_catalog"]
+        merged["source"] = f"{sector_map.get('source', 'sector map')} + built-in missing-symbol fallback"
+        return merged
+
+    def _fundamental_context(self, symbol: str) -> dict[str, Any]:
+        if _index_definition_for(symbol):
+            return {
+                "status": "not_applicable",
+                "score": None,
+                "reasons": ["Index-level fundamentals are not applicable."],
+                "inputs": {},
+                "source": "Index instrument",
+            }
+
+        item = self._watchlist_items_by_symbol().get(symbol.upper())
+        if not item:
+            return {
+                "status": "missing",
+                "score": None,
+                "reasons": ["Symbol is not present in the watchlist fundamentals source."],
+                "inputs": {},
+                "source": str(self.watchlist_path),
+            }
+
+        inputs = {
+            key: value
+            for key, value in asdict(item.fundamentals).items()
+            if value is not None
+        }
+        signal = analyze_fundamentals(item.fundamentals)
+        return {
+            "status": "analyzed" if inputs else "missing",
+            "score": signal.score,
+            "reasons": list(signal.reasons),
+            "inputs": inputs,
+            "source": str(self.watchlist_path),
+        }
 
     def _symbol_row(self, symbol: str, name: str, instrument_group: str) -> dict[str, Any]:
         return {
@@ -731,7 +997,7 @@ class AnalysisService:
 
     def _relative_strength(self, symbol: str, chart_candles, timeframe: str, window) -> Any:
         benchmark = self._load_optional_timeframe(Path(self.benchmark_file).stem, timeframe, window)
-        sector_map = load_sector_map(self.sector_map_path)
+        sector_map = self._load_or_create_sector_map()
         sector_config = sector_config_for_symbol(sector_map, symbol)
         sector = None
         if sector_config:
@@ -742,6 +1008,37 @@ class AnalysisService:
             sector_candles=sector,
         )
 
+    def _scan_option_chain_context(self, symbol: str, expiry: str | None, strikes_around: int) -> dict[str, Any]:
+        analysis, snapshot = self._option_chain(
+            symbol=symbol,
+            previous_snapshot=None,
+            strikes_around=strikes_around,
+            expiry=expiry,
+            all_strikes=False,
+        )
+        build_counts = Counter(row.buildup for row in analysis.rows)
+        return {
+            "status": "analyzed",
+            "expiry": analysis.expiry.isoformat(),
+            "spot_price": analysis.spot_price,
+            "pcr_oi": analysis.pcr_oi,
+            "max_pain": analysis.max_pain,
+            "atm_iv": analysis.atm_iv,
+            "atm_iv_change": analysis.atm_iv_change,
+            "total_volume": analysis.total_volume,
+            "total_oi_change_percent": analysis.total_oi_change_percent,
+            "highest_call_oi_strike": analysis.highest_call_oi_strike,
+            "highest_put_oi_strike": analysis.highest_put_oi_strike,
+            "previous_snapshot_found": snapshot.get("previous_snapshot_found"),
+            "history_snapshot": snapshot.get("history_snapshot"),
+            "buildup_analysis": snapshot.get("buildup_analysis"),
+            "buildup_counts": dict(build_counts),
+            "summary": (
+                f"PCR {_fmt_decimal(analysis.pcr_oi)}, max pain {_fmt_decimal(analysis.max_pain)}, "
+                f"ATM IV {_fmt_decimal(analysis.atm_iv)}, OI% {_fmt_decimal(analysis.total_oi_change_percent)}."
+            ),
+        }
+
     def _option_chain(
         self,
         symbol: str,
@@ -749,6 +1046,7 @@ class AnalysisService:
         strikes_around: int,
         expiry: str | None = None,
         all_strikes: bool = False,
+        max_snapshots: int = 5,
     ) -> Any:
         client = _zerodha_client()
         instruments = load_instruments_csv(self.nfo_instruments_path)
@@ -773,6 +1071,8 @@ class AnalysisService:
         history_snapshot = self._history_snapshot_path(symbol, selected_expiry)
         write_option_chain_snapshot(history_snapshot, analysis)
         write_option_chain_snapshot(default_snapshot, analysis)
+        buildup_analysis = self._write_option_buildup_analysis(analysis, history_snapshot, previous_exists)
+        self._prune_option_chain_history(symbol, selected_expiry, max_snapshots)
         return analysis, {
             "symbol": symbol,
             "expiry": selected_expiry.isoformat(),
@@ -781,6 +1081,8 @@ class AnalysisService:
             "latest_snapshot": str(default_snapshot),
             "history_snapshot": str(history_snapshot),
             "archived_previous_latest": str(archived_previous) if archived_previous else None,
+            "buildup_analysis": str(buildup_analysis),
+            "max_history_snapshots": max_snapshots,
         }
 
     def _has_candles(self, symbol: str, timeframe: str) -> bool:
@@ -823,6 +1125,9 @@ class AnalysisService:
     def _history_snapshot_dir(self) -> Path:
         return self.option_chain_dir / "history"
 
+    def _buildup_analysis_dir(self) -> Path:
+        return self.option_chain_dir / "buildup"
+
     def _history_snapshot_path(self, symbol: str, expiry: date, when: datetime | None = None) -> Path:
         when = when or datetime.now()
         base = self._history_snapshot_dir() / f"{symbol}_{expiry.isoformat()}_{when.strftime('%Y%m%d_%H%M%S')}.csv"
@@ -846,6 +1151,65 @@ class AnalysisService:
             return archive
         shutil.copy2(latest, archive)
         return archive
+
+    def _write_option_buildup_analysis(self, analysis, snapshot_path: Path, previous_found: bool) -> Path:
+        counts = Counter(row.buildup for row in analysis.rows)
+        by_side = {
+            option_type: Counter(row.buildup for row in analysis.rows if row.option_type == option_type)
+            for option_type in ("CE", "PE")
+        }
+        payload = {
+            "snapshot_time": datetime.now().isoformat(timespec="seconds"),
+            "symbol": analysis.symbol,
+            "expiry": analysis.expiry.isoformat(),
+            "snapshot": str(snapshot_path),
+            "previous_snapshot_found": previous_found,
+            "pcr_oi": analysis.pcr_oi,
+            "max_pain": analysis.max_pain,
+            "atm_iv": analysis.atm_iv,
+            "total_volume": analysis.total_volume,
+            "total_oi_change": analysis.total_oi_change,
+            "total_oi_change_percent": analysis.total_oi_change_percent,
+            "buildup_counts": dict(counts),
+            "call_buildup_counts": dict(by_side["CE"]),
+            "put_buildup_counts": dict(by_side["PE"]),
+            "top_oi_rows": [
+                {
+                    "tradingsymbol": row.tradingsymbol,
+                    "strike": row.strike,
+                    "option_type": row.option_type,
+                    "oi": row.oi,
+                    "oi_change": row.oi_change,
+                    "volume": row.volume,
+                    "buildup": row.buildup,
+                }
+                for row in sorted(analysis.rows, key=lambda item: item.oi, reverse=True)[:10]
+            ],
+        }
+        output = self._buildup_analysis_dir() / f"{analysis.symbol}_{analysis.expiry.isoformat()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        return output
+
+    def _prune_option_chain_history(self, symbol: str, expiry: date, max_snapshots: int) -> None:
+        max_snapshots = max(1, max_snapshots)
+        self._prune_matching_files(
+            self._history_snapshot_dir().glob(f"{symbol}_{expiry.isoformat()}_*.csv"),
+            max_snapshots,
+        )
+        self._prune_matching_files(
+            self._buildup_analysis_dir().glob(f"{symbol}_{expiry.isoformat()}_*.json"),
+            max_snapshots,
+        )
+
+    def _prune_matching_files(self, paths, max_files: int) -> None:
+        sorted_paths = sorted(
+            [path for path in paths if path.exists()],
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        for path in sorted_paths[max_files:]:
+            path.unlink()
 
     def _snapshot_rows(self, symbol: str, expiry: date | None) -> list[dict[str, Any]]:
         paths: list[tuple[Path, str]] = []
@@ -914,6 +1278,8 @@ class AnalysisService:
         option_chain,
         option_snapshot: dict[str, Any] | None,
         entry_trigger: dict[str, Any],
+        entry_context: dict[str, Any],
+        fundamentals: dict[str, Any],
         refresh_requested: bool,
         refresh_results: list[dict[str, Any]],
         refresh_error: str | None,
@@ -955,6 +1321,14 @@ class AnalysisService:
                 "analyzed",
                 f"{entry_trigger['status']}: {entry_trigger['summary']}",
                 "MTF direction, 15-minute trigger, support/invalidation distance, option-chain build-up, OI/PCR/max pain, and volume",
+            )
+        )
+        rows.append(
+            _coverage_row(
+                "Entry context",
+                "analyzed",
+                entry_context["summary"],
+                "Fibonacci, VWAP, EMA20/EMA50, previous day high/low, opening range, and volume confirmation",
             )
         )
 
@@ -1043,25 +1417,31 @@ class AnalysisService:
                 )
             )
 
-        rows.extend(
-            [
-                _coverage_row(
-                    "Fundamentals",
-                    "not_analyzed",
-                    "Fundamental scoring is not included in this Web UI trade-decision score yet.",
-                    "Watchlist fundamentals / future source",
-                ),
-                _coverage_row(
-                    "FII/DII flow",
-                    "not_analyzed",
-                    "Market-wide FII/DII data is not included in this stock-specific UI score yet.",
-                    "data/raw/nse/fii_dii.csv",
-                ),
-            ]
+        rows.append(
+            _coverage_row(
+                "Fundamentals",
+                fundamentals["status"],
+                _fundamental_detail(fundamentals),
+                fundamentals["source"],
+            )
+        )
+        rows.append(
+            _coverage_row(
+                "FII/DII flow",
+                "not_analyzed",
+                "Market-wide FII/DII data is not included in this stock-specific UI score yet.",
+                "data/raw/nse/fii_dii.csv",
+            )
         )
 
+        index = _index_definition_for(symbol)
         return {
             "symbol": symbol,
+            "instrument": {
+                "symbol": symbol,
+                "name": index["name"] if index else symbol,
+                "type": "index" if index else "stock",
+            },
             "timeframe": timeframe,
             "timeframe_label": timeframe_label(timeframe),
             "window": {
@@ -1099,20 +1479,22 @@ class AnalysisService:
                 )
             )
 
-        sector_map = load_sector_map(self.sector_map_path)
+        sector_map = self._load_or_create_sector_map()
         sector_config = sector_config_for_symbol(sector_map, symbol)
         if not sector_config:
+            unmapped = sector_map.get("unmapped", {}).get(symbol.upper(), {}) if sector_map else {}
+            reason = unmapped.get("reason") or "No sector mapping found for this stock."
             return rows + [
                 _coverage_row(
                     "Relative strength vs sector",
-                    "missing",
-                    "No sector mapping found for this stock.",
+                    "not_applicable" if unmapped.get("sector") == "NA" else "missing",
+                    f"Sector mapping is NA. {reason}" if unmapped.get("sector") == "NA" else reason,
                     str(self.sector_map_path),
                 ),
                 _coverage_row(
                     "Sector vs Nifty",
-                    "missing",
-                    "No sector mapping found for this stock.",
+                    "not_applicable" if unmapped.get("sector") == "NA" else "missing",
+                    f"Sector mapping is NA. {reason}" if unmapped.get("sector") == "NA" else reason,
                     str(self.sector_map_path),
                 ),
             ]
@@ -1260,6 +1642,24 @@ def classify_setup(score: int, technical_trend: str, structure_trend: str) -> di
     }
 
 
+def _analysis_header(symbol: str, timeframe: str, chart_candles, chart_technical, option_chain) -> dict[str, Any]:
+    index = _index_definition_for(symbol)
+    live_price = option_chain.spot_price if option_chain and option_chain.spot_price is not None else None
+    candle_time = chart_candles[-1].timestamp if chart_candles else None
+    return {
+        "symbol": symbol.upper(),
+        "name": index["name"] if index else symbol.upper(),
+        "instrument_type": "index" if index else "stock",
+        "timeframe": timeframe,
+        "timeframe_label": timeframe_label(timeframe),
+        "analyzed_at": datetime.now().isoformat(timespec="seconds"),
+        "latest_price": live_price if live_price is not None else chart_technical.close,
+        "latest_price_time": datetime.now().isoformat(timespec="seconds") if live_price is not None else candle_time,
+        "latest_price_source": "Zerodha spot quote" if live_price is not None else "latest analyzed candle close",
+        "candle_count": len(chart_candles),
+    }
+
+
 def _scan_row(result: dict[str, Any]) -> dict[str, Any]:
     decision = result["decision"]
     chart = result["chart"]
@@ -1283,6 +1683,28 @@ def _scan_row(result: dict[str, Any]) -> dict[str, Any]:
         "stock_vs_nifty": _rs_label(rs.get("stock_vs_nifty")),
         "reason": "; ".join(decision["reasons"][:3]),
     }
+
+
+def _structure_timeframe_rows(multi_timeframe: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = []
+    for row in multi_timeframe.get("rows", []):
+        rows.append(
+            {
+                "timeframe": row.get("timeframe"),
+                "label": row.get("label"),
+                "status": row.get("status"),
+                "message": row.get("message"),
+                "candle_count": row.get("candle_count"),
+                "close": row.get("close"),
+                "technical_trend": row.get("technical_trend"),
+                "structure_trend": row.get("structure_trend"),
+                "support": row.get("support"),
+                "resistance": row.get("resistance"),
+                "invalidation": row.get("invalidation"),
+                "path": row.get("path"),
+            }
+        )
+    return rows
 
 
 def _scan_sort_key(row: dict[str, Any], scan_type: str) -> float:
@@ -1353,6 +1775,23 @@ def _coverage_row(name: str, status: str, detail: str, source: str) -> dict[str,
         "detail": detail,
         "source": source,
     }
+
+
+def _fundamental_detail(fundamentals: dict[str, Any]) -> str:
+    status = fundamentals.get("status")
+    reasons = "; ".join(fundamentals.get("reasons") or [])
+    if status == "not_applicable":
+        return reasons or "Fundamentals are not applicable."
+    if status == "missing":
+        return (
+            "No stock fundamentals were supplied in the watchlist. "
+            "Add roe_percent, debt_to_equity, sales_growth_yoy_percent, "
+            "profit_growth_yoy_percent, and pledged_percent to enable scoring."
+        )
+    score = fundamentals.get("score")
+    inputs = fundamentals.get("inputs") or {}
+    input_summary = ", ".join(f"{key}={value}" for key, value in inputs.items()) or "no inputs"
+    return f"Fundamental score {score}; {reasons}. Inputs: {input_summary}."
 
 
 def _candle_source_summary(
@@ -1504,6 +1943,13 @@ def _refresh_timeframes_for_analysis(selected_timeframe: str) -> list[str]:
     return output
 
 
+def _refresh_window_for_analysis(window, timeframe: str):
+    normalized = normalize_timeframe(timeframe)
+    if normalized == "day":
+        return _multi_timeframe_window(window, "month")
+    return _multi_timeframe_window(window, normalized)
+
+
 def _normalize_bulk_requested_timeframes(values: list[str]) -> list[str]:
     requested = values or ["day", "60minute", "15minute"]
     order = ["month", "week", "day", "60minute", "15minute"]
@@ -1626,6 +2072,7 @@ def _entry_trigger_panel(
     chart_structure,
     multi_timeframe: dict[str, Any],
     option_chain,
+    entry_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     bucket = setup.get("bucket")
     if bucket not in {"bullish", "bearish", "neutral"}:
@@ -1648,6 +2095,7 @@ def _entry_trigger_panel(
     common_rows = [
         _entry_mtf_factor(bucket, multi_timeframe),
         _entry_intraday_factor(bucket, multi_timeframe),
+        _entry_context_factor(entry_context),
         _entry_distance_factor(bucket, chart_structure, spot),
         _entry_option_context_factor(bucket, option_chain),
         _entry_volume_factor(multi_timeframe),
@@ -1765,6 +2213,16 @@ def _entry_intraday_factor(bucket: str, multi_timeframe: dict[str, Any]) -> dict
     if close is not None and ((resistance is not None and close >= resistance) or (support is not None and close <= support)):
         return _entry_factor("15-min price trigger", ENTRY_EXIT, "15-min price is breaking out of the range.")
     return _entry_factor("15-min price trigger", ENTRY_WAIT, "Wait for 15-min range confirmation before selling both sides.")
+
+
+def _entry_context_factor(entry_context: dict[str, Any] | None) -> dict[str, str]:
+    if not entry_context:
+        return _entry_factor("Pullback/level context", ENTRY_ALLOWED, "Entry context was not supplied by this caller.")
+    status = entry_context.get("status")
+    summary = entry_context.get("summary") or "Entry context is not available."
+    if status == "supportive":
+        return _entry_factor("Pullback/level context", ENTRY_ALLOWED, summary)
+    return _entry_factor("Pullback/level context", ENTRY_WAIT, summary)
 
 
 def _entry_distance_factor(bucket: str, structure, spot: float | None) -> dict[str, str]:

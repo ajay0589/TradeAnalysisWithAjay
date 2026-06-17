@@ -19,12 +19,33 @@ NSE_EQUITY_QUOTE_PAGE = "https://www.nseindia.com/get-quotes/equity"
 NSE_EQUITY_QUOTE_API = "https://www.nseindia.com/api/quote-equity"
 
 INDEX_ALIASES = {
+    "NIFTY CAPITAL GOODS": "NIFTY INFRA",
+    "NIFTY CEMENT": "NIFTY INFRA",
+    "NIFTY COMMERCIAL & TRANSPORT SERVICES": "NIFTY TRANS LOGIS",
+    "NIFTY CONSTRUCTION": "NIFTY INFRA",
+    "NIFTY CONSUMER DURABLES": "NIFTY CONSR DURBL",
+    "NIFTY CONSUMER DURABLES INDEX": "NIFTY CONSR DURBL",
+    "NIFTY CONSUMER SERVICES": "NIFTY CONSUMPTION",
     "NIFTY OIL & GAS": "NIFTY OIL AND GAS",
     "NIFTY FINANCIAL SERVICES": "NIFTY FIN SERVICE",
+    "NIFTY FINANCIAL SERVICES 25/50": "NIFTY FINSRV25 50",
+    "NIFTY FINANCIAL SERVICES 25/50 INDEX": "NIFTY FINSRV25 50",
     "NIFTY FINANCIAL SERVICES EX-BANK": "NIFTY FINSEREXBNK",
+    "NIFTY HOSPITALS": "NIFTY HEALTHCARE",
+    "NIFTY HOUSING FINANCE": "NIFTY HOUSING",
+    "NIFTY INSURANCE": "NIFTY FIN SERVICE",
+    "NIFTY NBFC": "NIFTY FIN SERVICE",
     "NIFTY PRIVATE BANK": "NIFTY PVT BANK",
+    "NIFTY POWER": "NIFTY ENERGY",
+    "NIFTY REITS & REALTY": "NIFTY REALTY",
+    "NIFTY RETAIL": "NIFTY CONSUMPTION",
     "NIFTY SERVICES SECTOR": "NIFTY SERV SECTOR",
+    "NIFTY TELECOMMUNICATIONS": "NIFTY SERV SECTOR",
     "NIFTY INFRASTRUCTURE": "NIFTY INFRA",
+    "NIFTY500 HEALTHCARE": "NIFTY500 HEALTH",
+    "NIFTY MIDSMALL FINANCIAL SERVICES": "NIFTY MS FIN SERV",
+    "NIFTY MIDSMALL HEALTHCARE": "NIFTY MIDSML HLTH",
+    "NIFTY MIDSMALL IT & TELECOM": "NIFTY MS IT TELCM",
 }
 
 PREFERRED_SECTOR_INDICES = [
@@ -42,11 +63,16 @@ PREFERRED_SECTOR_INDICES = [
     "NIFTY IT",
     "NIFTY PHARMA",
     "NIFTY HEALTHCARE",
+    "NIFTY500 HEALTH",
     "NIFTY AUTO",
     "NIFTY FMCG",
     "NIFTY METAL",
     "NIFTY REALTY",
     "NIFTY MEDIA",
+    "NIFTY CHEMICALS",
+    "NIFTY CONSR DURBL",
+    "NIFTY CONSUMPTION",
+    "NIFTY TRANS LOGIS",
     "NIFTY COMMODITIES",
     "NIFTY INFRASTRUCTURE",
     "NIFTY INFRA",
@@ -94,6 +120,112 @@ INDUSTRY_FALLBACKS = [
     ("commodity", "NIFTY COMMODITIES"),
     ("chemicals", "NIFTY COMMODITIES"),
 ]
+
+NIFTY_SECTOR_INDEX_SOURCES = [
+    ("NIFTY AUTO", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-auto"),
+    ("NIFTY BANK", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-bank"),
+    ("NIFTY INFRA", "https://niftyindices.com/indices/equity/sectoral-indices/nifty-cement"),
+    ("NIFTY INFRA", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-capital-goods"),
+    ("NIFTY CHEMICALS", "https://niftyindices.com/indices/equity/sectoral-indices/nifty-chemicals"),
+    ("NIFTY TRANS LOGIS", "https://niftyindices.com/indices/equity/sectoral-indices/nifty-commercial-transport-services"),
+    ("NIFTY INFRA", "https://niftyindices.com/indices/equity/sectoral-indices/nifty-construction"),
+    ("NIFTY CONSUMPTION", "https://niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-services"),
+    ("NIFTY FIN SERVICE", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services"),
+    ("NIFTY FINSRV25 50", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services-25-50-index"),
+    ("NIFTY FINSEREXBNK", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-financial-services-ex-bank"),
+    ("NIFTY FMCG", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-fmcg"),
+    ("NIFTY HEALTHCARE", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-healthcare-index"),
+    ("NIFTY HEALTHCARE", "https://niftyindices.com/indices/equity/sectoral-indices/nifty-hospitals"),
+    ("NIFTY HOUSING", "https://niftyindices.com/indices/equity/sectoral-indices/nifty-housing-finance"),
+    ("NIFTY FIN SERVICE", "https://niftyindices.com/indices/equity/sectoral-indices/nifty-insurance"),
+    ("NIFTY IT", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-it"),
+    ("NIFTY MEDIA", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-media"),
+    ("NIFTY METAL", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-metal"),
+    ("NIFTY FIN SERVICE", "https://niftyindices.com/indices/equity/sectoral-indices/nifty-nbfc"),
+    ("NIFTY PHARMA", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-pharma"),
+    ("NIFTY ENERGY", "https://niftyindices.com/indices/equity/sectoral-indices/nifty-power"),
+    ("NIFTY PVT BANK", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-private-bank"),
+    ("NIFTY PSU BANK", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-psu-bank"),
+    ("NIFTY REALTY", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-realty"),
+    ("NIFTY REALTY", "https://niftyindices.com/indices/equity/sectoral-indices/nifty-reits-realty"),
+    ("NIFTY CONSUMPTION", "https://niftyindices.com/indices/equity/sectoral-indices/nifty-retail"),
+    ("NIFTY SERV SECTOR", "https://niftyindices.com/indices/equity/sectoral-indices/nifty-telecommunications"),
+    ("NIFTY CONSR DURBL", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-consumer-durables-index"),
+    ("NIFTY OIL AND GAS", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-oil-and-gas-index"),
+    ("NIFTY500 HEALTH", "https://niftyindices.com/indices/equity/sectoral-indices/nifty500-healthcare"),
+    ("NIFTY MS FIN SERV", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-midsmall-financial-services"),
+    ("NIFTY MIDSML HLTH", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-midsmall-healthcare"),
+    ("NIFTY MS IT TELCM", "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-midsmall-it-telecom"),
+]
+
+FNO_SYMBOL_SECTOR_GROUPS = {
+    "NIFTY AUTO": (
+        "ASHOKLEY", "BAJAJ-AUTO", "BHARATFORG", "BOSCHLTD", "EICHERMOT", "EXIDEIND",
+        "FORCEMOT", "HEROMOTOCO", "HYUNDAI", "M&M", "MARUTI", "MOTHERSON", "SONACOMS",
+        "TIINDIA", "TMPV", "TVSMOTOR", "UNOMINDA",
+    ),
+    "NIFTY PSU BANK": ("BANKBARODA", "BANKINDIA", "CANBK", "INDIANB", "PNB", "SBIN", "UNIONBANK"),
+    "NIFTY PVT BANK": (
+        "AUBANK", "AXISBANK", "BANDHANBNK", "FEDERALBNK", "HDFCBANK", "ICICIBANK",
+        "IDFCFIRSTB", "INDUSINDBK", "KOTAKBANK", "RBLBANK", "YESBANK",
+    ),
+    "NIFTY FIN SERVICE": (
+        "ABCAPITAL", "BAJAJFINSV", "BAJAJHLDNG", "BAJFINANCE", "CHOLAFIN", "HDFCAMC",
+        "HDFCLIFE", "ICICIGI", "ICICIPRULI", "JIOFIN", "LICHSGFIN", "LICI", "LTF",
+        "IRFC", "MANAPPURAM", "MFSL", "MUTHOOTFIN", "PFC", "PNBHOUSING", "POLICYBZR", "RECLTD",
+        "SAMMAANCAP", "SBICARD", "SBILIFE", "SHRIRAMFIN",
+    ),
+    "NIFTY CAPITAL MKT": (
+        "360ONE", "ANGELONE", "BSE", "CAMS", "CDSL", "IEX", "KFINTECH", "MCX",
+        "MOTILALOFS", "NAM-INDIA", "NUVAMA",
+    ),
+    "NIFTY IT": (
+        "COFORGE", "HCLTECH", "INFY", "KPITTECH", "LTM", "MPHASIS", "OFSS",
+        "PERSISTENT", "TATAELXSI", "TCS", "TECHM", "WIPRO",
+    ),
+    "NIFTY PHARMA": (
+        "ALKEM", "AUROPHARMA", "BIOCON", "CIPLA", "DIVISLAB", "DRREDDY", "GLENMARK",
+        "LAURUSLABS", "LUPIN", "MANKIND", "SUNPHARMA", "TORNTPHARM", "ZYDUSLIFE",
+    ),
+    "NIFTY HEALTHCARE": ("APOLLOHOSP", "FORTIS", "MAXHEALTH"),
+    "NIFTY FMCG": (
+        "BRITANNIA", "COLPAL", "DABUR", "GODFRYPHLP", "GODREJCP", "HINDUNILVR",
+        "ITC", "MARICO", "NESTLEIND", "PATANJALI", "RADICO", "TATACONSUM", "UNITDSPR", "VBL",
+    ),
+    "NIFTY OIL AND GAS": ("BPCL", "GAIL", "HINDPETRO", "IOC", "OIL", "ONGC", "PETRONET", "RELIANCE"),
+    "NIFTY ENERGY": (
+        "ADANIENSOL", "ADANIGREEN", "ADANIPOWER", "INOXWIND", "IREDA", "JSWENERGY",
+        "NHPC", "NTPC", "POWERGRID", "PREMIERENE", "SUZLON", "TATAPOWER", "WAAREEENER",
+    ),
+    "NIFTY METAL": (
+        "APLAPOLLO", "HINDALCO", "HINDZINC", "JINDALSTEL", "JSWSTEEL", "NATIONALUM",
+        "NMDC", "SAIL", "TATASTEEL", "VEDL",
+    ),
+    "NIFTY REALTY": ("DLF", "GODREJPROP", "LODHA", "OBEROIRLTY", "PHOENIXLTD", "PRESTIGE"),
+    "NIFTY CONSR DURBL": (
+        "AMBER", "ASIANPAINT", "BLUESTARCO", "CROMPTON", "DIXON", "HAVELLS", "KALYANKJIL",
+        "PAGEIND", "PGEL", "TITAN", "VOLTAS",
+    ),
+    "NIFTY CHEMICALS": ("ASTRAL", "PIDILITIND", "PIIND", "SOLARINDS", "SRF", "SUPREMEIND", "UPL"),
+    "NIFTY INFRA": (
+        "ABB", "AMBUJACEM", "BDL", "BEL", "BHEL", "CGPOWER", "COCHINSHIP", "CUMMINSIND",
+        "DALBHARAT", "GRASIM", "GVT&D", "HAL", "KAYNES", "KEI", "LT", "MAZDOCK",
+        "NBCC", "POLYCAB", "POWERINDIA", "RVNL", "SHREECEM", "SIEMENS", "ULTRACEMCO",
+    ),
+    "NIFTY TRANS LOGIS": ("ADANIPORTS", "CONCOR", "DELHIVERY", "GMRAIRPORT", "INDIGO"),
+    "NIFTY CONSUMPTION": (
+        "DMART", "ETERNAL", "INDHOTEL", "JUBLFOOD", "NAUKRI", "NYKAA", "PAYTM", "SWIGGY",
+        "TRENT", "VMM",
+    ),
+    "NIFTY SERV SECTOR": ("BHARTIARTL", "IDEA", "INDUSTOWER"),
+    "NIFTY COMMODITIES": ("ADANIENT", "COALINDIA"),
+}
+
+FNO_SYMBOL_SECTOR_OVERRIDES = {
+    symbol: sector
+    for sector, symbols in FNO_SYMBOL_SECTOR_GROUPS.items()
+    for symbol in symbols
+}
 
 
 def fetch_equity_quote_metadata(
@@ -331,6 +463,68 @@ def build_sector_map_from_csv_rows(
         "symbols": dict(sorted(mapped_symbols.items())),
         "unmapped": dict(sorted(unmapped.items())),
     }
+
+
+def build_sector_map_from_symbol_overrides(
+    symbols: list[str],
+    nse_instruments: list[dict[str, str]],
+    source: str = "Nifty Indices sectoral catalog + built-in F&O symbol overrides",
+) -> dict[str, Any]:
+    index_symbols = zerodha_index_symbols(nse_instruments)
+    sectors: dict[str, dict[str, str]] = {}
+    mapped_symbols: dict[str, dict[str, str]] = {}
+    unmapped: dict[str, dict[str, Any]] = {}
+
+    for symbol in symbols:
+        key = symbol.upper()
+        preferred = FNO_SYMBOL_SECTOR_OVERRIDES.get(key)
+        selected = _canonical_index_name(preferred) if preferred else None
+        if selected and selected in index_symbols:
+            sectors.setdefault(
+                selected,
+                {
+                    "index_symbol": selected,
+                    "data_file": f"{safe_symbol_filename(selected)}.csv",
+                    "source_url": sector_source_url(selected),
+                },
+            )
+            mapped_symbols[key] = {
+                "sector": selected,
+                "index_symbol": selected,
+                "data_file": f"{safe_symbol_filename(selected)}.csv",
+                "source": "built-in F&O sector override",
+                "source_url": sector_source_url(selected),
+            }
+        else:
+            unmapped[key] = {
+                "sector": "NA",
+                "preferred_index": preferred or "",
+                "reason": (
+                    "No confident stock-to-sector mapping configured."
+                    if not preferred
+                    else "Preferred sector index is not present in Zerodha NSE instruments."
+                ),
+            }
+
+    return {
+        "generated_on": date.today().isoformat(),
+        "source": source,
+        "sector_source_catalog": [
+            {"index_symbol": index_symbol, "source_url": url}
+            for index_symbol, url in NIFTY_SECTOR_INDEX_SOURCES
+        ],
+        "sectors": dict(sorted(sectors.items())),
+        "symbols": dict(sorted(mapped_symbols.items())),
+        "unmapped": dict(sorted(unmapped.items())),
+    }
+
+
+def sector_source_url(index_symbol: str) -> str:
+    canonical = _canonical_index_name(index_symbol)
+    for source_index, url in NIFTY_SECTOR_INDEX_SOURCES:
+        if _canonical_index_name(source_index) == canonical:
+            return url
+    return ""
 
 
 def choose_sector_index(metadata: dict[str, Any], index_symbols: set[str]) -> str | None:

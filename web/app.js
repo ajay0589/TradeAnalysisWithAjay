@@ -3,9 +3,22 @@ const state = {
   lastAnalysis: null,
   bulkJobId: null,
   bulkPollTimer: null,
+  optionMonitorJobId: null,
+  optionMonitorPollTimer: null,
 };
 
 const $ = (id) => document.getElementById(id);
+
+function activateTab(name) {
+  document.querySelectorAll("[data-tab-target]").forEach((button) => {
+    const active = button.dataset.tabTarget === name;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  document.querySelectorAll("[data-tab-panel]").forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.tabPanel === name);
+  });
+}
 
 const BULK_TIMEFRAME_LABELS = {
   month: "Monthly",
@@ -52,6 +65,10 @@ function scanParams() {
   const limit = $("scanLimit").value.trim();
   if (days) params.set("days", days);
   params.set("limit", limit || "all");
+  params.set("option_chain", $("scanOptionChainToggle").checked ? "true" : "false");
+  params.set("option_chain_limit", $("scanOptionChainLimit").value.trim() || "5");
+  params.set("strikes_around", $("scanStrikesAround").value.trim() || "10");
+  if ($("scanExpiry").value) params.set("expiry", $("scanExpiry").value);
   return params;
 }
 
@@ -365,6 +382,75 @@ function bulkFrameLabels(values) {
   return (values || []).map((value) => BULK_TIMEFRAME_LABELS[value] || value).join(", ");
 }
 
+async function startOptionMonitor() {
+  const symbols = $("optionMonitorSymbols").value.trim() || $("symbolInput").value.trim();
+  if (!symbols) {
+    setNotes(["Enter at least one stock/index for the option-chain monitor."], true);
+    return;
+  }
+  const payload = {
+    symbols,
+    expiry: $("optionMonitorExpiry").value || null,
+    interval_minutes: Number($("optionMonitorInterval").value || 15),
+    max_snapshots: Number($("optionMonitorKeep").value || 5),
+    strikes_around: Number($("optionMonitorStrikes").value || 10),
+    run_once: $("optionMonitorRunOnce").checked,
+  };
+  try {
+    const job = await postApi("/api/option-chain-monitor/start", payload);
+    state.optionMonitorJobId = job.job_id;
+    renderOptionMonitorJob(job);
+    pollOptionMonitorJob();
+    setNotes("Option-chain monitor started. Keep this web UI server running for recurring pulls.");
+  } catch (error) {
+    setNotes([error.message], true);
+  }
+}
+
+async function stopOptionMonitor() {
+  if (!state.optionMonitorJobId) {
+    $("optionMonitorStatus").textContent = "No option-chain monitor job is active.";
+    return;
+  }
+  try {
+    const job = await postApi("/api/option-chain-monitor/stop", { job_id: state.optionMonitorJobId });
+    renderOptionMonitorJob(job);
+  } catch (error) {
+    setNotes([error.message], true);
+  }
+}
+
+async function pollOptionMonitorJob() {
+  if (!state.optionMonitorJobId) return;
+  clearTimeout(state.optionMonitorPollTimer);
+  try {
+    const job = await api(`/api/job?job_id=${encodeURIComponent(state.optionMonitorJobId)}`);
+    renderOptionMonitorJob(job);
+    if (["queued", "running", "sleeping", "stopping"].includes(job.status)) {
+      state.optionMonitorPollTimer = setTimeout(pollOptionMonitorJob, 2500);
+    }
+  } catch (error) {
+    $("optionMonitorStatus").textContent = error.message;
+  }
+}
+
+function renderOptionMonitorJob(job) {
+  const nextRun = job.next_run_at ? ` | next ${fmtDateTime(job.next_run_at)}` : "";
+  $("optionMonitorMeta").textContent = `${job.status} / pulls ${job.completed || 0}`;
+  $("optionMonitorStatus").textContent = `${job.status}: ${(job.symbols || []).join(", ")} | success ${job.successes || 0} | failures ${job.failures || 0}${nextRun}`;
+  $("optionMonitorResults").innerHTML = (job.results || [])
+    .slice(-6)
+    .reverse()
+    .map((row) => `<div>${row.symbol} ${row.expiry}: ${row.contracts} contracts, PCR ${fmt(row.pcr_oi)}, max pain ${fmt(row.max_pain)}<div class="cell-note">${row.history_snapshot || ""}</div></div>`)
+    .join("");
+  if ((job.errors || []).length) {
+    $("optionMonitorResults").innerHTML += (job.errors || [])
+      .slice(-4)
+      .map((error) => `<div class="error">${error}</div>`)
+      .join("");
+  }
+}
+
 async function saveReport() {
   if (!state.lastAnalysis) {
     setNotes(["Run Analyze before saving a report."], true);
@@ -381,40 +467,148 @@ async function saveReport() {
 
 async function scan(type) {
   setNotes(`Loading ${type} scan...`);
+  setScanProgress("running", `Preparing ${type} scan...`);
   try {
+    if ($("scanRefreshToggle").checked) {
+      await refreshCandlesForScan();
+    }
     const params = scanParams();
     params.set("type", type);
+    const optionNote = $("scanOptionChainToggle").checked
+      ? ` Pulling option chain for top ${$("scanOptionChainLimit").value || 5} shown candidate(s).`
+      : "";
+    setScanProgress("running", `Scanning ${type} candidates from candle data.${optionNote}`);
     const data = await api(`/api/scan?${params.toString()}`);
+    if (data.summary && $("scanRefreshToggle").checked) {
+      data.summary.latest_candles_pulled = true;
+      data.summary.points = [
+        "Pulled latest candles with the bulk downloader before running this scan.",
+        ...(data.summary.points || []),
+      ];
+    }
     $("scanTitle").textContent = `${capitalize(type)} candidates`;
     $("scanMeta").textContent = `${data.results.length} shown / ${data.matched_symbols} matched / ${data.available_symbols} ready / ${data.timeframe_label}`;
+    renderScanSummary(data.summary);
     renderScan(data.results);
+    setScanProgress("completed", `${data.results.length} shown from ${data.matched_symbols} matched ${type} setup(s).`);
     setNotes(`${data.strategy}. Verify option chain, liquidity, event risk, and risk/reward before trade.`);
   } catch (error) {
+    setScanProgress("failed", error.message);
     setNotes([error.message], true);
   }
 }
 
+async function refreshCandlesForScan() {
+  const timeframe = $("scanTimeframeSelect").value;
+  const days = Number($("scanDays").value || 90);
+  const payload = {
+    timeframes: scanRefreshTimeframes(timeframe),
+    days,
+    limit: null,
+  };
+  const job = await postApi("/api/bulk-candles", payload);
+  renderScanRefreshJob(job);
+  await waitForScanRefreshJob(job.job_id);
+}
+
+function scanRefreshTimeframes(timeframe) {
+  const frames = new Set([timeframe, "day", "60minute", "15minute"]);
+  return Array.from(frames);
+}
+
+async function waitForScanRefreshJob(jobId) {
+  while (true) {
+    const job = await api(`/api/job?job_id=${encodeURIComponent(jobId)}`);
+    renderScanRefreshJob(job);
+    if (!["queued", "running"].includes(job.status)) {
+      if (job.status !== "completed") {
+        throw new Error(`Candle refresh ${job.status}. ${job.errors?.[0] || ""}`.trim());
+      }
+      return job;
+    }
+    await delay(1500);
+  }
+}
+
+function renderScanRefreshJob(job) {
+  const total = job.total || 0;
+  const completed = job.completed || 0;
+  const percent = total ? Math.round((completed / total) * 100) : 0;
+  $("scanProgressMeta").textContent = `refresh ${job.status} / ${completed}/${total}`;
+  $("scanProgressStatus").textContent = `Refreshing candles before scan: ${job.current || "starting"} | success ${job.successes || 0} | failures ${job.failures || 0}`;
+  $("scanProgressBar").style.width = `${percent}%`;
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function setScanProgress(status, detail) {
+  const percent = status === "completed" ? "100%" : status === "failed" ? "100%" : "55%";
+  $("scanProgressMeta").textContent = status;
+  $("scanProgressStatus").textContent = detail;
+  $("scanProgressBar").style.width = percent;
+  $("scanProgressBar").classList.toggle("active", status === "running");
+}
+
+function renderScanSummary(summary) {
+  if (!summary) {
+    $("scanSummaryCards").innerHTML = "";
+    $("scanSummaryPoints").innerHTML = "";
+    return;
+  }
+  const cards = [
+    ["Analyzed", summary.analyzed_symbols],
+    ["Matched", summary.matched_symbols],
+    ["Shown", summary.shown_symbols],
+    ["Errors", summary.error_count],
+    ["Latest candles", summary.latest_candles_pulled ? "Pulled" : "No"],
+    ["Option chain", summary.option_chain_pulled ? "Pulled" : "No"],
+    ["OC attempts", summary.option_chain_attempts || 0],
+    ["OC success", summary.option_chain_successes || 0],
+  ];
+  $("scanSummaryCards").innerHTML = cards
+    .map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${fmtMetric(value)}</strong></div>`)
+    .join("");
+  $("scanSummaryPoints").innerHTML = (summary.points || []).map((point) => `<div>${point}</div>`).join("");
+}
+
+function fmtMetric(value) {
+  return typeof value === "number" ? fmtInt(value) : String(value ?? "-");
+}
+
 function renderAnalysis(data) {
+  renderAnalysisHeader(data.analysis_header, data);
   $("biasValue").textContent = data.decision.bias;
   $("biasValue").className = data.decision.bias;
   $("scoreValue").textContent = data.decision.score;
   $("strategyValue").textContent = data.setup.strategy;
   $("decisionValue").textContent = data.decision.decision;
-  $("structureMeta").textContent = `${data.chart.label} / ${data.chart.candle_count} candles`;
+  $("structureMeta").textContent = `${(data.structure_timeframes || []).length} timeframe(s)`;
 
   renderScoreBreakdown(data.decision.score_breakdown);
   renderMultiTimeframe(data.multi_timeframe);
   renderEntryTrigger(data.entry_trigger);
+  renderEntryContext(data.entry_context);
   renderOptionGuide(data.option_trade_guide);
   renderCoverage(data.analysis_summary);
-  $("structureBody").innerHTML = [
-    structureRow(data.chart.label, data.chart.technical, data.chart.structure),
-    structureRow("60m", data.hourly.technical, data.hourly.structure),
-  ].join("");
+  renderStructureTimeframes(data.structure_timeframes);
 
   renderRelativeStrength(data.relative_strength);
   renderOptionChain(data.option_chain);
   renderSnapshotStatus(data.option_snapshot);
+}
+
+function renderAnalysisHeader(header, data) {
+  const source = header || {};
+  const symbol = source.symbol || data.symbol || "-";
+  const type = source.instrument_type ? ` (${source.instrument_type})` : "";
+  const timeframe = source.timeframe_label ? ` / ${source.timeframe_label}` : "";
+  $("analysisInstrument").textContent = `${symbol}${type}${timeframe}`;
+  $("analysisPrice").textContent = fmt(source.latest_price ?? data.chart?.technical?.close);
+  $("analysisPriceTime").textContent = fmtDateTime(source.latest_price_time || data.chart?.to);
+  $("analysisRunTime").textContent = fmtDateTime(source.analyzed_at);
+  $("analysisPriceSource").textContent = source.latest_price_source || "latest analyzed candle close";
 }
 
 function renderScoreBreakdown(breakdown) {
@@ -495,6 +689,28 @@ function renderEntryTrigger(trigger) {
     .join("");
 }
 
+function renderEntryContext(context) {
+  if (!context || !context.rows) {
+    $("entryContextMeta").textContent = "-";
+    $("entryContextBody").innerHTML = "";
+    return;
+  }
+  $("entryContextMeta").textContent = context.summary || "-";
+  $("entryContextBody").innerHTML = context.rows
+    .map(
+      (row) => `
+        <tr>
+          <td>${row.zone}</td>
+          <td><span class="status-badge status-${row.status}">${statusLabel(row.status)}</span></td>
+          <td>${row.signal}</td>
+          <td>${row.level}</td>
+          <td>${row.detail}</td>
+        </tr>
+      `
+    )
+    .join("");
+}
+
 function renderMultiTimeframe(mtf) {
   if (!mtf || !mtf.rows) {
     $("mtfMeta").textContent = "-";
@@ -571,8 +787,11 @@ function renderCoverage(summary) {
   }
   const analyzed = summary.rows.filter((row) => row.status === "analyzed").length;
   const pulled = summary.rows.filter((row) => row.status === "pulled").length;
-  const missing = summary.rows.filter((row) => ["missing", "failed", "not_analyzed", "not_requested"].includes(row.status)).length;
-  $("coverageMeta").textContent = `${summary.timeframe_label} / ${analyzed} analyzed / ${pulled} pulled / ${missing} skipped or missing`;
+  const missing = summary.rows.filter((row) => ["missing", "failed", "not_analyzed", "not_requested", "not_applicable"].includes(row.status)).length;
+  const instrument = summary.instrument
+    ? `${summary.instrument.symbol} ${summary.instrument.type || ""}`.trim()
+    : summary.symbol || "-";
+  $("coverageMeta").textContent = `${instrument} / ${summary.timeframe_label} / ${analyzed} analyzed / ${pulled} pulled / ${missing} skipped, NA, or missing`;
   $("coverageBody").innerHTML = summary.rows
     .map(
       (row) => `
@@ -587,21 +806,32 @@ function renderCoverage(summary) {
     .join("");
 }
 
-function structureRow(frame, technical, structure) {
-  if (!technical || !structure) {
-    return `<tr><td>${frame}</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>`;
-  }
-  return `
-    <tr>
-      <td>${frame}</td>
-      <td>${fmt(technical.close)}</td>
-      <td>${technical.trend}</td>
-      <td>${structure.trend}</td>
-      <td>${fmt(structure.support)}</td>
-      <td>${fmt(structure.resistance)}</td>
-      <td>${fmt(structure.invalidation)}</td>
-    </tr>
-  `;
+function renderStructureTimeframes(rows) {
+  $("structureBody").innerHTML = (rows || [])
+    .map((row) => {
+      if (row.status !== "analyzed") {
+        return `
+          <tr>
+            <td>${row.label || row.timeframe}</td>
+            <td colspan="6">${row.message || "Not available"}<div class="cell-note">${row.path || ""}</div></td>
+            <td><span class="status-badge status-${row.status || "missing"}">${statusLabel(row.status || "missing")}</span></td>
+          </tr>
+        `;
+      }
+      return `
+        <tr>
+          <td>${row.label}</td>
+          <td>${fmt(row.close)}</td>
+          <td>${row.technical_trend}</td>
+          <td>${row.structure_trend}</td>
+          <td>${fmt(row.support)}</td>
+          <td>${fmt(row.resistance)}</td>
+          <td>${fmt(row.invalidation)}</td>
+          <td><span class="status-badge status-analyzed">${fmtInt(row.candle_count)} candles</span></td>
+        </tr>
+      `;
+    })
+    .join("");
 }
 
 function renderRelativeStrength(rs) {
@@ -674,6 +904,7 @@ function renderScan(rows) {
           <td>${fmt(row.support)}</td>
           <td>${fmt(row.resistance)}</td>
           <td>${row.option_zone || "-"}</td>
+          <td>${scanOptionChainCell(row.option_chain_context)}</td>
           <td>${row.stock_vs_nifty}</td>
         </tr>
       `
@@ -683,9 +914,19 @@ function renderScan(rows) {
   document.querySelectorAll(".linkBtn").forEach((button) => {
     button.addEventListener("click", () => {
       $("symbolInput").value = button.dataset.symbol;
+      activateTab("analyze");
       analyze();
     });
   });
+}
+
+function scanOptionChainCell(context) {
+  if (!context) return "-";
+  if (context.status === "failed") return `<span class="error">${context.summary || "failed"}</span>`;
+  return `
+    <div>${context.expiry || "-"} PCR ${fmt(context.pcr_oi)} / MP ${fmt(context.max_pain)}</div>
+    <div class="cell-note">ATM IV ${fmt(context.atm_iv)} | OI% ${fmt(context.total_oi_change_percent)} | ${context.previous_snapshot_found ? "compared" : "new snapshot"}</div>
+  `;
 }
 
 function setNotes(value, isError = false) {
@@ -723,6 +964,50 @@ function pointsClass(value) {
   return "points-zero";
 }
 
+function fmtDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("en-IN", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function enhanceCollapsibleSections() {
+  document.querySelectorAll(".table-panel > .panel-head").forEach((head, index) => {
+    if (head.querySelector(".collapse-btn")) return;
+    const title = head.querySelector("h2");
+    if (title && !title.parentElement.classList.contains("panel-head-title")) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "panel-head-title";
+      title.replaceWith(wrapper);
+      wrapper.appendChild(title);
+    }
+    const button = document.createElement("button");
+    button.className = "collapse-btn";
+    button.type = "button";
+    button.textContent = "-";
+    button.title = "Collapse section";
+    button.setAttribute("aria-expanded", "true");
+    button.setAttribute("aria-controls", `panel-body-${index}`);
+    const wrapper = head.querySelector(".panel-head-title") || head;
+    wrapper.insertBefore(button, wrapper.firstChild);
+    button.addEventListener("click", () => {
+      const panel = head.closest(".table-panel");
+      const collapsed = !panel.classList.contains("collapsed");
+      panel.classList.toggle("collapsed", collapsed);
+      button.textContent = collapsed ? "+" : "-";
+      button.title = collapsed ? "Expand section" : "Collapse section";
+      button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    });
+  });
+}
+
 $("analyzeBtn").addEventListener("click", analyze);
 $("checkZerodhaBtn").addEventListener("click", checkZerodhaStatus);
 $("updateZerodhaTokenBtn").addEventListener("click", updateZerodhaToken);
@@ -732,6 +1017,8 @@ $("bulkWeek").addEventListener("change", adjustBulkDaysForHigherFrames);
 $("sectorUploadBtn").addEventListener("click", uploadSectorCsv);
 $("refreshFiiDiiBtn").addEventListener("click", () => loadFiiDii(true));
 $("saveReportBtn").addEventListener("click", saveReport);
+$("startOptionMonitorBtn").addEventListener("click", startOptionMonitor);
+$("stopOptionMonitorBtn").addEventListener("click", stopOptionMonitor);
 $("symbolInput").addEventListener("keydown", (event) => {
   if (event.key === "Enter") analyze();
 });
@@ -745,6 +1032,12 @@ $("previousSnapshot").addEventListener("input", () => {
 document.querySelectorAll("[data-scan]").forEach((button) => {
   button.addEventListener("click", () => scan(button.dataset.scan));
 });
+document.querySelectorAll("[data-tab-target]").forEach((button) => {
+  button.setAttribute("role", "tab");
+  button.setAttribute("aria-selected", button.classList.contains("active") ? "true" : "false");
+  button.addEventListener("click", () => activateTab(button.dataset.tabTarget));
+});
+enhanceCollapsibleSections();
 
 Promise.all([loadZerodhaLoginUrl(), checkZerodhaStatus(), loadSymbols(), loadSectorStatus(), loadFiiDii(false)])
   .then(() => {
