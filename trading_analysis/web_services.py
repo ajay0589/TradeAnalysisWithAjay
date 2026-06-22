@@ -17,6 +17,7 @@ from urllib.error import HTTPError, URLError
 
 from trading_analysis.analysis.entry_context import build_entry_context
 from trading_analysis.analysis.fundamental import analyze_fundamentals
+from trading_analysis.analysis.indicator_suite import analyze_indicator_suite
 from trading_analysis.analysis.market_structure import analyze_market_structure
 from trading_analysis.analysis.options import (
     analyze_option_chain,
@@ -31,6 +32,7 @@ from trading_analysis.analysis.relative_strength import (
     load_sector_map,
     sector_config_for_symbol,
 )
+from trading_analysis.analysis.scanners import SETUP_LABELS, scan_symbol_for_setups
 from trading_analysis.analysis.technical import analyze_technical
 from trading_analysis.analysis.trade_decision import build_trade_decision
 from trading_analysis.brokers.zerodha import (
@@ -216,13 +218,17 @@ class AnalysisService:
         requested_timeframes = _normalize_bulk_requested_timeframes(timeframes)
         normalized_timeframes = _normalize_bulk_timeframes(timeframes)
         effective_days = _bulk_window_days(requested_timeframes, days)
-        window = candle_window(from_date=from_date, to_date=to_date, days=None if from_date else effective_days)
-        if window.from_time is None:
-            window = type(window)(
-                from_time=window.to_time - timedelta(days=effective_days),
-                to_time=window.to_time,
-                days=effective_days,
+        timeframe_windows = {
+            timeframe: _bulk_window_for_timeframe(
+                requested_timeframes=requested_timeframes,
+                timeframe=timeframe,
+                days=days,
+                from_date=from_date,
+                to_date=to_date,
             )
+            for timeframe in normalized_timeframes
+        }
+        status_window = timeframe_windows.get("day") or next(iter(timeframe_windows.values()))
         symbols = self._watchlist_symbols()
         if limit:
             symbols = symbols[:limit]
@@ -247,16 +253,24 @@ class AnalysisService:
             "source_timeframes": normalized_timeframes,
             "timeframes": normalized_timeframes,
             "window": {
-                "from": window.from_time,
-                "to": window.to_time,
-                "days": window.days,
+                "from": status_window.from_time,
+                "to": status_window.to_time,
+                "days": status_window.days or effective_days,
+            },
+            "timeframe_windows": {
+                timeframe: {
+                    "from": window.from_time,
+                    "to": window.to_time,
+                    "days": window.days,
+                }
+                for timeframe, window in timeframe_windows.items()
             },
         }
         with self._jobs_lock:
             self._jobs[job_id] = job
         thread = threading.Thread(
             target=self._run_bulk_candle_download,
-            args=(job_id, targets, normalized_timeframes, window, sleep_seconds),
+            args=(job_id, targets, normalized_timeframes, timeframe_windows, sleep_seconds),
             daemon=True,
         )
         thread.start()
@@ -470,6 +484,7 @@ class AnalysisService:
             )
         chart_technical = analyze_technical(chart_candles)
         chart_structure = analyze_market_structure(chart_candles)
+        indicator_suite = analyze_indicator_suite(chart_candles)
         fundamentals = self._fundamental_context(symbol)
 
         if normalized_timeframe == "60minute":
@@ -508,6 +523,7 @@ class AnalysisService:
         entry_context = build_entry_context(
             chart_candles=chart_candles,
             daily_candles=daily_context,
+            hourly_candles=hourly,
             intraday_candles=intraday_context,
             bucket=setup["bucket"],
         )
@@ -532,6 +548,7 @@ class AnalysisService:
             option_snapshot=option_snapshot,
             entry_trigger=entry_trigger,
             entry_context=entry_context,
+            indicator_suite=indicator_suite,
             fundamentals=fundamentals,
             refresh_requested=refresh,
             refresh_results=refresh_results,
@@ -548,6 +565,7 @@ class AnalysisService:
             "multi_timeframe": multi_timeframe,
             "entry_trigger": entry_trigger,
             "entry_context": entry_context,
+            "indicator_suite": indicator_suite.to_dict(),
             "option_trade_guide": option_trade_guide,
             "option_snapshot": option_snapshot,
             "analysis_summary": analysis_summary,
@@ -616,12 +634,13 @@ class AnalysisService:
             )
         return results
 
-    def _run_bulk_candle_download(self, job_id: str, targets, timeframes, window, sleep_seconds: float) -> None:
+    def _run_bulk_candle_download(self, job_id: str, targets, timeframes, timeframe_windows, sleep_seconds: float) -> None:
         self._update_job(job_id, status="running", started_at=datetime.now().isoformat(timespec="seconds"))
         try:
             client = _zerodha_client()
             for exchange, tradingsymbol, file_stem in targets:
                 for timeframe in timeframes:
+                    window = timeframe_windows[timeframe]
                     current = f"{exchange}:{tradingsymbol} {timeframe}"
                     self._update_job(job_id, current=current)
                     try:
@@ -865,6 +884,94 @@ class AnalysisService:
                         else "Did not pull option chain during scan; enable Option chain for top candidates to enrich scan rows."
                     ),
                     "Ranking used price trend, market structure, relative strength, support/resistance, and cached volume from candle CSVs.",
+                ],
+            },
+        }
+
+    def scan_opportunities(
+        self,
+        opportunity_type: str | None = None,
+        direction: str | None = None,
+        limit: int | None = 50,
+        timeframe: str = "day",
+        from_date: str | None = None,
+        to_date: str | None = None,
+        days: int | None = None,
+    ) -> dict[str, Any]:
+        requested_type = (opportunity_type or "all").strip().lower()
+        if requested_type not in {"all", *SETUP_LABELS.keys()}:
+            allowed = ", ".join(["all", *SETUP_LABELS.keys()])
+            raise ValueError(f"opportunity_type must be one of: {allowed}")
+
+        requested_direction = (direction or "").strip().lower() or None
+        if requested_direction and requested_direction not in {"bullish", "bearish", "neutral", "watch", "avoid"}:
+            raise ValueError("direction must be bullish, bearish, neutral, watch, or avoid")
+
+        normalized_timeframe = normalize_timeframe(timeframe)
+        window = candle_window(from_date=from_date, to_date=to_date, days=days)
+        rows: list[dict[str, Any]] = []
+        errors: list[dict[str, str]] = []
+        analyzed_symbols = 0
+
+        for symbol in self._watchlist_symbols():
+            if not self._has_candles(symbol, normalized_timeframe):
+                continue
+            try:
+                candles, source = self._load_timeframe_with_summary(symbol, normalized_timeframe, window)
+                analyzed_symbols += 1
+                structure = analyze_market_structure(candles) if len(candles) >= 10 else None
+                relative_strength = None
+                try:
+                    relative_strength = asdict(self._relative_strength(symbol, candles, normalized_timeframe, window))
+                except Exception:
+                    relative_strength = None
+
+                matches = scan_symbol_for_setups(
+                    symbol=symbol,
+                    candles=candles,
+                    structure=structure,
+                    relative_strength=relative_strength,
+                )
+                for match in matches:
+                    if requested_type != "all" and match.setup_type != requested_type:
+                        continue
+                    if requested_direction and match.direction != requested_direction:
+                        continue
+                    rows.append(_opportunity_scan_row(match, source))
+            except Exception as exc:
+                errors.append({"symbol": symbol, "error": str(exc)})
+
+        rows = sorted(rows, key=lambda row: (row.get("score") or 0, row.get("confidence") == "high"), reverse=True)
+        limited_rows = rows if limit is None else rows[:limit]
+        available_symbols = self._available_count(normalized_timeframe)
+        return {
+            "type": requested_type,
+            "direction": requested_direction,
+            "timeframe": normalized_timeframe,
+            "timeframe_label": timeframe_label(normalized_timeframe),
+            "analyzed_symbols": analyzed_symbols,
+            "available_symbols": available_symbols,
+            "total_fno_symbols": len(self._watchlist_symbols()),
+            "matched_symbols": len(rows),
+            "limit": limit,
+            "results": limited_rows,
+            "errors": errors[:20],
+            "summary": {
+                "candle_source": "local cached candle CSV files",
+                "latest_candles_pulled": False,
+                "option_chain_pulled": False,
+                "option_chain_requested": False,
+                "option_chain_attempts": 0,
+                "option_chain_successes": 0,
+                "analyzed_symbols": analyzed_symbols,
+                "matched_symbols": len(rows),
+                "shown_symbols": len(limited_rows),
+                "error_count": len(errors),
+                "points": [
+                    f"Scanned {analyzed_symbols} symbols using {timeframe_label(normalized_timeframe)} cached candles.",
+                    "Scanner used deterministic rules: trend averages, RSI, ATR, market structure, Donchian levels, Bollinger compression, and volume ratio.",
+                    "Relative strength was included where cached Nifty/sector candles were available.",
+                    "No external data calls or order-placement actions are performed inside the scanner.",
                 ],
             },
         }
@@ -1279,6 +1386,7 @@ class AnalysisService:
         option_snapshot: dict[str, Any] | None,
         entry_trigger: dict[str, Any],
         entry_context: dict[str, Any],
+        indicator_suite,
         fundamentals: dict[str, Any],
         refresh_requested: bool,
         refresh_results: list[dict[str, Any]],
@@ -1328,7 +1436,15 @@ class AnalysisService:
                 "Entry context",
                 "analyzed",
                 entry_context["summary"],
-                "Fibonacci, VWAP, EMA20/EMA50, previous day high/low, opening range, and volume confirmation",
+                "ATR-normalized pullback score, Fibonacci, VWAP, EMA20/EMA50, previous day high/low, opening range, and volume confirmation",
+            )
+        )
+        rows.append(
+            _coverage_row(
+                "Indicator confluence",
+                "analyzed" if indicator_suite.rows else "insufficient",
+                indicator_suite.summary,
+                "Volume, EMA 9/26, VWAP, Chande Kroll Stop, Donchian 20, Ichimoku, VWMA20, and EMA 26/89",
             )
         )
 
@@ -1685,6 +1801,19 @@ def _scan_row(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _opportunity_scan_row(match, source: dict[str, Any]) -> dict[str, Any]:
+    row = match.to_dict()
+    row["setup"] = SETUP_LABELS.get(row["setup_type"], row["setup_type"])
+    row["reasons_text"] = "; ".join(row.get("reasons") or [])
+    row["timeframe"] = source.get("timeframe")
+    row["timeframe_label"] = source.get("timeframe_label")
+    row["candle_count"] = source.get("analyzed_count")
+    row["from"] = source.get("from")
+    row["to"] = source.get("to")
+    row["source_path"] = source.get("path")
+    return row
+
+
 def _structure_timeframe_rows(multi_timeframe: dict[str, Any]) -> list[dict[str, Any]]:
     rows = []
     for row in multi_timeframe.get("rows", []):
@@ -1970,6 +2099,45 @@ def _bulk_window_days(requested_timeframes: list[str], days: int | None) -> int:
         default=0,
     )
     return max(base_days, derived_minimum)
+
+
+def _bulk_window_days_for_timeframe(requested_timeframes: list[str], timeframe: str, days: int | None) -> int:
+    normalized = normalize_timeframe(timeframe)
+    if normalized == "day":
+        return _bulk_window_days(requested_timeframes, days)
+    requested_days = days or DEFAULT_REFRESH_DAYS[normalized]
+    return min(requested_days, DEFAULT_REFRESH_DAYS[normalized])
+
+
+def _bulk_window_for_timeframe(
+    requested_timeframes: list[str],
+    timeframe: str,
+    days: int | None,
+    from_date: str | None,
+    to_date: str | None,
+):
+    normalized = normalize_timeframe(timeframe)
+    max_days = _bulk_window_days_for_timeframe(requested_timeframes, normalized, days)
+    anchor = candle_window(from_date=from_date, to_date=to_date, days=None)
+    to_time = anchor.to_time or datetime.now()
+    from_time = anchor.from_time
+    if from_time is None:
+        from_time = to_time - timedelta(days=max_days)
+        return type(anchor)(from_time=from_time, to_time=to_time, days=max_days)
+
+    span_days = _window_span_days(from_time, to_time)
+    if normalized in {"60minute", "15minute"} and span_days > max_days:
+        from_time = to_time - timedelta(days=max_days)
+        return type(anchor)(from_time=from_time, to_time=to_time, days=max_days)
+    return type(anchor)(from_time=from_time, to_time=to_time, days=span_days)
+
+
+def _window_span_days(from_time: datetime, to_time: datetime) -> int:
+    seconds = max(0, (to_time - from_time).total_seconds())
+    days = int(seconds // 86400)
+    if seconds % 86400:
+        days += 1
+    return max(1, days)
 
 
 def _dedupe_targets(targets: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:

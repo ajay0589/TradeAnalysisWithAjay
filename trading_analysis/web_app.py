@@ -102,6 +102,19 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         strikes_around=_optional_int(params.get("strikes_around", [None])[0]) or 10,
                     )
                 )
+            elif parsed.path == "/api/scan-opportunities":
+                params = parse_qs(parsed.query)
+                self._send_json(
+                    self.service.scan_opportunities(
+                        opportunity_type=params.get("type", ["all"])[0],
+                        direction=params.get("direction", [None])[0] or None,
+                        timeframe=params.get("timeframe", ["day"])[0],
+                        from_date=params.get("from_date", [None])[0] or None,
+                        to_date=params.get("to_date", [None])[0] or None,
+                        days=_optional_int(params.get("days", [None])[0]),
+                        limit=_optional_limit(params.get("limit", ["50"])[0]),
+                    )
+                )
             else:
                 self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
         except Exception as exc:

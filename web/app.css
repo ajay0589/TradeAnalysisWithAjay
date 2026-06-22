@@ -293,6 +293,34 @@ label {
   line-height: 1.35;
 }
 
+.lookback-panel table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.lookback-panel th,
+.lookback-panel td {
+  border-top: 1px solid var(--line);
+  padding: 7px 4px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.lookback-panel th {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.lookback-panel td:first-child {
+  font-weight: 650;
+}
+
+.lookback-panel .field-hint:last-child {
+  margin: 10px 0 0;
+}
+
 .segmented {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -306,6 +334,19 @@ label {
 
 .segmented button:last-child {
   border-right: 0;
+}
+
+.setup-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.setup-grid button {
+  min-height: 34px;
+  text-align: left;
+  padding: 6px 10px;
 }
 
 .content {
@@ -668,7 +709,8 @@ tr:last-child td {
 .status-supportive,
 .status-completed,
 .status-sleeping,
-.status-stopped {
+.status-stopped,
+.status-bullish {
   border-color: #9bd8c3;
   color: var(--green);
   background: #effaf5;
@@ -677,7 +719,8 @@ tr:last-child td {
 .status-missing,
 .status-failed,
 .status-avoid,
-.status-exit_adjust {
+.status-exit_adjust,
+.status-bearish {
   border-color: #f0b8b3;
   color: var(--red);
   background: #fff5f4;
@@ -690,6 +733,7 @@ tr:last-child td {
 .status-wait,
 .status-watch,
 .status-caution,
+.status-neutral,
 .status-running,
 .status-queued,
 .status-stopping {

@@ -33,6 +33,18 @@ const BULK_DERIVED_MIN_DAYS = {
   week: 730,
 };
 
+const OPPORTUNITY_LABELS = {
+  bullish_breakout: "Bullish Breakout",
+  bullish_pullback: "Bullish Pullback",
+  bullish_trend: "Bullish Trend",
+  bearish_breakdown: "Bearish Breakdown",
+  bearish_pullback: "Bearish Pullback",
+  bearish_trend: "Bearish Trend",
+  neutral_range: "Neutral Range",
+  compression: "Compression Watch",
+  avoid: "Avoid / Choppy",
+};
+
 function fmt(value) {
   if (value === null || value === undefined || value === "") return "-";
   if (typeof value === "number") return value.toFixed(2);
@@ -153,12 +165,18 @@ async function loadSymbols() {
   $("dataStatus").textContent = `${data.total_fno_symbols || data.total} F&O stocks + ${data.total_indexes || 0} indexes tracked`;
 
   const list = $("symbolList");
+  const monitorList = $("optionMonitorSymbolList");
   list.innerHTML = "";
+  monitorList.innerHTML = "";
   data.symbols.forEach((row) => {
     const option = document.createElement("option");
     option.value = row.symbol;
     option.label = row.name || row.symbol;
     list.appendChild(option);
+    const monitorOption = document.createElement("option");
+    monitorOption.value = row.symbol;
+    monitorOption.label = row.name || row.symbol;
+    monitorList.appendChild(monitorOption);
   });
 }
 
@@ -241,6 +259,52 @@ async function loadOptionExpiries() {
   } catch (error) {
     setNotes([error.message], true);
   }
+}
+
+async function loadOptionMonitorExpiries() {
+  const firstSymbol = firstMonitorSymbol();
+  const select = $("optionMonitorExpiry");
+  select.innerHTML = `<option value="">Nearest expiry</option>`;
+  if (!firstSymbol) {
+    $("optionMonitorExpiryStatus").textContent = "Enter a stock/index to load expiries.";
+    return;
+  }
+  $("optionMonitorExpiryStatus").textContent = `Loading expiries for ${firstSymbol.toUpperCase()}...`;
+  try {
+    const data = await api(`/api/option-expiries?symbol=${encodeURIComponent(firstSymbol)}`);
+    if (data.symbol && firstSymbol.toUpperCase() !== data.symbol) {
+      replaceFirstMonitorSymbol(data.symbol);
+    }
+    (data.expiries || []).forEach((expiry) => {
+      const option = document.createElement("option");
+      option.value = expiry;
+      option.textContent = expiry === data.nearest ? `${expiry} (nearest)` : expiry;
+      select.appendChild(option);
+    });
+    $("optionMonitorExpiryStatus").textContent = (data.expiries || []).length
+      ? `${data.expiries.length} expiry date(s) loaded for ${data.symbol}.`
+      : `No expiries found for ${data.symbol}.`;
+  } catch (error) {
+    $("optionMonitorExpiryStatus").textContent = error.message;
+  }
+}
+
+function firstMonitorSymbol() {
+  return ($("optionMonitorSymbols").value || "")
+    .split(",")
+    .map((value) => value.trim())
+    .find(Boolean) || "";
+}
+
+function replaceFirstMonitorSymbol(symbol) {
+  const input = $("optionMonitorSymbols");
+  const parts = input.value.split(",").map((value) => value.trim());
+  if (!parts.length) {
+    input.value = symbol;
+    return;
+  }
+  parts[0] = symbol;
+  input.value = parts.filter(Boolean).join(", ");
 }
 
 async function loadOptionSnapshots() {
@@ -341,7 +405,7 @@ function renderBulkJob(job) {
   const percent = total ? Math.round((completed / total) * 100) : 0;
   const requested = bulkFrameLabels(job.requested_timeframes || job.timeframes || []);
   const sources = bulkFrameLabels(job.source_timeframes || job.timeframes || []);
-  const windowDays = job.window && job.window.days ? `${job.window.days} days` : "";
+  const windowDays = bulkWindowSummary(job) || (job.window && job.window.days ? `${job.window.days} days` : "");
   const requestNote = requested && sources && requested !== sources
     ? ` | requested ${requested}, downloaded ${sources}`
     : requested
@@ -380,6 +444,15 @@ function adjustBulkDaysForHigherFrames() {
 
 function bulkFrameLabels(values) {
   return (values || []).map((value) => BULK_TIMEFRAME_LABELS[value] || value).join(", ");
+}
+
+function bulkWindowSummary(job) {
+  const windows = job.timeframe_windows || {};
+  const entries = Object.entries(windows);
+  if (!entries.length) return "";
+  return entries
+    .map(([timeframe, window]) => `${BULK_TIMEFRAME_LABELS[timeframe] || timeframe} ${window.days || "-"}d`)
+    .join(", ");
 }
 
 async function startOptionMonitor() {
@@ -498,6 +571,37 @@ async function scan(type) {
   }
 }
 
+async function scanOpportunity(type) {
+  const label = OPPORTUNITY_LABELS[type] || type;
+  setNotes(`Loading ${label} scan...`);
+  setScanProgress("running", `Preparing ${label} scan...`);
+  try {
+    if ($("scanRefreshToggle").checked) {
+      await refreshCandlesForScan();
+    }
+    const params = scanParams();
+    params.set("type", type);
+    setScanProgress("running", `Scanning ${label} setups from cached candle data.`);
+    const data = await api(`/api/scan-opportunities?${params.toString()}`);
+    if (data.summary && $("scanRefreshToggle").checked) {
+      data.summary.latest_candles_pulled = true;
+      data.summary.points = [
+        "Pulled latest candles with the bulk downloader before running this scan.",
+        ...(data.summary.points || []),
+      ];
+    }
+    $("scanTitle").textContent = `${label} setups`;
+    $("scanMeta").textContent = `${data.results.length} shown / ${data.matched_symbols} matched / ${data.analyzed_symbols} analyzed / ${data.timeframe_label}`;
+    renderScanSummary(data.summary);
+    renderScan(data.results);
+    setScanProgress("completed", `${data.results.length} shown from ${data.matched_symbols} ${label} setup(s).`);
+    setNotes("Setup scan is rule-based analysis from cached candles. Treat it as a shortlist, not trade advice.");
+  } catch (error) {
+    setScanProgress("failed", error.message);
+    setNotes([error.message], true);
+  }
+}
+
 async function refreshCandlesForScan() {
   const timeframe = $("scanTimeframeSelect").value;
   const days = Number($("scanDays").value || 90);
@@ -587,6 +691,7 @@ function renderAnalysis(data) {
   $("structureMeta").textContent = `${(data.structure_timeframes || []).length} timeframe(s)`;
 
   renderScoreBreakdown(data.decision.score_breakdown);
+  renderIndicatorSuite(data.indicator_suite);
   renderMultiTimeframe(data.multi_timeframe);
   renderEntryTrigger(data.entry_trigger);
   renderEntryContext(data.entry_context);
@@ -636,6 +741,28 @@ function renderScoreBreakdown(breakdown) {
           <td>${component.name}</td>
           <td class="${pointsClass(component.points)}">${fmtSigned(component.points)}</td>
           <td>${component.detail || "-"}</td>
+        </tr>
+      `
+    )
+    .join("");
+}
+
+function renderIndicatorSuite(suite) {
+  if (!suite) {
+    $("indicatorMeta").textContent = "-";
+    $("indicatorBody").innerHTML = "";
+    return;
+  }
+  $("indicatorMeta").textContent = `${suite.bias || "-"} / score ${fmtInt(suite.score)} / ${suite.summary || ""}`;
+  $("indicatorBody").innerHTML = (suite.rows || [])
+    .map(
+      (row) => `
+        <tr>
+          <td>${row.name}</td>
+          <td><span class="status-badge status-${statusKey(row.signal)}">${statusLabel(row.signal || "-")}</span></td>
+          <td>${row.value || "-"}</td>
+          <td>${row.reference || "-"}</td>
+          <td>${row.detail || "-"}</td>
         </tr>
       `
     )
@@ -893,21 +1020,28 @@ function renderSnapshotStatus(snapshot) {
 function renderScan(rows) {
   $("scanBody").innerHTML = rows
     .map(
-      (row) => `
-        <tr>
-          <td><button class="linkBtn" data-symbol="${row.symbol}">${row.symbol}</button></td>
-          <td>${row.score}</td>
-          <td class="${row.bias}">${row.bias}</td>
-          <td>${row.strategy}</td>
-          <td>${fmt(row.close)}</td>
-          <td>${row.timeframe}: ${row.daily_trend} / ${row.daily_structure}</td>
-          <td>${fmt(row.support)}</td>
-          <td>${fmt(row.resistance)}</td>
-          <td>${row.option_zone || "-"}</td>
-          <td>${scanOptionChainCell(row.option_chain_context)}</td>
-          <td>${row.stock_vs_nifty}</td>
-        </tr>
-      `
+      (row) => {
+        const setup = row.setup || row.strategy || row.stance || row.setup_type || "-";
+        const direction = row.direction || row.bias || "-";
+        const zone = row.trigger_zone || row.target_zone || row.option_zone || "-";
+        const reasons = row.reasons_text || (row.reasons || []).join("; ") || row.reason || row.stock_vs_nifty || "-";
+        const optionNote = row.option_chain_context ? `<div class="cell-note">${scanOptionChainCell(row.option_chain_context)}</div>` : "";
+        return `
+          <tr>
+            <td><button class="linkBtn" data-symbol="${row.symbol}">${row.symbol}</button></td>
+            <td>${setup}</td>
+            <td class="${direction}">${direction}</td>
+            <td>${row.score}</td>
+            <td>${row.confidence || "-"}</td>
+            <td>${fmt(row.close)}</td>
+            <td>${fmt(row.support)}</td>
+            <td>${fmt(row.resistance)}</td>
+            <td>${fmt(row.invalidation)}</td>
+            <td>${zone}${optionNote}</td>
+            <td>${reasons}</td>
+          </tr>
+        `;
+      }
     )
     .join("");
 
@@ -1019,6 +1153,11 @@ $("refreshFiiDiiBtn").addEventListener("click", () => loadFiiDii(true));
 $("saveReportBtn").addEventListener("click", saveReport);
 $("startOptionMonitorBtn").addEventListener("click", startOptionMonitor);
 $("stopOptionMonitorBtn").addEventListener("click", stopOptionMonitor);
+$("optionMonitorSymbols").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") loadOptionMonitorExpiries();
+});
+$("optionMonitorSymbols").addEventListener("blur", loadOptionMonitorExpiries);
+$("optionMonitorSymbols").addEventListener("change", loadOptionMonitorExpiries);
 $("symbolInput").addEventListener("keydown", (event) => {
   if (event.key === "Enter") analyze();
 });
@@ -1031,6 +1170,9 @@ $("previousSnapshot").addEventListener("input", () => {
 });
 document.querySelectorAll("[data-scan]").forEach((button) => {
   button.addEventListener("click", () => scan(button.dataset.scan));
+});
+document.querySelectorAll("[data-opportunity]").forEach((button) => {
+  button.addEventListener("click", () => scanOpportunity(button.dataset.opportunity));
 });
 document.querySelectorAll("[data-tab-target]").forEach((button) => {
   button.setAttribute("role", "tab");

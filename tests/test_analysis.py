@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from trading_analysis.candles import normalize_timeframe, prepare_candles, candle_window
 from trading_analysis.analysis.entry_context import build_entry_context
 from trading_analysis.analysis.fundamental import analyze_fundamentals
+from trading_analysis.analysis.indicator_suite import analyze_indicator_suite
 from trading_analysis.analysis.market_structure import analyze_market_structure
 from trading_analysis.analysis.options import (
     OptionContract,
@@ -20,6 +21,7 @@ from trading_analysis.analysis.options import (
     select_strikes_around_spot,
 )
 from trading_analysis.analysis.relative_strength import compare_relative_strength
+from trading_analysis.analysis.scanners import scan_symbol_for_setups
 from trading_analysis.analysis.scoring import combine_signals
 from trading_analysis.analysis.technical import analyze_technical
 from trading_analysis.analysis.trade_decision import build_trade_decision
@@ -45,6 +47,7 @@ from trading_analysis.web_services import (
     AnalysisService,
     _analysis_header,
     _bulk_window_days,
+    _bulk_window_days_for_timeframe,
     _entry_trigger_panel,
     _normalize_bulk_requested_timeframes,
     _normalize_bulk_timeframes,
@@ -423,6 +426,9 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(_bulk_window_days(requested, 90), 1460)
         self.assertEqual(_bulk_window_days(["week"], 90), 730)
         self.assertEqual(_bulk_window_days(["day", "60minute"], 90), 90)
+        self.assertEqual(_bulk_window_days_for_timeframe(requested, "day", 1460), 1460)
+        self.assertEqual(_bulk_window_days_for_timeframe(requested, "60minute", 1460), 90)
+        self.assertEqual(_bulk_window_days_for_timeframe(requested, "15minute", 1460), 45)
 
     def test_analyze_refresh_preserves_monthly_daily_source_window(self) -> None:
         window = candle_window(days=200, now=datetime(2026, 6, 17))
@@ -489,6 +495,7 @@ class AnalysisTests(unittest.TestCase):
         )
 
         zones = {row["zone"] for row in context["rows"]}
+        self.assertIn("Volatility-normalized pullback score", zones)
         self.assertIn("Fibonacci retracement", zones)
         self.assertIn("VWAP", zones)
         self.assertIn("20 EMA / 50 EMA pullback", zones)
@@ -550,6 +557,128 @@ class AnalysisTests(unittest.TestCase):
                 os.environ.pop("ZERODHA_ACCESS_TOKEN", None)
             else:
                 os.environ["ZERODHA_ACCESS_TOKEN"] = original
+
+    def test_scanner_detects_bullish_breakout_with_volume(self) -> None:
+        closes = [100 + [0.0, 0.2, -0.1, 0.1, -0.2, 0.0][index % 6] for index in range(80)]
+        closes[-1] = 101.4
+        volumes = [1000] * 79 + [5000]
+
+        matches = scan_symbol_for_setups("ABC", self._scanner_candles(closes, volumes))
+        breakout = self._scanner_match(matches, "bullish_breakout")
+
+        self.assertIsNotNone(breakout)
+        self.assertGreaterEqual(breakout.score, 0)
+        self.assertLessEqual(breakout.score, 100)
+        self.assertTrue(breakout.reasons)
+
+    def test_scanner_detects_bearish_breakdown_with_volume(self) -> None:
+        closes = [100 + [0.0, 0.2, -0.1, 0.1, -0.2, 0.0][index % 6] for index in range(80)]
+        closes[-1] = 98.6
+        volumes = [1000] * 79 + [5000]
+
+        matches = scan_symbol_for_setups("ABC", self._scanner_candles(closes, volumes))
+        breakdown = self._scanner_match(matches, "bearish_breakdown")
+
+        self.assertIsNotNone(breakdown)
+        self.assertTrue(any("20-period low" in reason for reason in breakdown.reasons))
+
+    def test_scanner_detects_neutral_range(self) -> None:
+        closes = [100 + [0.25, -0.25, 0.15, -0.15, 0.0][index % 5] for index in range(90)]
+
+        matches = scan_symbol_for_setups("ABC", self._scanner_candles(closes))
+        neutral = self._scanner_match(matches, "neutral_range")
+
+        self.assertIsNotNone(neutral)
+        self.assertEqual(neutral.direction, "neutral")
+
+    def test_scanner_detects_volatility_compression(self) -> None:
+        wide = [100 + [2.0, -2.0, 1.5, -1.5, 0.0][index % 5] for index in range(100)]
+        tight = [100 + [0.10, -0.10, 0.05, -0.05, 0.0][index % 5] for index in range(40)]
+
+        matches = scan_symbol_for_setups("ABC", self._scanner_candles(wide + tight))
+        compression = self._scanner_match(matches, "compression")
+
+        self.assertIsNotNone(compression)
+        self.assertEqual(compression.direction, "watch")
+
+    def test_scanner_detects_bullish_pullback_near_support(self) -> None:
+        trend = [100 + (index * 0.4) for index in range(65)]
+        pullback = [125.0, 124.0, 123.0, 122.0, 121.0, 121.4]
+
+        matches = scan_symbol_for_setups("ABC", self._scanner_candles(trend + pullback))
+        bullish_pullback = self._scanner_match(matches, "bullish_pullback")
+
+        self.assertIsNotNone(bullish_pullback)
+        self.assertEqual(bullish_pullback.direction, "bullish")
+
+    def test_scanner_detects_bearish_pullback_near_resistance(self) -> None:
+        trend = [150 - (index * 0.4) for index in range(65)]
+        pullback = [125.0, 126.0, 127.0, 128.0, 129.0, 128.6]
+
+        matches = scan_symbol_for_setups("ABC", self._scanner_candles(trend + pullback))
+        bearish_pullback = self._scanner_match(matches, "bearish_pullback")
+
+        self.assertIsNotNone(bearish_pullback)
+        self.assertEqual(bearish_pullback.direction, "bearish")
+
+    def test_scanner_keeps_existing_setup_classifier_expectations(self) -> None:
+        self.assertEqual(classify_setup(65, "bullish", "uptrend")["bucket"], "bullish")
+        self.assertEqual(classify_setup(35, "bearish", "downtrend")["bucket"], "bearish")
+        self.assertEqual(classify_setup(50, "neutral", "range")["bucket"], "neutral")
+
+    def test_scanner_avoid_match_has_reasons_and_bounded_score(self) -> None:
+        matches = scan_symbol_for_setups("ABC", self._scanner_candles([100, 101, 100.5]))
+
+        self.assertEqual(matches[0].setup_type, "avoid")
+        self.assertGreaterEqual(matches[0].score, 0)
+        self.assertLessEqual(matches[0].score, 100)
+        self.assertTrue(matches[0].reasons)
+
+    def test_indicator_suite_includes_requested_indicators(self) -> None:
+        closes = [100 + (index * 0.5) for index in range(100)]
+
+        suite = analyze_indicator_suite(self._scanner_candles(closes))
+        names = {row.name for row in suite.rows}
+
+        self.assertEqual(suite.bias, "bullish")
+        self.assertGreater(suite.score, 50)
+        self.assertIn("Volume", names)
+        self.assertIn("EMA Cross 9 / 26", names)
+        self.assertIn("VWAP hlc3 Session", names)
+        self.assertIn("Chande Kroll Stop 10 1 9", names)
+        self.assertIn("DC 20 0", names)
+        self.assertIn("Ichimoku 9 26 52 26 26", names)
+        self.assertIn("VWMA 20", names)
+        self.assertIn("EMA Cross 89 / 26", names)
+
+    def test_indicator_suite_handles_insufficient_candles(self) -> None:
+        suite = analyze_indicator_suite(self._scanner_candles([100, 101, 102]))
+
+        self.assertEqual(suite.bias, "insufficient")
+        self.assertEqual(suite.rows, [])
+        self.assertTrue(suite.warnings)
+
+    def _scanner_candles(self, closes: list[float], volumes: list[int] | None = None) -> list[Candle]:
+        volumes = volumes or [1000] * len(closes)
+        output = []
+        for index, close in enumerate(closes):
+            previous = closes[index - 1] if index else close
+            high = max(previous, close) + 0.4
+            low = min(previous, close) - 0.4
+            output.append(
+                Candle(
+                    timestamp=datetime(2026, 1, 1) + timedelta(days=index),
+                    open=previous,
+                    high=high,
+                    low=low,
+                    close=close,
+                    volume=volumes[index],
+                )
+            )
+        return output
+
+    def _scanner_match(self, matches, setup_type: str):
+        return next((match for match in matches if match.setup_type == setup_type), None)
 
     def _entry_option_chain(self, spot_price: float):
         contracts = [

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from trading_analysis.analysis.market_structure import analyze_market_structure
-from trading_analysis.analysis.technical import ema
+from trading_analysis.analysis.technical import atr, ema, rsi
 from trading_analysis.models import Candle
 
 
@@ -14,16 +14,21 @@ FIB_RATIOS = (0.382, 0.5, 0.618)
 def build_entry_context(
     chart_candles: list[Candle],
     daily_candles: list[Candle] | None = None,
+    hourly_candles: list[Candle] | None = None,
     intraday_candles: list[Candle] | None = None,
     bucket: str = "watch",
 ) -> dict[str, Any]:
+    daily = daily_candles or chart_candles
+    hourly = hourly_candles or chart_candles
+    intraday = intraday_candles or []
     rows = [
+        _volatility_normalized_pullback_row(daily, hourly, intraday, bucket),
         _fibonacci_row(chart_candles, bucket),
         _ema_pullback_row(chart_candles, bucket),
-        _vwap_row(intraday_candles or chart_candles, bucket),
-        _previous_day_row(daily_candles or chart_candles, bucket),
-        _opening_range_row(intraday_candles or [], bucket),
-        _volume_confirmation_row(intraday_candles or chart_candles, bucket),
+        _vwap_row(intraday or chart_candles, bucket),
+        _previous_day_row(daily, bucket),
+        _opening_range_row(intraday, bucket),
+        _volume_confirmation_row(intraday or chart_candles, bucket),
     ]
     available = [row for row in rows if row["status"] != "missing"]
     supportive = sum(1 for row in available if row["signal"] == "supportive")
@@ -46,6 +51,83 @@ def build_entry_context(
         "summary": summary,
         "rows": rows,
     }
+
+
+def _volatility_normalized_pullback_row(
+    daily_candles: list[Candle],
+    hourly_candles: list[Candle],
+    intraday_candles: list[Candle],
+    bucket: str,
+) -> dict[str, Any]:
+    if bucket not in {"bullish", "bearish"}:
+        return _row(
+            "Volatility-normalized pullback score",
+            "not_applicable",
+            "watch",
+            "-",
+            "Directional pullback scoring is used for bullish put-sell and bearish call-sell setups.",
+        )
+    if len(daily_candles) < 50:
+        return _row(
+            "Volatility-normalized pullback score",
+            "missing",
+            "missing",
+            "-",
+            "At least 50 daily candles are needed for regime, EMA20, ATR14, and RSI14 context.",
+        )
+
+    closes = [candle.close for candle in daily_candles]
+    close = closes[-1]
+    ema20 = ema(closes, 20)
+    ema50 = ema(closes, 50)
+    ema200 = ema(closes, 200) if len(closes) >= 200 else None
+    atr14 = atr(daily_candles, 14)
+    rsi14 = rsi(closes, 14)
+    previous_rsi14 = rsi(closes[:-1], 14) if len(closes) > 15 else None
+    if ema20 is None or ema50 is None or atr14 is None or atr14 == 0 or rsi14 is None:
+        return _row(
+            "Volatility-normalized pullback score",
+            "missing",
+            "missing",
+            "-",
+            "Could not calculate EMA20, EMA50, ATR14, or RSI14.",
+        )
+
+    atr_z = (close - ema20) / atr14
+    volume_ratio = _volume_ratio(hourly_candles)
+    trigger = _intraday_trigger(intraday_candles, bucket)
+
+    if bucket == "bullish":
+        regime_ok = close > ema50 and (ema200 is None or ema50 > ema200)
+        depth_ok = -1.8 <= atr_z <= -0.8
+        rsi_ok = 38 <= rsi14 <= 52 and (previous_rsi14 is None or rsi14 >= previous_rsi14)
+        trigger_ok = trigger == "bullish reclaim"
+    else:
+        regime_ok = close < ema50 and (ema200 is None or ema50 < ema200)
+        depth_ok = 0.8 <= atr_z <= 1.8
+        rsi_ok = 48 <= rsi14 <= 62 and (previous_rsi14 is None or rsi14 <= previous_rsi14)
+        trigger_ok = trigger == "bearish rejection"
+
+    volume_ok = volume_ratio is not None and volume_ratio <= 0.9
+    checks = {
+        "regime": regime_ok,
+        "ATR pullback": depth_ok,
+        "RSI reset": rsi_ok,
+        "60m volume contraction": volume_ok,
+        "15m trigger": trigger_ok,
+    }
+    score = sum(1 for passed in checks.values() if passed)
+    signal = "supportive" if score >= 4 else "caution" if score >= 2 else "adverse"
+    level = f"{score}/5"
+    ema200_text = f", EMA200 {ema200:.2f}" if ema200 is not None else ""
+    volume_text = f"{volume_ratio:.2f}x" if volume_ratio is not None else "missing"
+    detail = (
+        f"Regime {'ok' if regime_ok else 'not ok'}; ATR-z {atr_z:.2f}; "
+        f"RSI14 {rsi14:.2f}; 60m volume {volume_text}; 15m trigger {trigger}. "
+        f"EMA20 {ema20:.2f}, EMA50 {ema50:.2f}{ema200_text}. "
+        f"Passed: {', '.join(name for name, passed in checks.items() if passed) or 'none'}."
+    )
+    return _row("Volatility-normalized pullback score", "analyzed", signal, level, detail)
 
 
 def _fibonacci_row(candles: list[Candle], bucket: str) -> dict[str, Any]:
@@ -236,3 +318,30 @@ def _distance_percent(close: float, level: float) -> float:
     if close == 0:
         return 0.0
     return ((close - level) / close) * 100
+
+
+def _volume_ratio(candles: list[Candle]) -> float | None:
+    if len(candles) < 21:
+        return None
+    baseline = _median([candle.volume for candle in candles[-21:-1]])
+    return candles[-1].volume / baseline if baseline else None
+
+
+def _intraday_trigger(candles: list[Candle], bucket: str) -> str:
+    if len(candles) < 2:
+        return "missing"
+    latest = candles[-1]
+    previous = candles[-2]
+    if bucket == "bullish" and latest.close > previous.high and latest.close > latest.open:
+        return "bullish reclaim"
+    if bucket == "bearish" and latest.close < previous.low and latest.close < latest.open:
+        return "bearish rejection"
+    return "not confirmed"
+
+
+def _median(values: list[int]) -> float:
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return float(ordered[middle])
+    return (ordered[middle - 1] + ordered[middle]) / 2

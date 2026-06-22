@@ -24,6 +24,7 @@ from trading_analysis.analysis.relative_strength import (
     load_sector_map,
     sector_config_for_symbol,
 )
+from trading_analysis.analysis.scanners import SETUP_LABELS
 from trading_analysis.analysis.scoring import combine_signals
 from trading_analysis.analysis.technical import analyze_technical
 from trading_analysis.analysis.trade_decision import TradeDecision, build_trade_decision
@@ -54,6 +55,7 @@ from trading_analysis.data_sources.nse_equity import (
 )
 from trading_analysis.data_sources.nse_fii_dii import fetch_fii_dii_activity, write_fii_dii_csv
 from trading_analysis.reporting.console import render_signal_table
+from trading_analysis.web_services import AnalysisService
 
 
 def main() -> None:
@@ -402,6 +404,29 @@ def main() -> None:
     )
     decision_parser.add_argument("--output-json", help="Optional path to write report JSON")
 
+    scan_opportunities_parser = subparsers.add_parser(
+        "scan-opportunities",
+        help="Scan cached F&O candles for richer opportunity setup types",
+    )
+    scan_opportunities_parser.add_argument(
+        "--type",
+        dest="opportunity_type",
+        default="all",
+        choices=["all", *SETUP_LABELS.keys()],
+        help="Opportunity setup type to scan",
+    )
+    scan_opportunities_parser.add_argument(
+        "--direction",
+        choices=["bullish", "bearish", "neutral", "watch", "avoid"],
+        help="Optional direction filter",
+    )
+    scan_opportunities_parser.add_argument("--timeframe", default="day", help="day, 60minute, 15minute, week, or month")
+    scan_opportunities_parser.add_argument("--days", type=int, help="Number of calendar days to analyze")
+    scan_opportunities_parser.add_argument("--from-date", help="Start date YYYY-MM-DD")
+    scan_opportunities_parser.add_argument("--to-date", help="End date YYYY-MM-DD")
+    scan_opportunities_parser.add_argument("--limit", type=int, default=50, help="Maximum rows to show")
+    scan_opportunities_parser.add_argument("--output-json", help="Optional path to write full scan JSON")
+
     args = parser.parse_args()
     if args.command == "analyze":
         run_analyze(args)
@@ -431,6 +456,8 @@ def main() -> None:
         run_fii_dii(args)
     elif args.command == "trade-decision":
         run_trade_decision(args)
+    elif args.command == "scan-opportunities":
+        run_scan_opportunities(args)
 
 
 def run_analyze(args: argparse.Namespace) -> None:
@@ -808,6 +835,26 @@ def run_trade_decision(args: argparse.Namespace) -> None:
         print(f"\nWrote trade-decision JSON: {output_path}")
 
 
+def run_scan_opportunities(args: argparse.Namespace) -> None:
+    service = AnalysisService()
+    payload = service.scan_opportunities(
+        opportunity_type=args.opportunity_type,
+        direction=args.direction,
+        timeframe=args.timeframe,
+        from_date=args.from_date,
+        to_date=args.to_date,
+        days=args.days,
+        limit=args.limit,
+    )
+    print(_render_scan_opportunities(payload))
+
+    if args.output_json:
+        output_path = Path(args.output_json)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        print(f"\nWrote scan-opportunities JSON: {output_path}")
+
+
 def _zerodha_client_from_settings() -> ZerodhaKiteClient:
     creds = load_settings().broker_credentials
     missing = [
@@ -1002,10 +1049,72 @@ def _render_option_chain_rows(analysis) -> str:
     return _plain_table(headers, rows)
 
 
+def _render_scan_opportunities(payload: dict) -> str:
+    summary = payload.get("summary") or {}
+    lines = [
+        f"Scan type: {payload.get('type')} | Direction: {payload.get('direction') or 'any'} | "
+        f"Timeframe: {payload.get('timeframe_label')}",
+        f"Analyzed: {payload.get('analyzed_symbols')} | Matched: {payload.get('matched_symbols')} | "
+        f"Shown: {len(payload.get('results') or [])} | Errors: {summary.get('error_count', 0)}",
+    ]
+    rows = []
+    for row in payload.get("results") or []:
+        zone = row.get("trigger_zone") or row.get("target_zone") or "-"
+        rows.append(
+            [
+                row.get("symbol", "-"),
+                row.get("setup", row.get("setup_type", "-")),
+                row.get("direction", "-"),
+                str(row.get("score", "-")),
+                row.get("confidence", "-"),
+                _fmt(row.get("close")),
+                _fmt(row.get("support")),
+                _fmt(row.get("resistance")),
+                _fmt(row.get("invalidation")),
+                _short_text(zone, 58),
+                _short_text(row.get("reasons_text") or "; ".join(row.get("reasons") or []), 72),
+            ]
+        )
+    if rows:
+        lines.extend(
+            [
+                "",
+                _plain_table(
+                    [
+                        "Symbol",
+                        "Setup",
+                        "Direction",
+                        "Score",
+                        "Confidence",
+                        "Close",
+                        "Support",
+                        "Resistance",
+                        "Invalidation",
+                        "Trigger/Zone",
+                        "Reasons",
+                    ],
+                    rows,
+                ),
+            ]
+        )
+    else:
+        lines.append("\nNo matching setups found.")
+    points = summary.get("points") or []
+    if points:
+        lines.extend(["", "Summary:"])
+        lines.extend(f"- {point}" for point in points)
+    return "\n".join(lines)
+
+
 def _fmt(value: float | None) -> str:
     if value is None:
         return "-"
     return f"{value:.2f}"
+
+
+def _short_text(value: object, limit: int) -> str:
+    text = str(value or "-")
+    return text if len(text) <= limit else text[: max(0, limit - 3)] + "..."
 
 
 def _plain_table(headers: list[str], rows: list[list[str]]) -> str:

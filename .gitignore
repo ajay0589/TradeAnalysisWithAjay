@@ -10,3 +10,4 @@ reports/
 logs/
 data/raw/
 data/processed/
+*.zip

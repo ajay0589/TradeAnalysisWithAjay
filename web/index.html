@@ -92,6 +92,47 @@
                 <input id="previousSnapshot" placeholder="Leave blank for auto latest" />
                 <div id="snapshotStatus" class="mini-status">Snapshot history not loaded</div>
               </div>
+              <div class="panel lookback-panel">
+                <label>Lookback Reference</label>
+                <div class="field-hint">Use longer windows for direction and shorter windows for entry timing.</div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Frame</th>
+                      <th>Ideal</th>
+                      <th>Use</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Monthly</td>
+                      <td>36-60 candles</td>
+                      <td>Major trend, cycle, regime</td>
+                    </tr>
+                    <tr>
+                      <td>Weekly</td>
+                      <td>104-156 candles</td>
+                      <td>Swing structure, large S/R</td>
+                    </tr>
+                    <tr>
+                      <td>Daily</td>
+                      <td>200-365 candles</td>
+                      <td>Bias, pullback, ATR, RSI</td>
+                    </tr>
+                    <tr>
+                      <td>1 hour</td>
+                      <td>60-90 days</td>
+                      <td>Setup and pullback quality</td>
+                    </tr>
+                    <tr>
+                      <td>15 min</td>
+                      <td>20-45 days</td>
+                      <td>Entry trigger and volume</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div class="field-hint">Bulk download guide: Monthly needs about 1460 daily days, Weekly 730, Daily 365, 1 hour 90, 15 min 45.</div>
+              </div>
             </aside>
 
             <section class="content">
@@ -169,6 +210,25 @@
                     </tr>
                   </thead>
                   <tbody id="scoreBreakdownBody"></tbody>
+                </table>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Indicator Confluence</h2>
+                  <span id="indicatorMeta"></span>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Indicator</th>
+                      <th>Signal</th>
+                      <th>Value</th>
+                      <th>Reference</th>
+                      <th>Read</th>
+                    </tr>
+                  </thead>
+                  <tbody id="indicatorBody"></tbody>
                 </table>
               </section>
 
@@ -382,10 +442,23 @@
                 </div>
                 <label for="scanExpiry">Option expiry</label>
                 <input id="scanExpiry" type="date" />
+                <label>Classic bias scan</label>
                 <div class="segmented">
                   <button data-scan="bullish">Bullish</button>
                   <button data-scan="bearish">Bearish</button>
                   <button data-scan="neutral">Neutral</button>
+                </div>
+                <label>Opportunity setup scan</label>
+                <div class="setup-grid">
+                  <button data-opportunity="bullish_breakout">Bullish Breakout</button>
+                  <button data-opportunity="bullish_pullback">Bullish Pullback</button>
+                  <button data-opportunity="bullish_trend">Bullish Trend</button>
+                  <button data-opportunity="bearish_breakdown">Bearish Breakdown</button>
+                  <button data-opportunity="bearish_pullback">Bearish Pullback</button>
+                  <button data-opportunity="bearish_trend">Bearish Trend</button>
+                  <button data-opportunity="neutral_range">Neutral Range</button>
+                  <button data-opportunity="compression">Compression Watch</button>
+                  <button data-opportunity="avoid">Avoid / Choppy</button>
                 </div>
               </div>
             </aside>
@@ -423,16 +496,16 @@
                   <thead>
                     <tr>
                       <th>Symbol</th>
+                      <th>Setup</th>
+                      <th>Direction</th>
                       <th>Score</th>
-                      <th>Bias</th>
-                      <th>Strategy</th>
+                      <th>Confidence</th>
                       <th>Close</th>
-                      <th>Trend</th>
                       <th>Support</th>
                       <th>Resistance</th>
-                      <th>Option Zone</th>
-                      <th>Option Chain</th>
-                      <th>RS</th>
+                      <th>Invalidation</th>
+                      <th>Trigger/Target Zone</th>
+                      <th>Reasons</th>
                     </tr>
                   </thead>
                   <tbody id="scanBody"></tbody>
@@ -476,7 +549,7 @@
                       <label class="check-row compact-check"><input id="bulkHour" type="checkbox" checked /> 1 hour</label>
                       <label class="check-row compact-check"><input id="bulk15" type="checkbox" checked /> 15 min</label>
                     </div>
-                    <div class="field-hint">Monthly and weekly are derived from daily candles. Keep 1460 days selected for valid monthly MTF analysis.</div>
+                    <div class="field-hint">Monthly and weekly are derived from daily candles. Use 1460 days for monthly, 730 for weekly, 365 for daily, 90 for 1 hour, and 45 for 15 min analysis.</div>
                     <div class="date-grid">
                       <div>
                         <label for="bulkDays">Days</label>
@@ -524,11 +597,15 @@
                   <div class="date-grid">
                     <div>
                       <label for="optionMonitorSymbols">Stocks / indexes</label>
-                      <input id="optionMonitorSymbols" placeholder="NIFTY, BANKNIFTY, RELIANCE" />
+                      <input id="optionMonitorSymbols" list="optionMonitorSymbolList" placeholder="NIFTY, BANKNIFTY, RELIANCE" autocomplete="off" />
+                      <datalist id="optionMonitorSymbolList"></datalist>
                     </div>
                     <div>
                       <label for="optionMonitorExpiry">Expiry</label>
-                      <input id="optionMonitorExpiry" type="date" />
+                      <select id="optionMonitorExpiry">
+                        <option value="">Nearest expiry</option>
+                      </select>
+                      <div id="optionMonitorExpiryStatus" class="cell-note">Enter a stock/index to load expiries.</div>
                     </div>
                   </div>
                   <div class="date-grid">

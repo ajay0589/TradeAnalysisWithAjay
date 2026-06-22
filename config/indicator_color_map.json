@@ -1,0 +1,201 @@
+{
+  "name": "TradingView indicator color map",
+  "source": "Visual mapping from NIFTY daily TradingView screenshots shared on 2026-06-22",
+  "note": "Hex values are approximate because the source images are JPEG screenshots. Use indicator names and plot roles as the durable mapping, not only the exact hex values.",
+  "theme": "light",
+  "items": [
+    {
+      "indicator": "Price candles",
+      "confidence": "high",
+      "plots": [
+        {
+          "plot": "Bullish candle body / wick",
+          "color_name": "teal green",
+          "hex": "#089981",
+          "use": "Price closed above open"
+        },
+        {
+          "plot": "Bearish candle body / wick",
+          "color_name": "red",
+          "hex": "#F23645",
+          "use": "Price closed below open"
+        }
+      ]
+    },
+    {
+      "indicator": "Volume",
+      "confidence": "high",
+      "plots": [
+        {
+          "plot": "Up-volume bar",
+          "color_name": "light teal",
+          "hex": "#8BD2C7",
+          "use": "Volume for bullish candle"
+        },
+        {
+          "plot": "Down-volume bar",
+          "color_name": "light red",
+          "hex": "#F5A0A8",
+          "use": "Volume for bearish candle"
+        }
+      ]
+    },
+    {
+      "indicator": "EMA Cross 9 26",
+      "confidence": "high",
+      "plots": [
+        {
+          "plot": "EMA 9 fast line",
+          "color_name": "purple",
+          "hex": "#B45ACB",
+          "use": "Short-term momentum line"
+        },
+        {
+          "plot": "EMA 26 slow line",
+          "color_name": "green",
+          "hex": "#4DA866",
+          "use": "Short-term trend comparison line"
+        }
+      ]
+    },
+    {
+      "indicator": "VWAP hlc3 Session",
+      "confidence": "high",
+      "plots": [
+        {
+          "plot": "Session VWAP",
+          "color_name": "pink red",
+          "hex": "#E05265",
+          "use": "Session volume-weighted mean price"
+        }
+      ]
+    },
+    {
+      "indicator": "Chande Kroll Stop 10 1 9",
+      "confidence": "high",
+      "plots": [
+        {
+          "plot": "Long / lower stop",
+          "color_name": "orange",
+          "hex": "#F5A400",
+          "use": "Trailing stop or bullish-side invalidation"
+        },
+        {
+          "plot": "Short / upper stop",
+          "color_name": "blue",
+          "hex": "#3B78C8",
+          "use": "Trailing stop or bearish-side invalidation"
+        }
+      ]
+    },
+    {
+      "indicator": "DC 20 0",
+      "likely_indicator": "Donchian Channel 20",
+      "confidence": "medium",
+      "plots": [
+        {
+          "plot": "Upper channel",
+          "color_name": "magenta",
+          "hex": "#D83C74",
+          "use": "20-period highest high / upper breakout band"
+        },
+        {
+          "plot": "Lower channel",
+          "color_name": "green",
+          "hex": "#5FAE67",
+          "use": "20-period lowest low / lower breakdown band"
+        },
+        {
+          "plot": "Channel fill",
+          "color_name": "pale red",
+          "hex": "#F7DCDC",
+          "use": "Area between Donchian upper and lower bands"
+        }
+      ]
+    },
+    {
+      "indicator": "Ichimoku 9 26 52 26 26",
+      "confidence": "medium",
+      "plots": [
+        {
+          "plot": "Green Ichimoku line / span",
+          "color_name": "green",
+          "hex": "#58A067",
+          "use": "Ichimoku support-side plot from the active template"
+        },
+        {
+          "plot": "Pink Ichimoku line / span",
+          "color_name": "pink",
+          "hex": "#D84C80",
+          "use": "Ichimoku resistance-side plot from the active template"
+        },
+        {
+          "plot": "Bearish cloud fill",
+          "color_name": "pale red",
+          "hex": "#F7DCDC",
+          "use": "Cloud resistance / uncertainty zone visible ahead of price"
+        }
+      ]
+    },
+    {
+      "indicator": "VWMA 20",
+      "confidence": "high",
+      "plots": [
+        {
+          "plot": "VWMA 20",
+          "color_name": "dark maroon",
+          "hex": "#8B1A2B",
+          "use": "20-period volume-weighted moving average"
+        }
+      ]
+    },
+    {
+      "indicator": "EMA Cross 89 26",
+      "confidence": "high",
+      "plots": [
+        {
+          "plot": "EMA 89 slow trend filter",
+          "color_name": "dark charcoal",
+          "hex": "#151923",
+          "use": "Medium-term trend or resistance line"
+        },
+        {
+          "plot": "EMA 26 comparison line",
+          "color_name": "green",
+          "hex": "#4DA866",
+          "use": "Faster comparison line against EMA 89"
+        },
+        {
+          "plot": "Unused / hidden output",
+          "color_name": "none",
+          "hex": null,
+          "use": "Legend shows empty output symbol"
+        }
+      ]
+    },
+    {
+      "indicator": "Manual drawings",
+      "confidence": "high",
+      "plots": [
+        {
+          "plot": "Resistance trendline / handwritten mark",
+          "color_name": "black",
+          "hex": "#111111",
+          "use": "Manually drawn resistance or annotation"
+        },
+        {
+          "plot": "Rising support trendline",
+          "color_name": "dark red",
+          "hex": "#7A0D1A",
+          "use": "Manually drawn support line"
+        },
+        {
+          "plot": "Green marked swing path",
+          "color_name": "light green",
+          "hex": "#66B56B",
+          "use": "Manually marked price path or support reaction"
+        }
+      ]
+    }
+  ]
+}
