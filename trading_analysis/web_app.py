@@ -115,6 +115,16 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         limit=_optional_limit(params.get("limit", ["50"])[0]),
                     )
                 )
+            elif parsed.path == "/api/krishna-setup-scan":
+                params = parse_qs(parsed.query)
+                self._send_json(
+                    self.service.scan_krishna_setup(
+                        days=_optional_int(params.get("days", [None])[0]) or 365,
+                        from_date=params.get("from_date", [None])[0] or None,
+                        to_date=params.get("to_date", [None])[0] or None,
+                        limit=_optional_limit(params.get("limit", ["50"])[0]),
+                    )
+                )
             else:
                 self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
         except Exception as exc:

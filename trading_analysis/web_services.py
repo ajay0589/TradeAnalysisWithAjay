@@ -18,6 +18,7 @@ from urllib.error import HTTPError, URLError
 from trading_analysis.analysis.entry_context import build_entry_context
 from trading_analysis.analysis.fundamental import analyze_fundamentals
 from trading_analysis.analysis.indicator_suite import analyze_indicator_suite
+from trading_analysis.analysis.krishna_setup import scan_krishna_bullish_setup
 from trading_analysis.analysis.market_structure import analyze_market_structure
 from trading_analysis.analysis.options import (
     analyze_option_chain,
@@ -972,6 +973,69 @@ class AnalysisService:
                     "Scanner used deterministic rules: trend averages, RSI, ATR, market structure, Donchian levels, Bollinger compression, and volume ratio.",
                     "Relative strength was included where cached Nifty/sector candles were available.",
                     "No external data calls or order-placement actions are performed inside the scanner.",
+                ],
+            },
+        }
+
+    def scan_krishna_setup(
+        self,
+        limit: int | None = 50,
+        days: int | None = 365,
+        from_date: str | None = None,
+        to_date: str | None = None,
+    ) -> dict[str, Any]:
+        timeframe = "day"
+        window = candle_window(from_date=from_date, to_date=to_date, days=days)
+        rows: list[dict[str, Any]] = []
+        errors: list[dict[str, str]] = []
+        analyzed_symbols = 0
+
+        for symbol in self._watchlist_symbols():
+            if not self._has_candles(symbol, timeframe):
+                continue
+            try:
+                candles, source = self._load_timeframe_with_summary(symbol, timeframe, window)
+                analyzed_symbols += 1
+                structure = analyze_market_structure(candles) if len(candles) >= 10 else None
+                match = scan_krishna_bullish_setup(symbol, candles, structure)
+                if match:
+                    row = match.to_dict()
+                    row["timeframe"] = timeframe
+                    row["timeframe_label"] = timeframe_label(timeframe)
+                    row["candle_count"] = source.get("analyzed_count")
+                    row["from"] = source.get("from")
+                    row["to"] = source.get("to")
+                    row["source_path"] = source.get("path")
+                    row["reasons_text"] = "; ".join(row.get("reasons") or [])
+                    rows.append(row)
+            except Exception as exc:
+                errors.append({"symbol": symbol, "error": str(exc)})
+
+        rows = sorted(rows, key=lambda row: (row.get("score") or 0, -(row.get("yellow_gap_percent") or 0)), reverse=True)
+        limited_rows = rows if limit is None else rows[:limit]
+        return {
+            "type": "krishna_bullish_pullback_watch",
+            "timeframe": timeframe,
+            "timeframe_label": timeframe_label(timeframe),
+            "analyzed_symbols": analyzed_symbols,
+            "available_symbols": self._available_count(timeframe),
+            "total_fno_symbols": len(self._watchlist_symbols()),
+            "matched_symbols": len(rows),
+            "limit": limit,
+            "results": limited_rows,
+            "errors": errors[:20],
+            "summary": {
+                "candle_source": "local cached daily candle CSV files",
+                "latest_candles_pulled": False,
+                "analyzed_symbols": analyzed_symbols,
+                "matched_symbols": len(rows),
+                "shown_symbols": len(limited_rows),
+                "error_count": len(errors),
+                "points": [
+                    "Daily-only bullish continuation pullback/consolidation watch.",
+                    "Ignored Ichimoku and EMA 26/89 as requested.",
+                    "Requires EMA9 above EMA26, non-downtrend structure, and yellow Chande Kroll upper line above recent candles and the selected indicator stack.",
+                    "This is a manual-review shortlist, not an entry signal or trade recommendation.",
                 ],
             },
         }

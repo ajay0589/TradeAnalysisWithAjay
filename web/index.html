@@ -22,6 +22,7 @@
       <nav class="activity-tabs" aria-label="Decision desk activities">
         <button class="tab-btn active" data-tab-target="analyze" type="button">Analyze</button>
         <button class="tab-btn" data-tab-target="scans" type="button">Scans</button>
+        <button class="tab-btn" data-tab-target="krishna" type="button">Krishna Setup</button>
         <button class="tab-btn" data-tab-target="data" type="button">Data Ops</button>
         <button class="tab-btn" data-tab-target="reports" type="button">Reports</button>
       </nav>
@@ -509,6 +510,83 @@
                     </tr>
                   </thead>
                   <tbody id="scanBody"></tbody>
+                </table>
+              </section>
+            </section>
+          </section>
+        </section>
+
+        <section id="tab-krishna" class="tab-pane" data-tab-panel="krishna">
+          <section class="workspace">
+            <aside class="sidebar">
+              <div class="panel">
+                <label>Krishna Bullish Setup</label>
+                <div class="field-hint">Daily timeframe only. Pulls latest daily candles first, then filters F&O stocks.</div>
+                <div class="date-grid">
+                  <div>
+                    <label for="krishnaDays">Days</label>
+                    <input id="krishnaDays" type="number" min="60" step="1" value="365" />
+                  </div>
+                  <div>
+                    <label for="krishnaLimit">Show</label>
+                    <input id="krishnaLimit" placeholder="50" value="50" />
+                  </div>
+                </div>
+                <label class="check-row">
+                  <input id="krishnaRefreshToggle" type="checkbox" checked />
+                  Pull latest daily candles before scan
+                </label>
+                <button id="krishnaScanBtn" class="full-btn">Scan bullish pullback watch</button>
+              </div>
+            </aside>
+
+            <section class="content">
+              <section class="activity-hero">
+                <div>
+                  <h2>Krishna Setup Filter</h2>
+                  <p>Daily uptrend stocks where the yellow Chande Kroll line is above recent candles and the selected indicator stack.</p>
+                </div>
+                <span id="krishnaMeta"></span>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Scan Progress & Data Used</h2>
+                  <span id="krishnaProgressMeta">Idle</span>
+                </div>
+                <div class="ops-body">
+                  <div class="progress-shell">
+                    <div id="krishnaProgressBar" class="progress-bar"></div>
+                  </div>
+                  <div id="krishnaProgressStatus" class="mini-status">Run the scan to refresh daily candles and filter F&O stocks.</div>
+                  <div id="krishnaSummaryCards" class="compact-metrics"></div>
+                  <div id="krishnaSummaryPoints" class="mini-list"></div>
+                </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Filtered Stocks</h2>
+                  <span id="krishnaResultMeta"></span>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Symbol</th>
+                      <th>Score</th>
+                      <th>Confidence</th>
+                      <th>Close</th>
+                      <th>Yellow CK</th>
+                      <th>Gap</th>
+                      <th>EMA 9/26</th>
+                      <th>VWMA / VWAP</th>
+                      <th>DC20</th>
+                      <th>Vol x20</th>
+                      <th>Structure</th>
+                      <th>Why</th>
+                    </tr>
+                  </thead>
+                  <tbody id="krishnaBody"></tbody>
                 </table>
               </section>
             </section>

@@ -11,6 +11,7 @@ from trading_analysis.candles import normalize_timeframe, prepare_candles, candl
 from trading_analysis.analysis.entry_context import build_entry_context
 from trading_analysis.analysis.fundamental import analyze_fundamentals
 from trading_analysis.analysis.indicator_suite import analyze_indicator_suite
+from trading_analysis.analysis.krishna_setup import scan_krishna_bullish_setup
 from trading_analysis.analysis.market_structure import analyze_market_structure
 from trading_analysis.analysis.options import (
     OptionContract,
@@ -657,6 +658,28 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(suite.bias, "insufficient")
         self.assertEqual(suite.rows, [])
         self.assertTrue(suite.warnings)
+
+    def test_krishna_setup_detects_daily_uptrend_pullback_watch(self) -> None:
+        closes = [100 + (index * 0.45) for index in range(70)] + [152, 145, 144, 143, 142]
+        candles = self._scanner_candles(closes)
+        structure = analyze_market_structure(candles)
+
+        match = scan_krishna_bullish_setup("ABC", candles, structure)
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.symbol, "ABC")
+        self.assertGreater(match.yellow_line, match.candle_high)
+        self.assertGreater(match.ema9, match.ema26)
+        self.assertTrue(any("Yellow Chande Kroll line" in reason for reason in match.reasons))
+
+    def test_krishna_setup_rejects_downtrend(self) -> None:
+        closes = [150 - (index * 0.35) for index in range(75)]
+        candles = self._scanner_candles(closes)
+        structure = analyze_market_structure(candles)
+
+        match = scan_krishna_bullish_setup("ABC", candles, structure)
+
+        self.assertIsNone(match)
 
     def _scanner_candles(self, closes: list[float], volumes: list[int] | None = None) -> list[Candle]:
         volumes = volumes or [1000] * len(closes)

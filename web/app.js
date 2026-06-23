@@ -3,6 +3,7 @@ const state = {
   lastAnalysis: null,
   bulkJobId: null,
   bulkPollTimer: null,
+  krishnaRefreshJobId: null,
   optionMonitorJobId: null,
   optionMonitorPollTimer: null,
 };
@@ -681,6 +682,134 @@ function fmtMetric(value) {
   return typeof value === "number" ? fmtInt(value) : String(value ?? "-");
 }
 
+async function runKrishnaScan() {
+  setNotes("Running Krishna bullish setup scan...");
+  setKrishnaProgress("running", "Preparing daily bullish setup filter...");
+  try {
+    if ($("krishnaRefreshToggle").checked) {
+      await refreshDailyForKrishna();
+    }
+    const params = new URLSearchParams();
+    const days = $("krishnaDays").value.trim();
+    const limit = $("krishnaLimit").value.trim();
+    if (days) params.set("days", days);
+    params.set("limit", limit || "50");
+    setKrishnaProgress("running", "Filtering cached daily candles for Krishna setup...");
+    const data = await api(`/api/krishna-setup-scan?${params.toString()}`);
+    if (data.summary && $("krishnaRefreshToggle").checked) {
+      data.summary.latest_candles_pulled = true;
+      data.summary.points = [
+        "Pulled latest daily candles with the bulk downloader before running this setup filter.",
+        ...(data.summary.points || []),
+      ];
+    }
+    $("krishnaMeta").textContent = `${data.results.length} shown / ${data.matched_symbols} matched / ${data.analyzed_symbols} analyzed / Daily`;
+    $("krishnaResultMeta").textContent = `${data.results.length} shown`;
+    renderKrishnaSummary(data.summary);
+    renderKrishnaResults(data.results);
+    setKrishnaProgress("completed", `${data.results.length} shown from ${data.matched_symbols} matching stock(s).`);
+    setNotes("Krishna setup shortlist is ready. Use it for manual chart review; entries are not automated.");
+  } catch (error) {
+    setKrishnaProgress("failed", error.message);
+    setNotes([error.message], true);
+  }
+}
+
+async function refreshDailyForKrishna() {
+  const days = Number($("krishnaDays").value || 365);
+  const job = await postApi("/api/bulk-candles", {
+    timeframes: ["day"],
+    days,
+    limit: null,
+  });
+  state.krishnaRefreshJobId = job.job_id;
+  renderKrishnaRefreshJob(job);
+  await waitForKrishnaRefreshJob(job.job_id);
+}
+
+async function waitForKrishnaRefreshJob(jobId) {
+  while (true) {
+    const job = await api(`/api/job?job_id=${encodeURIComponent(jobId)}`);
+    renderKrishnaRefreshJob(job);
+    if (!["queued", "running"].includes(job.status)) {
+      if (job.status !== "completed") {
+        throw new Error(`Daily candle refresh ${job.status}. ${job.errors?.[0] || ""}`.trim());
+      }
+      return job;
+    }
+    await delay(1500);
+  }
+}
+
+function renderKrishnaRefreshJob(job) {
+  const total = job.total || 0;
+  const completed = job.completed || 0;
+  const percent = total ? Math.round((completed / total) * 100) : 0;
+  $("krishnaProgressMeta").textContent = `refresh ${job.status} / ${completed}/${total}`;
+  $("krishnaProgressStatus").textContent = `Refreshing daily candles: ${job.current || "starting"} | success ${job.successes || 0} | failures ${job.failures || 0}`;
+  $("krishnaProgressBar").style.width = `${percent}%`;
+}
+
+function setKrishnaProgress(status, detail) {
+  const percent = status === "completed" ? "100%" : status === "failed" ? "100%" : "55%";
+  $("krishnaProgressMeta").textContent = status;
+  $("krishnaProgressStatus").textContent = detail;
+  $("krishnaProgressBar").style.width = percent;
+  $("krishnaProgressBar").classList.toggle("active", status === "running");
+}
+
+function renderKrishnaSummary(summary) {
+  if (!summary) {
+    $("krishnaSummaryCards").innerHTML = "";
+    $("krishnaSummaryPoints").innerHTML = "";
+    return;
+  }
+  const cards = [
+    ["Analyzed", summary.analyzed_symbols],
+    ["Matched", summary.matched_symbols],
+    ["Shown", summary.shown_symbols],
+    ["Errors", summary.error_count],
+    ["Latest candles", summary.latest_candles_pulled ? "Pulled" : "No"],
+  ];
+  $("krishnaSummaryCards").innerHTML = cards
+    .map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${fmtMetric(value)}</strong></div>`)
+    .join("");
+  $("krishnaSummaryPoints").innerHTML = (summary.points || []).map((point) => `<div>${point}</div>`).join("");
+}
+
+function renderKrishnaResults(rows) {
+  $("krishnaBody").innerHTML = (rows || [])
+    .map((row) => {
+      const reasons = row.reasons_text || (row.reasons || []).join("; ") || "-";
+      const warnings = (row.warnings || []).length ? `<div class="cell-note">${row.warnings.join(" | ")}</div>` : "";
+      return `
+        <tr>
+          <td><button class="linkBtn" data-symbol="${row.symbol}">${row.symbol}</button></td>
+          <td>${fmtInt(row.score)}</td>
+          <td>${row.confidence || "-"}</td>
+          <td>${fmt(row.close)}</td>
+          <td>${fmt(row.yellow_line)}</td>
+          <td>${fmt(row.yellow_gap_percent)}%<div class="cell-note">${row.yellow_gap_atr === null || row.yellow_gap_atr === undefined ? "-" : `${fmt(row.yellow_gap_atr)} ATR`}</div></td>
+          <td>${fmt(row.ema9)} / ${fmt(row.ema26)}</td>
+          <td>${fmt(row.vwma20)} / ${fmt(row.vwap)}</td>
+          <td>${fmt(row.donchian_upper20)} / ${fmt(row.donchian_mid20)} / ${fmt(row.donchian_lower20)}</td>
+          <td>${fmt(row.volume_ratio20)}</td>
+          <td>${row.structure_trend || "-"}</td>
+          <td>${reasons}${warnings}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  document.querySelectorAll("#krishnaBody .linkBtn").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("symbolInput").value = button.dataset.symbol;
+      activateTab("analyze");
+      analyze();
+    });
+  });
+}
+
 function renderAnalysis(data) {
   renderAnalysisHeader(data.analysis_header, data);
   $("biasValue").textContent = data.decision.bias;
@@ -1151,6 +1280,7 @@ $("bulkWeek").addEventListener("change", adjustBulkDaysForHigherFrames);
 $("sectorUploadBtn").addEventListener("click", uploadSectorCsv);
 $("refreshFiiDiiBtn").addEventListener("click", () => loadFiiDii(true));
 $("saveReportBtn").addEventListener("click", saveReport);
+$("krishnaScanBtn").addEventListener("click", runKrishnaScan);
 $("startOptionMonitorBtn").addEventListener("click", startOptionMonitor);
 $("stopOptionMonitorBtn").addEventListener("click", stopOptionMonitor);
 $("optionMonitorSymbols").addEventListener("keydown", (event) => {
