@@ -23,6 +23,7 @@
         <button class="tab-btn active" data-tab-target="analyze" type="button">Analyze</button>
         <button class="tab-btn" data-tab-target="scans" type="button">Scans</button>
         <button class="tab-btn" data-tab-target="krishna" type="button">Krishna Setup</button>
+        <button class="tab-btn" data-tab-target="backtest" type="button">Backtest</button>
         <button class="tab-btn" data-tab-target="data" type="button">Data Ops</button>
         <button class="tab-btn" data-tab-target="reports" type="button">Reports</button>
       </nav>
@@ -569,25 +570,200 @@
                   <h2>Filtered Stocks</h2>
                   <span id="krishnaResultMeta"></span>
                 </div>
+                <div class="table-actions">
+                  <button id="krishnaCopyBtn" type="button">Copy symbols</button>
+                  <button id="krishnaDownloadBtn" type="button">Download CSV</button>
+                </div>
+                <div class="wide-table">
+                  <table class="krishna-table">
+                    <thead>
+                      <tr>
+                        <th>Symbol</th>
+                        <th>Score</th>
+                        <th>Confidence</th>
+                        <th>Close</th>
+                        <th>Yellow CK</th>
+                        <th>Gap</th>
+                        <th>EMA 9/26</th>
+                        <th>VWMA / VWAP</th>
+                        <th>DC20</th>
+                        <th>Vol x20</th>
+                        <th>Structure</th>
+                        <th>Why</th>
+                      </tr>
+                    </thead>
+                    <tbody id="krishnaBody"></tbody>
+                  </table>
+                </div>
+              </section>
+            </section>
+          </section>
+        </section>
+
+        <section id="tab-backtest" class="tab-pane" data-tab-panel="backtest">
+          <section class="workspace">
+            <aside class="sidebar">
+              <div class="panel">
+                <label>Krishna Setup Backtest</label>
+                <div class="field-hint">Daily futures-style validation. Blank symbol tests the F&O watchlist; use cached daily candles.</div>
+                <label for="backtestSymbol">Symbol</label>
+                <input id="backtestSymbol" placeholder="Optional, e.g. NIFTY or RELIANCE" />
+                <div class="date-grid">
+                  <div>
+                    <label for="backtestDays">Days</label>
+                    <input id="backtestDays" type="number" min="90" step="1" value="730" />
+                  </div>
+                  <div>
+                    <label for="backtestHoldingDays">Hold</label>
+                    <input id="backtestHoldingDays" type="number" min="1" step="1" value="10" />
+                  </div>
+                </div>
+                <div class="date-grid">
+                  <div>
+                    <label for="backtestFromDate">From</label>
+                    <input id="backtestFromDate" type="date" />
+                  </div>
+                  <div>
+                    <label for="backtestToDate">To</label>
+                    <input id="backtestToDate" type="date" />
+                  </div>
+                </div>
+                <label for="backtestLimitSymbols">Symbols</label>
+                <input id="backtestLimitSymbols" placeholder="50 or all" value="50" />
+                <button id="backtestRunBtn" class="full-btn">Run backtest</button>
+              </div>
+            </aside>
+
+            <section class="content">
+              <section class="activity-hero">
+                <div>
+                  <h2>Setup Backtest</h2>
+                  <p>Checks whether the Krishna daily setup had directional edge before option-selling rules are added.</p>
+                </div>
+                <span id="backtestMeta"></span>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Backtest Summary</h2>
+                  <span id="backtestStatus">Idle</span>
+                </div>
+                <div class="ops-body">
+                  <div id="backtestSummaryCards" class="compact-metrics"></div>
+                  <div id="backtestSummaryPoints" class="mini-list"></div>
+                </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Forward Accuracy</h2>
+                  <span>Every historical signal</span>
+                </div>
                 <table>
                   <thead>
                     <tr>
-                      <th>Symbol</th>
-                      <th>Score</th>
-                      <th>Confidence</th>
-                      <th>Close</th>
-                      <th>Yellow CK</th>
-                      <th>Gap</th>
-                      <th>EMA 9/26</th>
-                      <th>VWMA / VWAP</th>
-                      <th>DC20</th>
-                      <th>Vol x20</th>
-                      <th>Structure</th>
-                      <th>Why</th>
+                      <th>Horizon</th>
+                      <th>Signals</th>
+                      <th>Successes</th>
+                      <th>Accuracy</th>
+                      <th>Avg Forward Return</th>
                     </tr>
                   </thead>
-                  <tbody id="krishnaBody"></tbody>
+                  <tbody id="backtestForwardBody"></tbody>
                 </table>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Score Buckets</h2>
+                  <span>Non-overlapping trades</span>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Score</th>
+                      <th>Trades</th>
+                      <th>Win Rate</th>
+                      <th>Avg Return</th>
+                      <th>Expectancy</th>
+                    </tr>
+                  </thead>
+                  <tbody id="backtestBucketBody"></tbody>
+                </table>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Symbol Summary</h2>
+                  <span id="backtestSymbolMeta"></span>
+                </div>
+                <div class="wide-table">
+                  <table class="readable-table">
+                    <thead>
+                      <tr>
+                        <th>Symbol</th>
+                        <th>Status</th>
+                        <th>Signals</th>
+                        <th>Trades</th>
+                        <th>Win Rate</th>
+                        <th>Avg Return</th>
+                        <th>Profit Factor</th>
+                        <th>Max DD</th>
+                        <th>Buy/Hold</th>
+                      </tr>
+                    </thead>
+                    <tbody id="backtestSymbolBody"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Monthly Performance</h2>
+                  <span>Trade exit month</span>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Month</th>
+                      <th>Trades</th>
+                      <th>Win Rate</th>
+                      <th>Total Return</th>
+                      <th>Avg Return</th>
+                    </tr>
+                  </thead>
+                  <tbody id="backtestMonthlyBody"></tbody>
+                </table>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Trade Log</h2>
+                  <span id="backtestTradeMeta"></span>
+                </div>
+                <div class="table-actions">
+                  <button id="backtestDownloadTradesBtn" type="button">Download trade CSV</button>
+                  <button id="backtestDownloadSignalsBtn" type="button">Download signal features CSV</button>
+                </div>
+                <div class="wide-table">
+                  <table class="readable-table">
+                    <thead>
+                      <tr>
+                        <th>Symbol</th>
+                        <th>Signal</th>
+                        <th>Entry Date</th>
+                        <th>Exit Date</th>
+                        <th>Score</th>
+                        <th>Confidence</th>
+                        <th>Entry</th>
+                        <th>Exit</th>
+                        <th>Return</th>
+                        <th>Why</th>
+                      </tr>
+                    </thead>
+                    <tbody id="backtestTradeBody"></tbody>
+                  </table>
+                </div>
               </section>
             </section>
           </section>

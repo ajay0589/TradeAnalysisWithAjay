@@ -4,6 +4,8 @@ const state = {
   bulkJobId: null,
   bulkPollTimer: null,
   krishnaRefreshJobId: null,
+  lastKrishnaRows: [],
+  lastBacktest: null,
   optionMonitorJobId: null,
   optionMonitorPollTimer: null,
 };
@@ -55,6 +57,61 @@ function fmt(value) {
 function fmtInt(value) {
   if (value === null || value === undefined || value === "") return "-";
   return Number(value).toLocaleString("en-IN");
+}
+
+function fmtPct(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  return `${Number(value).toFixed(2)}%`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function csvValue(value) {
+  const text = Array.isArray(value) ? value.join("; ") : String(value ?? "");
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+function downloadCsv(filename, rows, columns) {
+  if (!rows || !rows.length) {
+    setNotes("No rows available to download.", true);
+    return;
+  }
+  const header = columns.map((column) => csvValue(column.label)).join(",");
+  const lines = rows.map((row) => columns.map((column) => csvValue(column.value(row))).join(","));
+  const blob = new Blob([[header, ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function copyText(text, successMessage) {
+  if (!text) {
+    setNotes("Nothing to copy.", true);
+    return;
+  }
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+  } else {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  setNotes(successMessage);
 }
 
 function chartParams() {
@@ -778,15 +835,21 @@ function renderKrishnaSummary(summary) {
 }
 
 function renderKrishnaResults(rows) {
-  $("krishnaBody").innerHTML = (rows || [])
+  state.lastKrishnaRows = rows || [];
+  $("krishnaBody").innerHTML = state.lastKrishnaRows
     .map((row) => {
-      const reasons = row.reasons_text || (row.reasons || []).join("; ") || "-";
-      const warnings = (row.warnings || []).length ? `<div class="cell-note">${row.warnings.join(" | ")}</div>` : "";
+      const reasons = row.reasons || (row.reasons_text ? row.reasons_text.split(";") : []);
+      const reasonList = reasons.length
+        ? `<ul class="reason-list">${reasons.slice(0, 4).map((reason) => `<li>${escapeHtml(reason.trim())}</li>`).join("")}</ul>`
+        : "-";
+      const warnings = (row.warnings || []).length
+        ? `<div class="cell-note">${escapeHtml(row.warnings.join(" | "))}</div>`
+        : "";
       return `
         <tr>
-          <td><button class="linkBtn" data-symbol="${row.symbol}">${row.symbol}</button></td>
+          <td><button class="linkBtn symbol-chip" data-symbol="${escapeHtml(row.symbol)}">${escapeHtml(row.symbol)}</button></td>
           <td>${fmtInt(row.score)}</td>
-          <td>${row.confidence || "-"}</td>
+          <td>${escapeHtml(row.confidence || "-")}</td>
           <td>${fmt(row.close)}</td>
           <td>${fmt(row.yellow_line)}</td>
           <td>${fmt(row.yellow_gap_percent)}%<div class="cell-note">${row.yellow_gap_atr === null || row.yellow_gap_atr === undefined ? "-" : `${fmt(row.yellow_gap_atr)} ATR`}</div></td>
@@ -794,8 +857,8 @@ function renderKrishnaResults(rows) {
           <td>${fmt(row.vwma20)} / ${fmt(row.vwap)}</td>
           <td>${fmt(row.donchian_upper20)} / ${fmt(row.donchian_mid20)} / ${fmt(row.donchian_lower20)}</td>
           <td>${fmt(row.volume_ratio20)}</td>
-          <td>${row.structure_trend || "-"}</td>
-          <td>${reasons}${warnings}</td>
+          <td>${escapeHtml(row.structure_trend || "-")}</td>
+          <td>${reasonList}${warnings}</td>
         </tr>
       `;
     })
@@ -808,6 +871,256 @@ function renderKrishnaResults(rows) {
       analyze();
     });
   });
+}
+
+function copyKrishnaSymbols() {
+  const symbols = state.lastKrishnaRows.map((row) => row.symbol).filter(Boolean);
+  copyText(symbols.join(", "), `Copied ${symbols.length} Krishna setup symbol(s).`);
+}
+
+function downloadKrishnaCsv() {
+  downloadCsv("krishna_setup_filtered_stocks.csv", state.lastKrishnaRows, [
+    { label: "Symbol", value: (row) => row.symbol },
+    { label: "Score", value: (row) => row.score },
+    { label: "Confidence", value: (row) => row.confidence },
+    { label: "Close", value: (row) => row.close },
+    { label: "Yellow CK", value: (row) => row.yellow_line },
+    { label: "Gap %", value: (row) => row.yellow_gap_percent },
+    { label: "Gap ATR", value: (row) => row.yellow_gap_atr },
+    { label: "EMA9", value: (row) => row.ema9 },
+    { label: "EMA26", value: (row) => row.ema26 },
+    { label: "VWMA20", value: (row) => row.vwma20 },
+    { label: "VWAP", value: (row) => row.vwap },
+    { label: "Donchian Upper20", value: (row) => row.donchian_upper20 },
+    { label: "Donchian Mid20", value: (row) => row.donchian_mid20 },
+    { label: "Donchian Lower20", value: (row) => row.donchian_lower20 },
+    { label: "Vol x20", value: (row) => row.volume_ratio20 },
+    { label: "Structure", value: (row) => row.structure_trend },
+    { label: "Reasons", value: (row) => row.reasons || row.reasons_text },
+    { label: "Warnings", value: (row) => row.warnings },
+  ]);
+}
+
+async function runKrishnaBacktest() {
+  setNotes("Running Krishna setup backtest on cached daily candles...");
+  $("backtestStatus").textContent = "Running";
+  try {
+    const params = new URLSearchParams();
+    const symbol = $("backtestSymbol").value.trim();
+    const days = $("backtestDays").value.trim();
+    const holdingDays = $("backtestHoldingDays").value.trim();
+    const fromDate = $("backtestFromDate").value.trim();
+    const toDate = $("backtestToDate").value.trim();
+    const limitSymbols = $("backtestLimitSymbols").value.trim();
+    if (symbol) params.set("symbol", symbol);
+    if (days) params.set("days", days);
+    if (holdingDays) params.set("holding_days", holdingDays);
+    if (fromDate) params.set("from_date", fromDate);
+    if (toDate) params.set("to_date", toDate);
+    params.set("limit_symbols", limitSymbols || "50");
+
+    const data = await api(`/api/krishna-setup-backtest?${params.toString()}`);
+    state.lastBacktest = data;
+    renderBacktest(data);
+    setNotes("Backtest complete. Use the score buckets and forward accuracy to judge whether the setup has useful directional edge.");
+  } catch (error) {
+    $("backtestStatus").textContent = "Failed";
+    setNotes([error.message], true);
+  }
+}
+
+function renderBacktest(data) {
+  $("backtestStatus").textContent = "Completed";
+  $("backtestMeta").textContent = `${data.analyzed_symbols} analyzed / ${data.signal_count} signals / ${data.trade_count} trades / Daily`;
+  const metrics = data.metrics || {};
+  const baseline = data.baselines || {};
+  const buyHold = baseline.buy_and_hold || {};
+  const emaBaseline = baseline.ema20_gt_ema50 || {};
+  const cards = [
+    ["Trades", metrics.trades],
+    ["Win rate", fmtPct(metrics.win_rate)],
+    ["Avg return", fmtPct(metrics.avg_return)],
+    ["Expectancy", fmtPct(metrics.expectancy)],
+    ["Profit factor", fmt(metrics.profit_factor)],
+    ["Max DD", fmtPct(metrics.max_drawdown)],
+    ["Ending return", fmtPct(metrics.ending_return)],
+    ["Buy/Hold avg", fmtPct(buyHold.avg_return)],
+    ["EMA20>50 trades", emaBaseline.trades],
+    ["EMA20>50 win", fmtPct(emaBaseline.win_rate)],
+  ];
+  $("backtestSummaryCards").innerHTML = cards
+    .map(([label, value]) => `<div class="compact-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`)
+    .join("");
+  $("backtestSummaryPoints").innerHTML = ((data.summary && data.summary.points) || [])
+    .map((point) => `<div>${escapeHtml(point)}</div>`)
+    .join("");
+  renderBacktestForward(data.forward_accuracy || []);
+  renderBacktestBuckets(data.confidence_buckets || []);
+  renderBacktestSymbols(data.symbol_results || []);
+  renderBacktestMonthly(data.monthly_performance || []);
+  renderBacktestTrades(data.trades || []);
+}
+
+function renderBacktestForward(rows) {
+  $("backtestForwardBody").innerHTML = rows
+    .map(
+      (row) => `
+        <tr>
+          <td>${fmtInt(row.horizon_days)} days</td>
+          <td>${fmtInt(row.signals)}</td>
+          <td>${fmtInt(row.successes)}</td>
+          <td>${fmtPct(row.accuracy)}</td>
+          <td>${fmtPct(row.avg_forward_return)}</td>
+        </tr>
+      `
+    )
+    .join("");
+}
+
+function renderBacktestBuckets(rows) {
+  $("backtestBucketBody").innerHTML = rows
+    .map(
+      (row) => `
+        <tr>
+          <td>${escapeHtml(row.score_bucket)}</td>
+          <td>${fmtInt(row.trades)}</td>
+          <td>${fmtPct(row.win_rate)}</td>
+          <td>${fmtPct(row.avg_return)}</td>
+          <td>${fmtPct(row.expectancy)}</td>
+        </tr>
+      `
+    )
+    .join("");
+}
+
+function renderBacktestSymbols(rows) {
+  $("backtestSymbolMeta").textContent = `${rows.length} symbol row(s)`;
+  $("backtestSymbolBody").innerHTML = rows
+    .map(
+      (row) => `
+        <tr>
+          <td><button class="linkBtn symbol-chip" data-symbol="${escapeHtml(row.symbol)}">${escapeHtml(row.symbol)}</button></td>
+          <td>${escapeHtml(row.status)}</td>
+          <td>${fmtInt(row.signals)}</td>
+          <td>${fmtInt(row.trades)}</td>
+          <td>${fmtPct(row.win_rate)}</td>
+          <td>${fmtPct(row.avg_return)}</td>
+          <td>${fmt(row.profit_factor)}</td>
+          <td>${fmtPct(row.max_drawdown)}</td>
+          <td>${fmtPct(row.buy_hold_return)}</td>
+        </tr>
+      `
+    )
+    .join("");
+  document.querySelectorAll("#backtestSymbolBody .linkBtn").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("symbolInput").value = button.dataset.symbol;
+      activateTab("analyze");
+      analyze();
+    });
+  });
+}
+
+function renderBacktestMonthly(rows) {
+  $("backtestMonthlyBody").innerHTML = rows
+    .map(
+      (row) => `
+        <tr>
+          <td>${escapeHtml(row.month)}</td>
+          <td>${fmtInt(row.trades)}</td>
+          <td>${fmtPct(row.win_rate)}</td>
+          <td>${fmtPct(row.return_sum)}</td>
+          <td>${fmtPct(row.avg_return)}</td>
+        </tr>
+      `
+    )
+    .join("");
+}
+
+function renderBacktestTrades(rows) {
+  const shown = rows.slice(0, 200);
+  $("backtestTradeMeta").textContent = `${shown.length} shown / ${rows.length} trade(s)`;
+  $("backtestTradeBody").innerHTML = shown
+    .map((row) => {
+      const reasons = (row.reasons || []).slice(0, 3);
+      const reasonList = reasons.length
+        ? `<ul class="reason-list">${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`
+        : escapeHtml(row.reason_text || "-");
+      return `
+        <tr>
+          <td><button class="linkBtn symbol-chip" data-symbol="${escapeHtml(row.symbol)}">${escapeHtml(row.symbol)}</button></td>
+          <td>${escapeHtml(row.signal_date)}</td>
+          <td>${escapeHtml(row.entry_date)}</td>
+          <td>${escapeHtml(row.exit_date)}</td>
+          <td>${fmtInt(row.score)}</td>
+          <td>${escapeHtml(row.confidence || "-")}</td>
+          <td>${fmt(row.entry_price)}</td>
+          <td>${fmt(row.exit_price)}</td>
+          <td class="${Number(row.return_percent || 0) >= 0 ? "points-positive" : "points-negative"}">${fmtPct(row.return_percent)}</td>
+          <td>${reasonList}</td>
+        </tr>
+      `;
+    })
+    .join("");
+  document.querySelectorAll("#backtestTradeBody .linkBtn").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("symbolInput").value = button.dataset.symbol;
+      activateTab("analyze");
+      analyze();
+    });
+  });
+}
+
+function downloadBacktestTrades() {
+  const rows = (state.lastBacktest && state.lastBacktest.trades) || [];
+  downloadCsv("krishna_backtest_trades.csv", rows, [
+    { label: "Symbol", value: (row) => row.symbol },
+    { label: "Signal Date", value: (row) => row.signal_date },
+    { label: "Entry Date", value: (row) => row.entry_date },
+    { label: "Exit Date", value: (row) => row.exit_date },
+    { label: "Score", value: (row) => row.score },
+    { label: "Confidence", value: (row) => row.confidence },
+    { label: "Entry Price", value: (row) => row.entry_price },
+    { label: "Exit Price", value: (row) => row.exit_price },
+    { label: "Return %", value: (row) => row.return_percent },
+    { label: "Win", value: (row) => row.win },
+    { label: "Structure", value: (row) => row.structure_trend },
+    { label: "Support", value: (row) => row.support },
+    { label: "Resistance", value: (row) => row.resistance },
+    { label: "Invalidation", value: (row) => row.invalidation },
+    { label: "Reasons", value: (row) => row.reasons },
+  ]);
+}
+
+function downloadBacktestSignals() {
+  const rows = (state.lastBacktest && state.lastBacktest.signals) || [];
+  downloadCsv("krishna_backtest_signal_features.csv", rows, [
+    { label: "Symbol", value: (row) => row.symbol },
+    { label: "Signal Date", value: (row) => row.signal_date },
+    { label: "Signal Close", value: (row) => row.signal_close },
+    { label: "Score", value: (row) => row.score },
+    { label: "Confidence", value: (row) => row.confidence },
+    { label: "Trade Status", value: (row) => row.trade_status },
+    { label: "Structure", value: (row) => row.structure_trend },
+    { label: "Support", value: (row) => row.support },
+    { label: "Resistance", value: (row) => row.resistance },
+    { label: "Invalidation", value: (row) => row.invalidation },
+    { label: "Forward 5 %", value: (row) => row.forward_returns && row.forward_returns["5"] && row.forward_returns["5"].return_percent },
+    { label: "Forward 5 Success", value: (row) => row.forward_success && row.forward_success["5"] },
+    { label: "Forward 10 %", value: (row) => row.forward_returns && row.forward_returns["10"] && row.forward_returns["10"].return_percent },
+    { label: "Forward 10 Success", value: (row) => row.forward_success && row.forward_success["10"] },
+    { label: "Forward 15 %", value: (row) => row.forward_returns && row.forward_returns["15"] && row.forward_returns["15"].return_percent },
+    { label: "Forward 15 Success", value: (row) => row.forward_success && row.forward_success["15"] },
+    { label: "Yellow CK", value: (row) => row.features && row.features.yellow_line },
+    { label: "Gap %", value: (row) => row.features && row.features.yellow_gap_percent },
+    { label: "Gap ATR", value: (row) => row.features && row.features.yellow_gap_atr },
+    { label: "EMA9", value: (row) => row.features && row.features.ema9 },
+    { label: "EMA26", value: (row) => row.features && row.features.ema26 },
+    { label: "VWMA20", value: (row) => row.features && row.features.vwma20 },
+    { label: "VWAP", value: (row) => row.features && row.features.vwap },
+    { label: "Vol x20", value: (row) => row.features && row.features.volume_ratio20 },
+    { label: "Reasons", value: (row) => row.reasons },
+  ]);
 }
 
 function renderAnalysis(data) {
@@ -1281,6 +1594,11 @@ $("sectorUploadBtn").addEventListener("click", uploadSectorCsv);
 $("refreshFiiDiiBtn").addEventListener("click", () => loadFiiDii(true));
 $("saveReportBtn").addEventListener("click", saveReport);
 $("krishnaScanBtn").addEventListener("click", runKrishnaScan);
+$("krishnaCopyBtn").addEventListener("click", copyKrishnaSymbols);
+$("krishnaDownloadBtn").addEventListener("click", downloadKrishnaCsv);
+$("backtestRunBtn").addEventListener("click", runKrishnaBacktest);
+$("backtestDownloadTradesBtn").addEventListener("click", downloadBacktestTrades);
+$("backtestDownloadSignalsBtn").addEventListener("click", downloadBacktestSignals);
 $("startOptionMonitorBtn").addEventListener("click", startOptionMonitor);
 $("stopOptionMonitorBtn").addEventListener("click", stopOptionMonitor);
 $("optionMonitorSymbols").addEventListener("keydown", (event) => {

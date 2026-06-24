@@ -16,6 +16,11 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 
 from trading_analysis.analysis.entry_context import build_entry_context
+from trading_analysis.analysis.backtest import (
+    BacktestConfig,
+    aggregate_krishna_backtests,
+    backtest_krishna_bullish_setup,
+)
 from trading_analysis.analysis.fundamental import analyze_fundamentals
 from trading_analysis.analysis.indicator_suite import analyze_indicator_suite
 from trading_analysis.analysis.krishna_setup import scan_krishna_bullish_setup
@@ -1039,6 +1044,57 @@ class AnalysisService:
                 ],
             },
         }
+
+    def backtest_krishna_setup(
+        self,
+        symbol: str | None = None,
+        days: int | None = 730,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        holding_days: int = 10,
+        limit_symbols: int | None = 50,
+    ) -> dict[str, Any]:
+        window = candle_window(from_date=from_date, to_date=to_date, days=days)
+        if holding_days <= 0:
+            raise ValueError("holding_days must be greater than zero.")
+
+        if symbol and symbol.strip():
+            symbols = [self.resolve_symbol(symbol)]
+            effective_limit = None
+        else:
+            symbols = self._watchlist_symbols()
+            effective_limit = limit_symbols
+            if limit_symbols is not None:
+                symbols = symbols[:limit_symbols]
+
+        config = BacktestConfig(holding_days=holding_days)
+        results: list[dict[str, Any]] = []
+        errors: list[dict[str, str]] = []
+        for candidate in symbols:
+            if not self._has_candles(candidate, "day"):
+                continue
+            try:
+                candles, _source = self._load_timeframe_with_summary(candidate, "day", window)
+                results.append(backtest_krishna_bullish_setup(candidate, candles, config))
+            except Exception as exc:
+                errors.append({"symbol": candidate, "error": str(exc)})
+
+        payload = aggregate_krishna_backtests(results, errors=errors, limit_symbols=effective_limit)
+        payload["requested_symbol"] = symbol.strip().upper() if symbol and symbol.strip() else None
+        payload["holding_days"] = holding_days
+        payload["days"] = days
+        payload["from_date"] = from_date
+        payload["to_date"] = to_date
+        payload["available_symbols"] = self._available_count("day")
+        payload["total_fno_symbols"] = len(self._watchlist_symbols())
+        payload["summary"]["points"].insert(
+            0,
+            (
+                f"Backtested {payload['analyzed_symbols']} symbol(s), "
+                f"{payload['signal_count']} historical signal(s), and {payload['trade_count']} non-overlapping trade(s)."
+            ),
+        )
+        return payload
 
     def _watchlist_symbols(self) -> list[str]:
         if not self.watchlist_path.exists():

@@ -640,6 +640,42 @@ table {
   table-layout: fixed;
 }
 
+.wide-table {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.wide-table table {
+  table-layout: auto;
+  min-width: 1040px;
+}
+
+.krishna-table {
+  min-width: 1320px;
+}
+
+.readable-table {
+  min-width: 980px;
+}
+
+.krishna-table th,
+.krishna-table td,
+.readable-table th,
+.readable-table td {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.krishna-table th:nth-child(1),
+.krishna-table td:nth-child(1) {
+  width: 120px;
+}
+
+.krishna-table th:nth-child(12),
+.krishna-table td:nth-child(12) {
+  min-width: 320px;
+}
+
 th,
 td {
   border-bottom: 1px solid #edf0f4;
@@ -680,6 +716,38 @@ tr:last-child td {
   border-color: #b8c4d2;
   background: #f9fbfd;
   font-weight: 600;
+}
+
+.wide-table .linkBtn,
+.symbol-chip {
+  width: auto;
+  min-width: 82px;
+  max-width: 150px;
+  white-space: nowrap;
+}
+
+.reason-list {
+  margin: 0;
+  padding-left: 16px;
+  min-width: 260px;
+}
+
+.reason-list li {
+  margin: 0 0 3px;
+  overflow-wrap: normal;
+}
+
+.table-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.table-actions button {
+  min-height: 32px;
 }
 
 .linkBtn:hover {

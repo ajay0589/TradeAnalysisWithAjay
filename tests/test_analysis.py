@@ -8,6 +8,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from trading_analysis.candles import normalize_timeframe, prepare_candles, candle_window
+from trading_analysis.analysis.backtest import (
+    BacktestConfig,
+    aggregate_krishna_backtests,
+    backtest_krishna_bullish_setup,
+)
 from trading_analysis.analysis.entry_context import build_entry_context
 from trading_analysis.analysis.fundamental import analyze_fundamentals
 from trading_analysis.analysis.indicator_suite import analyze_indicator_suite
@@ -680,6 +685,44 @@ class AnalysisTests(unittest.TestCase):
         match = scan_krishna_bullish_setup("ABC", candles, structure)
 
         self.assertIsNone(match)
+
+    def test_krishna_backtest_records_non_overlapping_trades(self) -> None:
+        closes = (
+            [100 + (index * 0.45) for index in range(70)]
+            + [152, 145, 144, 143, 142]
+            + [143 + (index * 1.0) for index in range(35)]
+            + [190, 183, 182, 181, 180]
+            + [181 + (index * 0.8) for index in range(30)]
+        )
+        candles = self._scanner_candles(closes)
+
+        result = backtest_krishna_bullish_setup("ABC", candles, BacktestConfig(holding_days=5))
+
+        self.assertEqual(result["symbol"], "ABC")
+        self.assertGreater(result["signal_count"], 0)
+        self.assertGreater(result["trade_count"], 0)
+        self.assertGreater(result["trades"][0]["entry_date"], result["trades"][0]["signal_date"])
+        self.assertIn("5", result["signals"][0]["forward_returns"])
+        self.assertGreaterEqual(result["metrics"]["win_rate"], 0)
+        self.assertLessEqual(result["metrics"]["win_rate"], 100)
+
+    def test_krishna_backtest_aggregate_has_confidence_and_forward_summary(self) -> None:
+        closes = (
+            [100 + (index * 0.45) for index in range(70)]
+            + [152, 145, 144, 143, 142]
+            + [143 + (index * 1.0) for index in range(35)]
+            + [190, 183, 182, 181, 180]
+            + [181 + (index * 0.8) for index in range(30)]
+        )
+        result = backtest_krishna_bullish_setup("ABC", self._scanner_candles(closes), BacktestConfig(holding_days=5))
+
+        payload = aggregate_krishna_backtests([result])
+
+        self.assertEqual(payload["analyzed_symbols"], 1)
+        self.assertEqual(payload["trade_count"], result["trade_count"])
+        self.assertTrue(payload["forward_accuracy"])
+        self.assertTrue(payload["confidence_buckets"])
+        self.assertTrue(payload["summary"]["points"])
 
     def _scanner_candles(self, closes: list[float], volumes: list[int] | None = None) -> list[Candle]:
         volumes = volumes or [1000] * len(closes)

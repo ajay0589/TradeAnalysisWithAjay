@@ -427,6 +427,22 @@ def main() -> None:
     scan_opportunities_parser.add_argument("--limit", type=int, default=50, help="Maximum rows to show")
     scan_opportunities_parser.add_argument("--output-json", help="Optional path to write full scan JSON")
 
+    backtest_parser = subparsers.add_parser(
+        "backtest-krishna-setup",
+        help="Backtest the Krishna bullish daily setup using cached candles",
+    )
+    backtest_parser.add_argument("--symbol", help="Optional stock/index symbol. Omit to test the F&O watchlist.")
+    backtest_parser.add_argument("--days", type=int, default=730, help="Number of calendar days to backtest")
+    backtest_parser.add_argument("--from-date", help="Start date YYYY-MM-DD")
+    backtest_parser.add_argument("--to-date", help="End date YYYY-MM-DD")
+    backtest_parser.add_argument("--holding-days", type=int, default=10, help="Fixed futures-style holding period")
+    backtest_parser.add_argument(
+        "--limit-symbols",
+        default="50",
+        help="Number of watchlist symbols to test, or all. Ignored when --symbol is provided.",
+    )
+    backtest_parser.add_argument("--output-json", help="Optional path to write full backtest JSON")
+
     args = parser.parse_args()
     if args.command == "analyze":
         run_analyze(args)
@@ -458,6 +474,8 @@ def main() -> None:
         run_trade_decision(args)
     elif args.command == "scan-opportunities":
         run_scan_opportunities(args)
+    elif args.command == "backtest-krishna-setup":
+        run_backtest_krishna_setup(args)
 
 
 def run_analyze(args: argparse.Namespace) -> None:
@@ -855,6 +873,25 @@ def run_scan_opportunities(args: argparse.Namespace) -> None:
         print(f"\nWrote scan-opportunities JSON: {output_path}")
 
 
+def run_backtest_krishna_setup(args: argparse.Namespace) -> None:
+    service = AnalysisService()
+    payload = service.backtest_krishna_setup(
+        symbol=args.symbol,
+        days=args.days,
+        from_date=args.from_date,
+        to_date=args.to_date,
+        holding_days=args.holding_days,
+        limit_symbols=_parse_optional_limit(args.limit_symbols),
+    )
+    print(_render_backtest(payload))
+
+    if args.output_json:
+        output_path = Path(args.output_json)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        print(f"\nWrote backtest JSON: {output_path}")
+
+
 def _zerodha_client_from_settings() -> ZerodhaKiteClient:
     creds = load_settings().broker_credentials
     missing = [
@@ -1106,6 +1143,76 @@ def _render_scan_opportunities(payload: dict) -> str:
     return "\n".join(lines)
 
 
+def _render_backtest(payload: dict) -> str:
+    metrics = payload.get("metrics") or {}
+    lines = [
+        f"Backtest: {payload.get('setup_label')} | Timeframe: {payload.get('timeframe_label')} | "
+        f"Hold: {payload.get('holding_days')} day(s)",
+        f"Analyzed: {payload.get('analyzed_symbols')} | Signals: {payload.get('signal_count')} | "
+        f"Trades: {payload.get('trade_count')} | Errors: {len(payload.get('errors') or [])}",
+        "",
+        _plain_table(
+            ["Trades", "Win %", "Avg %", "Expectancy %", "Profit Factor", "Max DD %", "Ending %"],
+            [
+                [
+                    str(metrics.get("trades", 0)),
+                    _fmt(metrics.get("win_rate")),
+                    _fmt(metrics.get("avg_return")),
+                    _fmt(metrics.get("expectancy")),
+                    _fmt(metrics.get("profit_factor")),
+                    _fmt(metrics.get("max_drawdown")),
+                    _fmt(metrics.get("ending_return")),
+                ]
+            ],
+        ),
+    ]
+    forward_rows = [
+        [
+            f"{row.get('horizon_days')}d",
+            str(row.get("signals", 0)),
+            str(row.get("successes", 0)),
+            _fmt(row.get("accuracy")),
+            _fmt(row.get("avg_forward_return")),
+        ]
+        for row in payload.get("forward_accuracy") or []
+    ]
+    if forward_rows:
+        lines.extend(["", "Forward accuracy:", _plain_table(["Horizon", "Signals", "Wins", "Accuracy %", "Avg %"], forward_rows)])
+
+    bucket_rows = [
+        [
+            row.get("score_bucket", "-"),
+            str(row.get("trades", 0)),
+            _fmt(row.get("win_rate")),
+            _fmt(row.get("avg_return")),
+            _fmt(row.get("expectancy")),
+        ]
+        for row in payload.get("confidence_buckets") or []
+    ]
+    if bucket_rows:
+        lines.extend(["", "Score buckets:", _plain_table(["Score", "Trades", "Win %", "Avg %", "Expectancy %"], bucket_rows)])
+
+    symbol_rows = [
+        [
+            row.get("symbol", "-"),
+            row.get("status", "-"),
+            str(row.get("signals", 0)),
+            str(row.get("trades", 0)),
+            _fmt(row.get("win_rate")),
+            _fmt(row.get("avg_return")),
+        ]
+        for row in (payload.get("symbol_results") or [])[:20]
+    ]
+    if symbol_rows:
+        lines.extend(["", "Top symbols:", _plain_table(["Symbol", "Status", "Signals", "Trades", "Win %", "Avg %"], symbol_rows)])
+
+    points = (payload.get("summary") or {}).get("points") or []
+    if points:
+        lines.extend(["", "Notes:"])
+        lines.extend(f"- {point}" for point in points)
+    return "\n".join(lines)
+
+
 def _fmt(value: float | None) -> str:
     if value is None:
         return "-"
@@ -1115,6 +1222,13 @@ def _fmt(value: float | None) -> str:
 def _short_text(value: object, limit: int) -> str:
     text = str(value or "-")
     return text if len(text) <= limit else text[: max(0, limit - 3)] + "..."
+
+
+def _parse_optional_limit(value: str | None) -> int | None:
+    cleaned = (value or "").strip().lower()
+    if cleaned in {"", "all"}:
+        return None
+    return int(cleaned)
 
 
 def _plain_table(headers: list[str], rows: list[list[str]]) -> str:
