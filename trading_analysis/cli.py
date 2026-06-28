@@ -55,6 +55,7 @@ from trading_analysis.data_sources.nse_equity import (
 )
 from trading_analysis.data_sources.nse_fii_dii import fetch_fii_dii_activity, write_fii_dii_csv
 from trading_analysis.reporting.console import render_signal_table
+from trading_analysis.strategies.registry import get_strategy, list_strategies, strategy_info
 from trading_analysis.web_services import AnalysisService
 
 
@@ -443,6 +444,30 @@ def main() -> None:
     )
     backtest_parser.add_argument("--output-json", help="Optional path to write full backtest JSON")
 
+    subparsers.add_parser("list-strategies", help="List parameterized backtest strategies")
+
+    strategy_info_parser = subparsers.add_parser("strategy-info", help="Show strategy metadata and default parameters")
+    strategy_info_parser.add_argument("--strategy", required=True, help="Strategy id, for example bullish_breakout")
+
+    generic_backtest_parser = subparsers.add_parser(
+        "backtest-strategy",
+        help="Backtest any registered parameterized strategy using cached candles",
+    )
+    generic_backtest_parser.add_argument("--strategy", required=True, help="Strategy id, for example bullish_breakout")
+    generic_backtest_parser.add_argument("--symbols", help="Optional comma-separated symbols. Omit to test watchlist.")
+    generic_backtest_parser.add_argument("--timeframe", default="day", help="day, 60minute, 15minute, week, or month")
+    generic_backtest_parser.add_argument("--days", type=int, help="Number of calendar days to backtest")
+    generic_backtest_parser.add_argument("--from-date", help="Start date YYYY-MM-DD")
+    generic_backtest_parser.add_argument("--to-date", help="End date YYYY-MM-DD")
+    generic_backtest_parser.add_argument("--params", default="{}", help="Strategy parameter JSON object")
+    generic_backtest_parser.add_argument("--backtest-params", default="{}", help="Backtest parameter JSON object")
+    generic_backtest_parser.add_argument(
+        "--limit-symbols",
+        default="50",
+        help="Number of watchlist symbols to test, or all. Ignored when --symbols is provided.",
+    )
+    generic_backtest_parser.add_argument("--output-json", help="Optional path to write full backtest JSON")
+
     args = parser.parse_args()
     if args.command == "analyze":
         run_analyze(args)
@@ -476,6 +501,12 @@ def main() -> None:
         run_scan_opportunities(args)
     elif args.command == "backtest-krishna-setup":
         run_backtest_krishna_setup(args)
+    elif args.command == "list-strategies":
+        run_list_strategies()
+    elif args.command == "strategy-info":
+        run_strategy_info(args)
+    elif args.command == "backtest-strategy":
+        run_backtest_strategy(args)
 
 
 def run_analyze(args: argparse.Namespace) -> None:
@@ -892,6 +923,48 @@ def run_backtest_krishna_setup(args: argparse.Namespace) -> None:
         print(f"\nWrote backtest JSON: {output_path}")
 
 
+def run_list_strategies() -> None:
+    rows = [
+        [
+            item["strategy_id"],
+            item["label"],
+            item["direction"],
+            item["default_timeframe"],
+            str(item["min_candles"]),
+        ]
+        for item in list_strategies()
+    ]
+    print(_plain_table(["Strategy", "Label", "Direction", "Timeframe", "Min Candles"], rows))
+
+
+def run_strategy_info(args: argparse.Namespace) -> None:
+    payload = strategy_info(args.strategy)
+    print(json.dumps(payload, indent=2, default=str))
+
+
+def run_backtest_strategy(args: argparse.Namespace) -> None:
+    service = AnalysisService()
+    symbols = _split_cli_symbols(args.symbols)
+    payload = service.backtest_strategy(
+        strategy_id=args.strategy,
+        symbols=symbols,
+        timeframe=args.timeframe,
+        from_date=args.from_date,
+        to_date=args.to_date,
+        days=args.days,
+        strategy_params=_parse_json_object(args.params, "--params"),
+        backtest_params=_parse_json_object(args.backtest_params, "--backtest-params"),
+        limit_symbols=_parse_optional_limit(args.limit_symbols),
+    )
+    print(_render_generic_backtest(payload))
+
+    if args.output_json:
+        output_path = Path(args.output_json)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        print(f"\nWrote strategy backtest JSON: {output_path}")
+
+
 def _zerodha_client_from_settings() -> ZerodhaKiteClient:
     creds = load_settings().broker_credentials
     missing = [
@@ -927,6 +1000,23 @@ def _optional_float(value: object) -> float | None:
     if value is None or value == "":
         return None
     return float(value)
+
+
+def _parse_json_object(value: str, label: str) -> dict:
+    try:
+        parsed = json.loads(value or "{}")
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"{label} must be a JSON object: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise SystemExit(f"{label} must be a JSON object.")
+    return parsed
+
+
+def _split_cli_symbols(value: str | None) -> list[str] | None:
+    if not value:
+        return None
+    symbols = [part.strip() for part in value.split(",") if part.strip()]
+    return symbols or None
 
 
 def _load_optional_candles(path: Path):
@@ -1205,6 +1295,84 @@ def _render_backtest(payload: dict) -> str:
     ]
     if symbol_rows:
         lines.extend(["", "Top symbols:", _plain_table(["Symbol", "Status", "Signals", "Trades", "Win %", "Avg %"], symbol_rows)])
+
+    points = (payload.get("summary") or {}).get("points") or []
+    if points:
+        lines.extend(["", "Notes:"])
+        lines.extend(f"- {point}" for point in points)
+    return "\n".join(lines)
+
+
+def _render_generic_backtest(payload: dict) -> str:
+    metrics = payload.get("metrics") or {}
+    strategy = payload.get("strategy") or {}
+    lines = [
+        f"Backtest: {strategy.get('label') or payload.get('strategy_id')} | Timeframe: {payload.get('timeframe_label') or payload.get('timeframe')}",
+        f"Analyzed: {payload.get('analyzed_symbols')} | Signals: {payload.get('signal_count')} | "
+        f"Trades: {payload.get('trade_count')} | Errors: {len(payload.get('errors') or [])}",
+        "",
+        _plain_table(
+            ["Trades", "Win %", "Avg %", "Expectancy %", "Profit Factor", "Max DD %", "Ending %", "Avg R"],
+            [
+                [
+                    str(metrics.get("trades", 0)),
+                    _fmt(metrics.get("win_rate")),
+                    _fmt(metrics.get("avg_return")),
+                    _fmt(metrics.get("expectancy")),
+                    _fmt(metrics.get("profit_factor")),
+                    _fmt(metrics.get("max_drawdown")),
+                    _fmt(metrics.get("ending_return")),
+                    _fmt(metrics.get("avg_r_multiple")),
+                ]
+            ],
+        ),
+    ]
+
+    forward_rows = [
+        [
+            f"{row.get('horizon_bars')} bars",
+            str(row.get("signals", 0)),
+            str(row.get("successes", 0)),
+            _fmt(row.get("accuracy")),
+            _fmt(row.get("avg_forward_return")),
+        ]
+        for row in payload.get("forward_accuracy") or []
+    ]
+    if forward_rows:
+        lines.extend(["", "Forward accuracy:", _plain_table(["Horizon", "Signals", "Wins", "Accuracy %", "Avg %"], forward_rows)])
+
+    bucket_rows = [
+        [
+            row.get("score_bucket", "-"),
+            str(row.get("trades", 0)),
+            _fmt(row.get("win_rate")),
+            _fmt(row.get("avg_return")),
+            _fmt(row.get("expectancy")),
+        ]
+        for row in payload.get("score_buckets") or []
+    ]
+    if bucket_rows:
+        lines.extend(["", "Score buckets:", _plain_table(["Score", "Trades", "Win %", "Avg %", "Expectancy %"], bucket_rows)])
+
+    symbol_rows = [
+        [
+            row.get("symbol", "-"),
+            str(row.get("trades", 0)),
+            _fmt(row.get("win_rate")),
+            _fmt(row.get("avg_return")),
+            _fmt(row.get("profit_factor")),
+            _fmt(row.get("ending_return")),
+        ]
+        for row in (payload.get("symbol_performance") or [])[:20]
+    ]
+    if symbol_rows:
+        lines.extend(
+            [
+                "",
+                "Top symbols:",
+                _plain_table(["Symbol", "Trades", "Win %", "Avg %", "Profit Factor", "Ending %"], symbol_rows),
+            ]
+        )
 
     points = (payload.get("summary") or {}).get("points") or []
     if points:

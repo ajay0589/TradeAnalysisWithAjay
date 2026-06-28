@@ -605,6 +605,48 @@
           <section class="workspace">
             <aside class="sidebar">
               <div class="panel">
+                <label>Generic Strategy Backtest</label>
+                <div class="field-hint">Parameterized historical simulation using cached candles only.</div>
+                <label for="genericStrategySelect">Strategy</label>
+                <select id="genericStrategySelect"></select>
+                <label for="genericBacktestSymbol">Symbols</label>
+                <input id="genericBacktestSymbol" placeholder="Optional, e.g. NIFTY, RELIANCE" />
+                <div class="date-grid">
+                  <div>
+                    <label for="genericBacktestTimeframe">Timeframe</label>
+                    <select id="genericBacktestTimeframe">
+                      <option value="day">Daily</option>
+                      <option value="60minute">1 hour</option>
+                      <option value="15minute">15 min</option>
+                      <option value="week">Weekly</option>
+                      <option value="month">Monthly</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="genericBacktestDays">Days</label>
+                    <input id="genericBacktestDays" type="number" min="30" step="1" value="730" />
+                  </div>
+                </div>
+                <div class="date-grid">
+                  <div>
+                    <label for="genericBacktestFromDate">From</label>
+                    <input id="genericBacktestFromDate" type="date" />
+                  </div>
+                  <div>
+                    <label for="genericBacktestToDate">To</label>
+                    <input id="genericBacktestToDate" type="date" />
+                  </div>
+                </div>
+                <label for="genericLimitSymbols">Symbols Limit</label>
+                <input id="genericLimitSymbols" placeholder="50 or all" value="50" />
+                <label for="genericStrategyParams">Strategy Params JSON</label>
+                <textarea id="genericStrategyParams" rows="5" spellcheck="false">{}</textarea>
+                <label for="genericBacktestParams">Backtest Params JSON</label>
+                <textarea id="genericBacktestParams" rows="7" spellcheck="false">{"entry":"next_open","holding_bars":5,"stop_type":"atr","stop_atr":1.5,"target_type":"risk_multiple","target_r_multiple":2}</textarea>
+                <button id="genericBacktestRunBtn" class="full-btn">Run strategy backtest</button>
+              </div>
+
+              <div class="panel">
                 <label>Krishna Setup Backtest</label>
                 <div class="field-hint">Daily futures-style validation. Blank symbol tests the F&O watchlist; use cached daily candles.</div>
                 <label for="backtestSymbol">Symbol</label>
@@ -636,6 +678,111 @@
             </aside>
 
             <section class="content">
+              <section class="activity-hero">
+                <div>
+                  <h2>Generic Strategy Backtest</h2>
+                  <p>Runs selected setup rules through a no-lookahead futures-style simulation for historical validation.</p>
+                </div>
+                <span id="genericBacktestMeta"></span>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Strategy Metrics</h2>
+                  <span id="genericBacktestStatus">Idle</span>
+                </div>
+                <div class="ops-body">
+                  <div id="genericBacktestSummaryCards" class="compact-metrics"></div>
+                  <div id="genericBacktestSummaryPoints" class="mini-list"></div>
+                </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Generic Score Buckets</h2>
+                  <span>Score quality check</span>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Score</th>
+                      <th>Trades</th>
+                      <th>Win Rate</th>
+                      <th>Avg Return</th>
+                      <th>Expectancy</th>
+                    </tr>
+                  </thead>
+                  <tbody id="genericBacktestBucketBody"></tbody>
+                </table>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Generic Symbol Performance</h2>
+                  <span id="genericBacktestSymbolMeta"></span>
+                </div>
+                <div class="wide-table">
+                  <table class="readable-table">
+                    <thead>
+                      <tr>
+                        <th>Symbol</th>
+                        <th>Trades</th>
+                        <th>Win Rate</th>
+                        <th>Avg Return</th>
+                        <th>Profit Factor</th>
+                        <th>Ending Return</th>
+                      </tr>
+                    </thead>
+                    <tbody id="genericBacktestSymbolBody"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Generic Monthly Performance</h2>
+                  <span>Trade exit month</span>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Month</th>
+                      <th>Trades</th>
+                      <th>Win Rate</th>
+                      <th>Total Return</th>
+                      <th>Avg Return</th>
+                    </tr>
+                  </thead>
+                  <tbody id="genericBacktestMonthlyBody"></tbody>
+                </table>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Generic Trade Log</h2>
+                  <span id="genericBacktestTradeMeta"></span>
+                </div>
+                <div class="wide-table">
+                  <table class="readable-table">
+                    <thead>
+                      <tr>
+                        <th>Symbol</th>
+                        <th>Side</th>
+                        <th>Signal</th>
+                        <th>Entry</th>
+                        <th>Exit</th>
+                        <th>Score</th>
+                        <th>Entry Price</th>
+                        <th>Exit Price</th>
+                        <th>Return</th>
+                        <th>Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody id="genericBacktestTradeBody"></tbody>
+                  </table>
+                </div>
+              </section>
+
               <section class="activity-hero">
                 <div>
                   <h2>Setup Backtest</h2>

@@ -34,6 +34,11 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"status": "ok"})
             elif parsed.path == "/api/symbols":
                 self._send_json(self.service.symbols())
+            elif parsed.path == "/api/strategies":
+                self._send_json(self.service.strategies())
+            elif parsed.path == "/api/strategy-info":
+                params = parse_qs(parsed.query)
+                self._send_json(self.service.strategy_info(_required(params, "strategy")))
             elif parsed.path == "/api/zerodha/status":
                 self._send_json(self.service.zerodha_status())
             elif parsed.path == "/api/zerodha/login-url":
@@ -137,6 +142,21 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         limit_symbols=_optional_limit(params.get("limit_symbols", ["50"])[0]),
                     )
                 )
+            elif parsed.path == "/api/backtest-strategy":
+                params = parse_qs(parsed.query)
+                self._send_json(
+                    self.service.backtest_strategy(
+                        strategy_id=params.get("strategy", params.get("strategy_id", [""]))[0],
+                        symbols=_split_symbols(params.get("symbols", [""])[0]),
+                        timeframe=params.get("timeframe", ["day"])[0],
+                        from_date=params.get("from_date", [None])[0] or None,
+                        to_date=params.get("to_date", [None])[0] or None,
+                        days=_optional_int(params.get("days", [None])[0]),
+                        strategy_params=_optional_json(params.get("params", ["{}"])[0]),
+                        backtest_params=_optional_json(params.get("backtest_params", ["{}"])[0]),
+                        limit_symbols=_optional_limit(params.get("limit_symbols", ["50"])[0]),
+                    )
+                )
             else:
                 self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
         except Exception as exc:
@@ -175,6 +195,28 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(self.service.fii_dii_activity(refresh=True))
             elif parsed.path == "/api/export-report":
                 self._send_json(self.service.export_report(self._read_json()))
+            elif parsed.path == "/api/backtest-strategy":
+                payload = self._read_json()
+                symbols = payload.get("symbols")
+                if isinstance(symbols, str):
+                    symbols = _split_symbols(symbols)
+                elif symbols is None:
+                    symbols = None
+                else:
+                    symbols = [str(symbol).strip() for symbol in symbols if str(symbol).strip()]
+                self._send_json(
+                    self.service.backtest_strategy(
+                        strategy_id=str(payload.get("strategy_id") or payload.get("strategy") or ""),
+                        symbols=symbols,
+                        timeframe=str(payload.get("timeframe") or "day"),
+                        from_date=payload.get("from_date") or None,
+                        to_date=payload.get("to_date") or None,
+                        days=_optional_int(payload.get("days")),
+                        strategy_params=payload.get("strategy_params") or payload.get("params") or {},
+                        backtest_params=payload.get("backtest_params") or {},
+                        limit_symbols=_optional_limit(str(payload.get("limit_symbols") or "50")),
+                    )
+                )
             elif parsed.path == "/api/option-chain-monitor/start":
                 payload = self._read_json()
                 raw_symbols = payload.get("symbols") or []
@@ -251,6 +293,21 @@ def _optional_limit(value: str | None) -> int | None:
     if cleaned in {"", "all"}:
         return None
     return int(cleaned)
+
+
+def _split_symbols(value: str | None) -> list[str] | None:
+    if not value or not value.strip():
+        return None
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def _optional_json(value: str | None) -> dict:
+    if not value or not value.strip():
+        return {}
+    loaded = json.loads(value)
+    if not isinstance(loaded, dict):
+        raise ValueError("JSON parameter must be an object.")
+    return loaded
 
 
 def main() -> None:

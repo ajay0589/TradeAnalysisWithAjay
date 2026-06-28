@@ -6,6 +6,8 @@ const state = {
   krishnaRefreshJobId: null,
   lastKrishnaRows: [],
   lastBacktest: null,
+  strategies: [],
+  lastGenericBacktest: null,
   optionMonitorJobId: null,
   optionMonitorPollTimer: null,
 };
@@ -903,6 +905,184 @@ function downloadKrishnaCsv() {
   ]);
 }
 
+async function loadStrategies() {
+  const data = await api("/api/strategies");
+  state.strategies = data.strategies || [];
+  const select = $("genericStrategySelect");
+  select.innerHTML = state.strategies
+    .map((strategy) => `<option value="${escapeHtml(strategy.strategy_id)}">${escapeHtml(strategy.label)}</option>`)
+    .join("");
+  if (state.strategies.length) {
+    select.value = state.strategies[0].strategy_id;
+    populateStrategyParams();
+  }
+}
+
+function populateStrategyParams() {
+  const selected = state.strategies.find((strategy) => strategy.strategy_id === $("genericStrategySelect").value);
+  if (!selected) return;
+  $("genericStrategyParams").value = JSON.stringify(selected.default_params || {}, null, 2);
+  $("genericBacktestTimeframe").value = selected.default_timeframe || "day";
+}
+
+function parseJsonTextarea(id, label) {
+  const text = $(id).value.trim();
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+      throw new Error(`${label} must be a JSON object.`);
+    }
+    return parsed;
+  } catch (error) {
+    throw new Error(`${label}: ${error.message}`);
+  }
+}
+
+async function runGenericBacktest() {
+  $("genericBacktestStatus").textContent = "Running";
+  setNotes("Running generic strategy backtest on cached candles...");
+  try {
+    const symbolsText = $("genericBacktestSymbol").value.trim();
+    const payload = {
+      strategy_id: $("genericStrategySelect").value,
+      symbols: symbolsText ? symbolsText.split(",").map((item) => item.trim()).filter(Boolean) : null,
+      timeframe: $("genericBacktestTimeframe").value,
+      days: $("genericBacktestDays").value ? Number($("genericBacktestDays").value) : null,
+      from_date: $("genericBacktestFromDate").value || null,
+      to_date: $("genericBacktestToDate").value || null,
+      strategy_params: parseJsonTextarea("genericStrategyParams", "Strategy params"),
+      backtest_params: parseJsonTextarea("genericBacktestParams", "Backtest params"),
+      limit_symbols: $("genericLimitSymbols").value.trim() || "50",
+    };
+    const data = await postApi("/api/backtest-strategy", payload);
+    state.lastGenericBacktest = data;
+    renderGenericBacktest(data);
+    setNotes("Generic backtest complete. Review score buckets, symbol performance, and trade log before trusting any setup.");
+  } catch (error) {
+    $("genericBacktestStatus").textContent = "Failed";
+    setNotes([error.message], true);
+  }
+}
+
+function renderGenericBacktest(data) {
+  $("genericBacktestStatus").textContent = "Completed";
+  const strategy = data.strategy || {};
+  $("genericBacktestMeta").textContent = `${strategy.label || data.strategy_id || "Strategy"} / ${data.analyzed_symbols || 0} analyzed / ${data.signal_count || 0} signals / ${data.trade_count || 0} trades`;
+  const metrics = data.metrics || {};
+  const cards = [
+    ["Trades", metrics.trades],
+    ["Win rate", fmtPct(metrics.win_rate)],
+    ["Avg return", fmtPct(metrics.avg_return)],
+    ["Expectancy", fmtPct(metrics.expectancy)],
+    ["Profit factor", fmt(metrics.profit_factor)],
+    ["Max DD", fmtPct(metrics.max_drawdown)],
+    ["Ending return", fmtPct(metrics.ending_return)],
+    ["Avg R", fmt(metrics.avg_r_multiple)],
+  ];
+  $("genericBacktestSummaryCards").innerHTML = cards
+    .map(([label, value]) => `<div class="compact-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`)
+    .join("");
+  $("genericBacktestSummaryPoints").innerHTML = ((data.summary && data.summary.points) || [])
+    .map((point) => `<div>${escapeHtml(point)}</div>`)
+    .join("");
+  renderGenericBacktestBuckets(data.score_buckets || []);
+  renderGenericBacktestSymbols(data.symbol_performance || []);
+  renderGenericBacktestMonthly(data.monthly_performance || []);
+  renderGenericBacktestTrades(data.trades || []);
+}
+
+function renderGenericBacktestBuckets(rows) {
+  $("genericBacktestBucketBody").innerHTML = rows
+    .map(
+      (row) => `
+        <tr>
+          <td>${escapeHtml(row.score_bucket)}</td>
+          <td>${fmtInt(row.trades)}</td>
+          <td>${fmtPct(row.win_rate)}</td>
+          <td>${fmtPct(row.avg_return)}</td>
+          <td>${fmtPct(row.expectancy)}</td>
+        </tr>
+      `
+    )
+    .join("");
+}
+
+function renderGenericBacktestSymbols(rows) {
+  $("genericBacktestSymbolMeta").textContent = `${rows.length} symbol row(s)`;
+  $("genericBacktestSymbolBody").innerHTML = rows
+    .map(
+      (row) => `
+        <tr>
+          <td><button class="linkBtn symbol-chip" data-symbol="${escapeHtml(row.symbol)}">${escapeHtml(row.symbol)}</button></td>
+          <td>${fmtInt(row.trades)}</td>
+          <td>${fmtPct(row.win_rate)}</td>
+          <td>${fmtPct(row.avg_return)}</td>
+          <td>${fmt(row.profit_factor)}</td>
+          <td>${fmtPct(row.ending_return)}</td>
+        </tr>
+      `
+    )
+    .join("");
+  document.querySelectorAll("#genericBacktestSymbolBody .linkBtn").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("symbolInput").value = button.dataset.symbol;
+      activateTab("analyze");
+      analyze();
+    });
+  });
+}
+
+function renderGenericBacktestMonthly(rows) {
+  $("genericBacktestMonthlyBody").innerHTML = rows
+    .map(
+      (row) => `
+        <tr>
+          <td>${escapeHtml(row.month)}</td>
+          <td>${fmtInt(row.trades)}</td>
+          <td>${fmtPct(row.win_rate)}</td>
+          <td>${fmtPct(row.return_sum)}</td>
+          <td>${fmtPct(row.avg_return)}</td>
+        </tr>
+      `
+    )
+    .join("");
+}
+
+function renderGenericBacktestTrades(rows) {
+  const shown = rows.slice(0, 200);
+  $("genericBacktestTradeMeta").textContent = `${shown.length} shown / ${rows.length} trade(s)`;
+  $("genericBacktestTradeBody").innerHTML = shown
+    .map((row) => {
+      const reasons = (row.reasons || []).slice(0, 2);
+      const reasonList = reasons.length
+        ? `<ul class="reason-list">${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`
+        : "-";
+      return `
+        <tr>
+          <td><button class="linkBtn symbol-chip" data-symbol="${escapeHtml(row.symbol)}">${escapeHtml(row.symbol)}</button></td>
+          <td>${escapeHtml(row.side || "-")}</td>
+          <td>${escapeHtml(row.signal_date || "-")}</td>
+          <td>${escapeHtml(row.entry_date || "-")}</td>
+          <td>${escapeHtml(row.exit_date || "-")}</td>
+          <td>${fmtInt(row.score)}</td>
+          <td>${fmt(row.entry_price)}</td>
+          <td>${fmt(row.exit_price)}</td>
+          <td class="${Number(row.return_percent || 0) >= 0 ? "points-positive" : "points-negative"}">${fmtPct(row.return_percent)}</td>
+          <td>${reasonList}</td>
+        </tr>
+      `;
+    })
+    .join("");
+  document.querySelectorAll("#genericBacktestTradeBody .linkBtn").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("symbolInput").value = button.dataset.symbol;
+      activateTab("analyze");
+      analyze();
+    });
+  });
+}
+
 async function runKrishnaBacktest() {
   setNotes("Running Krishna setup backtest on cached daily candles...");
   $("backtestStatus").textContent = "Running";
@@ -1600,6 +1780,8 @@ $("saveReportBtn").addEventListener("click", saveReport);
 $("krishnaScanBtn").addEventListener("click", runKrishnaScan);
 $("krishnaCopyBtn").addEventListener("click", copyKrishnaSymbols);
 $("krishnaDownloadBtn").addEventListener("click", downloadKrishnaCsv);
+$("genericStrategySelect").addEventListener("change", populateStrategyParams);
+$("genericBacktestRunBtn").addEventListener("click", runGenericBacktest);
 $("backtestRunBtn").addEventListener("click", runKrishnaBacktest);
 $("backtestDownloadTradesBtn").addEventListener("click", downloadBacktestTrades);
 $("backtestDownloadSignalsBtn").addEventListener("click", downloadBacktestSignals);
@@ -1633,7 +1815,7 @@ document.querySelectorAll("[data-tab-target]").forEach((button) => {
 });
 enhanceCollapsibleSections();
 
-Promise.all([loadZerodhaLoginUrl(), checkZerodhaStatus(), loadSymbols(), loadSectorStatus(), loadFiiDii(false)])
+Promise.all([loadZerodhaLoginUrl(), checkZerodhaStatus(), loadSymbols(), loadStrategies(), loadSectorStatus(), loadFiiDii(false)])
   .then(() => {
     const first = state.symbols.find((row) => row.has_daily);
     if (first) {

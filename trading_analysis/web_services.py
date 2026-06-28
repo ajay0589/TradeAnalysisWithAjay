@@ -41,6 +41,8 @@ from trading_analysis.analysis.relative_strength import (
 from trading_analysis.analysis.scanners import SETUP_ALIASES, SETUP_LABELS, scan_symbol_for_setups
 from trading_analysis.analysis.technical import analyze_technical
 from trading_analysis.analysis.trade_decision import build_trade_decision
+from trading_analysis.backtesting.engine import backtest_strategy_for_symbols
+from trading_analysis.backtesting.models import BacktestConfig as GenericBacktestConfig
 from trading_analysis.brokers.zerodha import (
     ZerodhaKiteClient,
     build_login_url,
@@ -66,6 +68,7 @@ from trading_analysis.data_sources.nse_equity import (
     build_sector_map_from_symbol_overrides,
 )
 from trading_analysis.data_sources.nse_fii_dii import fetch_fii_dii_activity, write_fii_dii_csv
+from trading_analysis.strategies.registry import get_strategy, list_strategies, strategy_info
 
 
 DEFAULT_REFRESH_DAYS = {
@@ -1097,6 +1100,81 @@ class AnalysisService:
             (
                 f"Backtested {payload['analyzed_symbols']} symbol(s), "
                 f"{payload['signal_count']} historical signal(s), and {payload['trade_count']} non-overlapping trade(s)."
+            ),
+        )
+        return payload
+
+    def strategies(self) -> dict[str, Any]:
+        return {"strategies": list_strategies()}
+
+    def strategy_info(self, strategy_id: str) -> dict[str, Any]:
+        return {"strategy": strategy_info(strategy_id)}
+
+    def backtest_strategy(
+        self,
+        strategy_id: str,
+        symbols: list[str] | None = None,
+        timeframe: str = "day",
+        from_date: str | None = None,
+        to_date: str | None = None,
+        days: int | None = None,
+        strategy_params: dict[str, Any] | None = None,
+        backtest_params: dict[str, Any] | None = None,
+        limit_symbols: int | None = None,
+    ) -> dict[str, Any]:
+        strategy = get_strategy(strategy_id)
+        normalized_timeframe = normalize_timeframe(timeframe or strategy.default_timeframe)
+        window = candle_window(from_date=from_date, to_date=to_date, days=days)
+
+        requested_symbols = [symbol for symbol in (symbols or []) if str(symbol).strip()]
+        if requested_symbols:
+            scan_symbols = [self.resolve_symbol(symbol) for symbol in requested_symbols]
+            effective_limit = None
+        else:
+            scan_symbols = self._watchlist_symbols()
+            effective_limit = limit_symbols
+            if limit_symbols is not None:
+                scan_symbols = scan_symbols[:limit_symbols]
+
+        config = GenericBacktestConfig.from_mapping(
+            strategy_id=strategy.strategy_id,
+            timeframe=normalized_timeframe,
+            from_date=from_date,
+            to_date=to_date,
+            days=days,
+            symbols=scan_symbols,
+            strategy_params=strategy_params,
+            backtest_params=backtest_params,
+        )
+
+        symbol_candles: dict[str, Any] = {}
+        errors: list[dict[str, str]] = []
+        for candidate in scan_symbols:
+            if not self._has_candles(candidate, normalized_timeframe):
+                errors.append({"symbol": candidate, "error": f"No cached {timeframe_label(normalized_timeframe)} candles found."})
+                continue
+            try:
+                candles, _source = self._load_timeframe_with_summary(candidate, normalized_timeframe, window)
+                symbol_candles[candidate] = candles
+            except Exception as exc:
+                errors.append({"symbol": candidate, "error": str(exc)})
+
+        payload = backtest_strategy_for_symbols(symbol_candles, strategy, config)
+        payload["errors"] = [*(payload.get("errors") or []), *errors]
+        payload["requested_symbols"] = requested_symbols
+        payload["limit_symbols"] = effective_limit
+        payload["days"] = days
+        payload["from_date"] = from_date
+        payload["to_date"] = to_date
+        payload["available_symbols"] = self._available_count(normalized_timeframe)
+        payload["total_fno_symbols"] = len(self._watchlist_symbols())
+        payload.setdefault("summary", {}).setdefault("points", [])
+        payload["summary"]["points"].insert(
+            0,
+            (
+                f"Backtested {payload.get('analyzed_symbols', 0)} symbol(s), "
+                f"{payload.get('signal_count', 0)} historical signal(s), and "
+                f"{payload.get('trade_count', 0)} simulated trade(s)."
             ),
         )
         return payload
