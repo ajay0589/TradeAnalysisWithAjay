@@ -18,7 +18,14 @@ SETUP_LABELS = {
     "bearish_pullback": "Bearish pullback to resistance",
     "neutral_range": "Neutral range-bound",
     "compression": "Volatility compression watch",
+    "compression_watch": "Volatility compression watch",
     "avoid": "Avoid / choppy",
+    "avoid_choppy": "Avoid / choppy",
+}
+
+SETUP_ALIASES = {
+    "compression_watch": "compression",
+    "avoid_choppy": "avoid",
 }
 
 
@@ -104,9 +111,13 @@ class ScanMatch:
     invalidation: float | None
     target_zone: str | None
     trigger_zone: str | None
+    trigger: float | None
+    range_zone: str | None
     risk_level: str
     risk_reward_comment: str
+    risk_comment: str
     reasons: list[str]
+    warnings: list[str]
     indicators: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -326,6 +337,7 @@ def _bullish_breakout(
         target_zone=_zone_above(snapshot.resistance),
         trigger_zone=f"Breakout above {breakout_level:.2f}; retest hold improves quality.",
         reasons=reasons,
+        trigger=breakout_level,
     )
 
 
@@ -478,6 +490,7 @@ def _bearish_breakdown(
         target_zone=_zone_below(snapshot.support),
         trigger_zone=f"Breakdown below {breakdown_level:.2f}; failed retest improves quality.",
         reasons=reasons,
+        trigger=breakdown_level,
     )
 
 
@@ -586,6 +599,7 @@ def _neutral_range(
         target_zone=target_zone,
         trigger_zone="Range behavior remains valid while price stays between support and resistance.",
         reasons=reasons,
+        range_zone=target_zone,
     )
 
 
@@ -633,6 +647,7 @@ def _compression(symbol: str, snapshot: IndicatorSnapshot, config: ScannerConfig
         target_zone="Wait for breakout/breakdown confirmation.",
         trigger_zone=f"Upper trigger {upper:.2f}; lower trigger {lower:.2f}." if upper is not None and lower is not None else None,
         reasons=reasons,
+        trigger=upper,
     )
 
 
@@ -661,9 +676,13 @@ def _avoid_match(
         invalidation=None,
         target_zone=None,
         trigger_zone=None,
+        trigger=None,
+        range_zone=None,
         risk_level="high",
         risk_reward_comment="Low-quality or unclear location; wait for a cleaner structure.",
+        risk_comment="Low-quality or unclear location; wait for a cleaner structure.",
         reasons=reasons,
+        warnings=_snapshot_warnings(snapshot) if snapshot else [],
         indicators=snapshot.to_dict() if snapshot else {},
     )
 
@@ -690,6 +709,30 @@ def _avoid_reasons(candles: list[Candle], snapshot: IndicatorSnapshot, config: S
     return reasons
 
 
+def _snapshot_warnings(snapshot: IndicatorSnapshot) -> list[str]:
+    warnings: list[str] = []
+    required = {
+        "SMA20": snapshot.sma20,
+        "SMA50": snapshot.sma50,
+        "EMA20": snapshot.ema20,
+        "RSI14": snapshot.rsi14,
+        "ATR14": snapshot.atr14,
+        "previous 20-period high": snapshot.previous_high20,
+        "previous 20-period low": snapshot.previous_low20,
+        "average volume 20": snapshot.average_volume20,
+        "volume ratio 20": snapshot.volume_ratio20,
+        "Bollinger width": snapshot.bollinger_width20,
+    }
+    missing = [name for name, value in required.items() if value is None]
+    if missing:
+        warnings.append(f"Missing indicator input(s): {', '.join(missing)}.")
+    if snapshot.sma200 is None:
+        warnings.append("SMA200 unavailable; long-term trend filter not scored.")
+    if snapshot.bollinger_width_percentile120 is None:
+        warnings.append("Bollinger width percentile unavailable; compression confidence is lower.")
+    return warnings
+
+
 def _make_match(
     symbol: str,
     setup_type: str,
@@ -700,8 +743,11 @@ def _make_match(
     target_zone: str | None,
     trigger_zone: str | None,
     reasons: list[str],
+    trigger: float | None = None,
+    range_zone: str | None = None,
 ) -> ScanMatch:
     score = _clamp(score)
+    risk_comment = _risk_comment(snapshot, invalidation)
     return ScanMatch(
         symbol=symbol,
         setup_type=setup_type,
@@ -714,9 +760,13 @@ def _make_match(
         invalidation=invalidation,
         target_zone=target_zone,
         trigger_zone=trigger_zone,
+        trigger=trigger,
+        range_zone=range_zone,
         risk_level=_risk_level(snapshot, invalidation),
-        risk_reward_comment=_risk_comment(snapshot, invalidation),
+        risk_reward_comment=risk_comment,
+        risk_comment=risk_comment,
         reasons=reasons,
+        warnings=_snapshot_warnings(snapshot),
         indicators=snapshot.to_dict(),
     )
 

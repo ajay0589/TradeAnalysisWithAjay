@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import unittest
+import json
 import os
 import tempfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from trading_analysis.candles import normalize_timeframe, prepare_candles, candle_window
 from trading_analysis.analysis.backtest import (
@@ -27,7 +29,7 @@ from trading_analysis.analysis.options import (
     select_strikes_around_spot,
 )
 from trading_analysis.analysis.relative_strength import compare_relative_strength
-from trading_analysis.analysis.scanners import scan_symbol_for_setups
+from trading_analysis.analysis.scanners import SETUP_LABELS, scan_symbol_for_setups
 from trading_analysis.analysis.scoring import combine_signals
 from trading_analysis.analysis.technical import analyze_technical
 from trading_analysis.analysis.trade_decision import build_trade_decision
@@ -38,6 +40,7 @@ from trading_analysis.brokers.zerodha import (
     kite_checksum,
     parse_kite_timestamp,
     resolve_instrument_token,
+    write_candles_csv,
 )
 from trading_analysis.data_sources.fno_universe import build_fno_watchlist, fno_stock_symbols
 from trading_analysis.data_sources.nse_equity import (
@@ -60,6 +63,7 @@ from trading_analysis.web_services import (
     _refresh_window_for_analysis,
     classify_setup,
 )
+from trading_analysis import cli as cli_module
 
 
 class AnalysisTests(unittest.TestCase):
@@ -334,6 +338,62 @@ class AnalysisTests(unittest.TestCase):
             "Sell call and put as strangle",
         )
 
+    def test_service_scan_opportunities_accepts_requested_aliases_and_serializes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            watchlist = root / "watchlist.json"
+            watchlist.write_text('{"symbols":[{"symbol":"ABC","instrument_type":"EQ"}]}', encoding="utf-8")
+            candles_dir = root / "candles"
+            closes = [100 + [0.25, -0.25, 0.15, -0.15, 0.0][index % 5] for index in range(90)]
+            write_candles_csv(candles_dir / "ABC.csv", self._scanner_candles(closes))
+            service = AnalysisService(watchlist_path=watchlist, daily_data_dir=candles_dir)
+
+            payload = service.scan_opportunities(opportunity_type="avoid_choppy", timeframe="day", limit=5)
+
+            self.assertEqual(payload["opportunity_type"], "avoid_choppy")
+            self.assertEqual(payload["canonical_type"], "avoid")
+            self.assertIn("summary", payload)
+            json.dumps(payload, default=str)
+
+    def test_cli_scan_opportunities_command_uses_service_and_json_output(self) -> None:
+        payload = {
+            "type": "bullish_breakout",
+            "opportunity_type": "bullish_breakout",
+            "direction": None,
+            "timeframe_label": "Daily",
+            "analyzed_symbols": 1,
+            "matched_symbols": 0,
+            "results": [],
+            "summary": {"error_count": 0, "points": []},
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = Path(tmpdir) / "scanner.json"
+            args = SimpleNamespace(
+                opportunity_type="bullish_breakout",
+                direction=None,
+                timeframe="day",
+                from_date=None,
+                to_date=None,
+                days=None,
+                limit=25,
+                output_json=str(output),
+            )
+            with patch.object(cli_module, "AnalysisService") as service_cls:
+                service_cls.return_value.scan_opportunities.return_value = payload
+
+                cli_module.run_scan_opportunities(args)
+
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["opportunity_type"], "bullish_breakout")
+            service_cls.return_value.scan_opportunities.assert_called_once_with(
+                opportunity_type="bullish_breakout",
+                direction=None,
+                timeframe="day",
+                from_date=None,
+                to_date=None,
+                days=None,
+                limit=25,
+            )
+
     def test_web_symbols_include_index_aliases(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -588,6 +648,56 @@ class AnalysisTests(unittest.TestCase):
         self.assertIsNotNone(breakdown)
         self.assertTrue(any("20-period low" in reason for reason in breakdown.reasons))
 
+    def test_scanner_detects_bullish_trend_continuation(self) -> None:
+        closes = []
+        price = 100.0
+        pattern = [0.6, -0.35, 0.45, -0.25]
+        for index in range(80):
+            price += pattern[index % len(pattern)]
+            closes.append(price)
+        structure = SimpleNamespace(
+            trend="uptrend",
+            support=124.0,
+            resistance=130.0,
+            range_low=122.0,
+            range_high=130.0,
+            invalidation=124.0,
+            last_swing_high=SimpleNamespace(price=123.0),
+            last_swing_low=SimpleNamespace(price=121.0),
+        )
+
+        matches = scan_symbol_for_setups("ABC", self._scanner_candles(closes), structure=structure)
+        trend = self._scanner_match(matches, "bullish_trend")
+
+        self.assertIsNotNone(trend)
+        self.assertEqual(trend.direction, "bullish")
+        self.assertTrue(trend.reasons)
+
+    def test_scanner_detects_bearish_trend_continuation(self) -> None:
+        closes = []
+        price = 150.0
+        pattern = [-0.6, 0.35, -0.45, 0.25]
+        for index in range(80):
+            price += pattern[index % len(pattern)]
+            closes.append(price)
+        structure = SimpleNamespace(
+            trend="downtrend",
+            support=119.0,
+            resistance=124.0,
+            range_low=119.0,
+            range_high=126.0,
+            invalidation=124.0,
+            last_swing_high=SimpleNamespace(price=128.0),
+            last_swing_low=SimpleNamespace(price=125.0),
+        )
+
+        matches = scan_symbol_for_setups("ABC", self._scanner_candles(closes), structure=structure)
+        trend = self._scanner_match(matches, "bearish_trend")
+
+        self.assertIsNotNone(trend)
+        self.assertEqual(trend.direction, "bearish")
+        self.assertTrue(trend.reasons)
+
     def test_scanner_detects_neutral_range(self) -> None:
         closes = [100 + [0.25, -0.25, 0.15, -0.15, 0.0][index % 5] for index in range(90)]
 
@@ -639,6 +749,42 @@ class AnalysisTests(unittest.TestCase):
         self.assertGreaterEqual(matches[0].score, 0)
         self.assertLessEqual(matches[0].score, 100)
         self.assertTrue(matches[0].reasons)
+        self.assertIn("warnings", matches[0].to_dict())
+
+    def test_scanner_contract_fields_scores_and_reasons_are_stable(self) -> None:
+        closes = [100 + [0.0, 0.2, -0.1, 0.1, -0.2, 0.0][index % 6] for index in range(80)]
+        closes[-1] = 101.4
+        volumes = [1000] * 79 + [5000]
+
+        matches = scan_symbol_for_setups("ABC", self._scanner_candles(closes, volumes))
+
+        self.assertTrue(matches)
+        for match in matches:
+            row = match.to_dict()
+            self.assertGreaterEqual(row["score"], 0)
+            self.assertLessEqual(row["score"], 100)
+            self.assertIn(row["confidence"], {"low", "medium", "high"})
+            self.assertTrue(row["reasons"])
+            self.assertIsInstance(row["warnings"], list)
+            self.assertIn("trigger", row)
+            self.assertIn("range_zone", row)
+            self.assertIn("risk_comment", row)
+            self.assertIsInstance(row["indicators"], dict)
+
+    def test_scanner_setup_type_aliases_are_supported(self) -> None:
+        required = {
+            "bullish_breakout",
+            "bullish_trend",
+            "bullish_pullback",
+            "bearish_breakdown",
+            "bearish_trend",
+            "bearish_pullback",
+            "neutral_range",
+            "compression_watch",
+            "avoid_choppy",
+        }
+
+        self.assertTrue(required.issubset(set(SETUP_LABELS)))
 
     def test_indicator_suite_includes_requested_indicators(self) -> None:
         closes = [100 + (index * 0.5) for index in range(100)]
