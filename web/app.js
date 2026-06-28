@@ -849,6 +849,9 @@ function renderKrishnaResults(rows) {
       const warnings = (row.warnings || []).length
         ? `<div class="cell-note">${escapeHtml(row.warnings.join(" | "))}</div>`
         : "";
+      const trigger = row.entry_trigger || {};
+      const triggerStatus = row.entry_trigger_status || trigger.status || "missing";
+      const triggerClass = triggerStatus === "entry_allowed" ? "points-positive" : triggerStatus === "wait" ? "points-warn" : "";
       return `
         <tr>
           <td><button class="linkBtn symbol-chip" data-symbol="${escapeHtml(row.symbol)}">${escapeHtml(row.symbol)}</button></td>
@@ -862,6 +865,10 @@ function renderKrishnaResults(rows) {
           <td>${fmt(row.donchian_upper20)} / ${fmt(row.donchian_mid20)} / ${fmt(row.donchian_lower20)}</td>
           <td>${fmt(row.volume_ratio20)}</td>
           <td>${escapeHtml(row.structure_trend || "-")}</td>
+          <td class="${triggerClass}">
+            ${escapeHtml(triggerStatus)}
+            <div class="cell-note">C ${fmt(row.entry_trigger_close || trigger.close)} / Y ${fmt(row.entry_trigger_yellow_line || trigger.yellow_line)} / VWMA ${fmt(row.entry_trigger_vwma20 || trigger.vwma20)}</div>
+          </td>
           <td>${reasonList}${warnings}</td>
         </tr>
       `;
@@ -900,6 +907,10 @@ function downloadKrishnaCsv() {
     { label: "Donchian Lower20", value: (row) => row.donchian_lower20 },
     { label: "Vol x20", value: (row) => row.volume_ratio20 },
     { label: "Structure", value: (row) => row.structure_trend },
+    { label: "2H Entry Status", value: (row) => row.entry_trigger_status },
+    { label: "2H Close", value: (row) => row.entry_trigger_close },
+    { label: "2H Yellow CK", value: (row) => row.entry_trigger_yellow_line },
+    { label: "2H VWMA20", value: (row) => row.entry_trigger_vwma20 },
     { label: "Reasons", value: (row) => row.reasons || row.reasons_text },
     { label: "Warnings", value: (row) => row.warnings },
   ]);
@@ -1091,12 +1102,18 @@ async function runKrishnaBacktest() {
     const symbol = $("backtestSymbol").value.trim();
     const days = $("backtestDays").value.trim();
     const holdingDays = $("backtestHoldingDays").value.trim();
+    const entryTrigger = $("backtestEntryTrigger").checked;
+    const triggerHoldingBars = $("backtestTriggerHoldingBars").value.trim();
+    const targetR = $("backtestTargetR").value.trim();
     const fromDate = $("backtestFromDate").value.trim();
     const toDate = $("backtestToDate").value.trim();
     const limitSymbols = $("backtestLimitSymbols").value.trim();
     if (symbol) params.set("symbol", symbol);
     if (days) params.set("days", days);
     if (holdingDays) params.set("holding_days", holdingDays);
+    params.set("entry_trigger", entryTrigger ? "true" : "false");
+    if (triggerHoldingBars) params.set("trigger_holding_bars", triggerHoldingBars);
+    if (targetR) params.set("target_r_multiple", targetR);
     if (fromDate) params.set("from_date", fromDate);
     if (toDate) params.set("to_date", toDate);
     params.set("limit_symbols", limitSymbols || "50");
@@ -1113,7 +1130,8 @@ async function runKrishnaBacktest() {
 
 function renderBacktest(data) {
   $("backtestStatus").textContent = "Completed";
-  $("backtestMeta").textContent = `${data.analyzed_symbols} analyzed / ${data.signal_count} signals / ${data.trade_count} trades / Daily`;
+  const entryMode = data.use_entry_trigger ? "Daily + 2H trigger" : "Daily";
+  $("backtestMeta").textContent = `${data.analyzed_symbols} analyzed / ${data.signal_count} signals / ${data.trade_count} trades / ${entryMode}`;
   const metrics = data.metrics || {};
   const baseline = data.baselines || {};
   const buyHold = baseline.buy_and_hold || {};

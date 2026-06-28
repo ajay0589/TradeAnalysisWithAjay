@@ -20,10 +20,11 @@ from trading_analysis.analysis.backtest import (
     BacktestConfig,
     aggregate_krishna_backtests,
     backtest_krishna_bullish_setup,
+    backtest_krishna_bullish_setup_with_entry_trigger,
 )
 from trading_analysis.analysis.fundamental import analyze_fundamentals
 from trading_analysis.analysis.indicator_suite import analyze_indicator_suite
-from trading_analysis.analysis.krishna_setup import scan_krishna_bullish_setup
+from trading_analysis.analysis.krishna_setup import scan_krishna_bullish_setup, scan_krishna_entry_trigger
 from trading_analysis.analysis.market_structure import analyze_market_structure
 from trading_analysis.analysis.options import (
     analyze_option_chain,
@@ -1020,6 +1021,22 @@ class AnalysisService:
                     row["to"] = source.get("to")
                     row["source_path"] = source.get("path")
                     row["reasons_text"] = "; ".join(row.get("reasons") or [])
+                    if self._has_candles(symbol, "120minute"):
+                        trigger_candles, trigger_source = self._load_timeframe_with_summary(symbol, "120minute", window)
+                        trigger = scan_krishna_entry_trigger(symbol, trigger_candles, timeframe="120minute")
+                        row["entry_trigger"] = trigger.to_dict()
+                        row["entry_trigger_status"] = trigger.status
+                        row["entry_trigger_timeframe"] = "120minute"
+                        row["entry_trigger_close"] = trigger.close
+                        row["entry_trigger_yellow_line"] = trigger.yellow_line
+                        row["entry_trigger_vwma20"] = trigger.vwma20
+                        row["entry_trigger_source_path"] = trigger_source.get("path")
+                    else:
+                        row["entry_trigger"] = {
+                            "status": "missing",
+                            "warnings": ["Cached 60-minute candles are needed to derive 2-hour entry trigger."],
+                        }
+                        row["entry_trigger_status"] = "missing"
                     rows.append(row)
             except Exception as exc:
                 errors.append({"symbol": symbol, "error": str(exc)})
@@ -1048,6 +1065,7 @@ class AnalysisService:
                     "Daily-only bullish continuation pullback/consolidation watch.",
                     "Ignored Ichimoku and EMA 26/89 as requested.",
                     "Requires EMA9 above EMA26, non-downtrend structure, and yellow Chande Kroll upper line above recent candles and the selected indicator stack.",
+                    "Entry trigger checks derived 2-hour candles: candle close above yellow Chande Kroll and yellow below VWMA20.",
                     "This is a manual-review shortlist, not an entry signal or trade recommendation.",
                 ],
             },
@@ -1061,10 +1079,15 @@ class AnalysisService:
         to_date: str | None = None,
         holding_days: int = 10,
         limit_symbols: int | None = 50,
+        use_entry_trigger: bool = False,
+        trigger_holding_bars: int = 6,
+        target_r_multiple: float = 2.0,
     ) -> dict[str, Any]:
         window = candle_window(from_date=from_date, to_date=to_date, days=days)
         if holding_days <= 0:
             raise ValueError("holding_days must be greater than zero.")
+        if trigger_holding_bars <= 0:
+            raise ValueError("trigger_holding_bars must be greater than zero.")
 
         if symbol and symbol.strip():
             symbols = [self.resolve_symbol(symbol)]
@@ -1075,21 +1098,36 @@ class AnalysisService:
             if limit_symbols is not None:
                 symbols = symbols[:limit_symbols]
 
-        config = BacktestConfig(holding_days=holding_days)
+        config = BacktestConfig(
+            holding_days=holding_days,
+            trigger_holding_bars=trigger_holding_bars,
+            target_r_multiple=target_r_multiple,
+        )
         results: list[dict[str, Any]] = []
         errors: list[dict[str, str]] = []
         for candidate in symbols:
             if not self._has_candles(candidate, "day"):
                 continue
+            if use_entry_trigger and not self._has_candles(candidate, "120minute"):
+                errors.append({"symbol": candidate, "error": "Missing cached 60-minute candles needed for derived 2-hour trigger."})
+                continue
             try:
                 candles, _source = self._load_timeframe_with_summary(candidate, "day", window)
-                results.append(backtest_krishna_bullish_setup(candidate, candles, config))
+                if use_entry_trigger:
+                    trigger_candles, _trigger_source = self._load_timeframe_with_summary(candidate, "120minute", window)
+                    results.append(backtest_krishna_bullish_setup_with_entry_trigger(candidate, candles, trigger_candles, config))
+                else:
+                    results.append(backtest_krishna_bullish_setup(candidate, candles, config))
             except Exception as exc:
                 errors.append({"symbol": candidate, "error": str(exc)})
 
         payload = aggregate_krishna_backtests(results, errors=errors, limit_symbols=effective_limit)
         payload["requested_symbol"] = symbol.strip().upper() if symbol and symbol.strip() else None
         payload["holding_days"] = holding_days
+        payload["use_entry_trigger"] = use_entry_trigger
+        payload["entry_timeframe"] = "120minute" if use_entry_trigger else "day"
+        payload["trigger_holding_bars"] = trigger_holding_bars if use_entry_trigger else None
+        payload["target_r_multiple"] = target_r_multiple if use_entry_trigger else None
         payload["days"] = days
         payload["from_date"] = from_date
         payload["to_date"] = to_date
@@ -1102,6 +1140,11 @@ class AnalysisService:
                 f"{payload['signal_count']} historical signal(s), and {payload['trade_count']} non-overlapping trade(s)."
             ),
         )
+        if use_entry_trigger:
+            payload["summary"]["points"].insert(
+                1,
+                "Entry mode: daily Krishna filter first, then derived 2-hour trigger where close is above yellow Chande Kroll and yellow is below VWMA20.",
+            )
         return payload
 
     def strategies(self) -> dict[str, Any]:

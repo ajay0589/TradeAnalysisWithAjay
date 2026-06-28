@@ -438,6 +438,23 @@ def main() -> None:
     backtest_parser.add_argument("--to-date", help="End date YYYY-MM-DD")
     backtest_parser.add_argument("--holding-days", type=int, default=10, help="Fixed futures-style holding period")
     backtest_parser.add_argument(
+        "--entry-trigger",
+        action="store_true",
+        help="Use Krishna daily filter plus derived 2-hour entry trigger from cached 60-minute candles",
+    )
+    backtest_parser.add_argument(
+        "--trigger-holding-bars",
+        type=int,
+        default=6,
+        help="Max 2-hour candles to hold after entry trigger",
+    )
+    backtest_parser.add_argument(
+        "--target-r-multiple",
+        type=float,
+        default=2.0,
+        help="Default target in risk multiples for the 2-hour trigger backtest",
+    )
+    backtest_parser.add_argument(
         "--limit-symbols",
         default="50",
         help="Number of watchlist symbols to test, or all. Ignored when --symbol is provided.",
@@ -913,6 +930,9 @@ def run_backtest_krishna_setup(args: argparse.Namespace) -> None:
         to_date=args.to_date,
         holding_days=args.holding_days,
         limit_symbols=_parse_optional_limit(args.limit_symbols),
+        use_entry_trigger=args.entry_trigger,
+        trigger_holding_bars=args.trigger_holding_bars,
+        target_r_multiple=args.target_r_multiple,
     )
     print(_render_backtest(payload))
 
@@ -1235,9 +1255,14 @@ def _render_scan_opportunities(payload: dict) -> str:
 
 def _render_backtest(payload: dict) -> str:
     metrics = payload.get("metrics") or {}
+    hold_label = (
+        f"2H trigger hold: {payload.get('trigger_holding_bars')} bar(s), target {payload.get('target_r_multiple')}R"
+        if payload.get("use_entry_trigger")
+        else f"Hold: {payload.get('holding_days')} day(s)"
+    )
     lines = [
         f"Backtest: {payload.get('setup_label')} | Timeframe: {payload.get('timeframe_label')} | "
-        f"Hold: {payload.get('holding_days')} day(s)",
+        f"{hold_label}",
         f"Analyzed: {payload.get('analyzed_symbols')} | Signals: {payload.get('signal_count')} | "
         f"Trades: {payload.get('trade_count')} | Errors: {len(payload.get('errors') or [])}",
         "",

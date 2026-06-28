@@ -140,6 +140,9 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         to_date=params.get("to_date", [None])[0] or None,
                         holding_days=_optional_int(params.get("holding_days", [None])[0]) or 10,
                         limit_symbols=_optional_limit(params.get("limit_symbols", ["50"])[0]),
+                        use_entry_trigger=params.get("entry_trigger", ["false"])[0].lower() == "true",
+                        trigger_holding_bars=_optional_int(params.get("trigger_holding_bars", [None])[0]) or 6,
+                        target_r_multiple=float(params.get("target_r_multiple", ["2"])[0] or 2),
                     )
                 )
             elif parsed.path == "/api/backtest-strategy":

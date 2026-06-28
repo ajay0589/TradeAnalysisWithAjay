@@ -590,6 +590,7 @@
                         <th>DC20</th>
                         <th>Vol x20</th>
                         <th>Structure</th>
+                        <th>2H Entry</th>
                         <th>Why</th>
                       </tr>
                     </thead>
@@ -669,6 +670,20 @@
                   <div>
                     <label for="backtestToDate">To</label>
                     <input id="backtestToDate" type="date" />
+                  </div>
+                </div>
+                <label class="checkbox-row">
+                  <input id="backtestEntryTrigger" type="checkbox" checked />
+                  <span>Use 2-hour entry trigger</span>
+                </label>
+                <div class="date-grid">
+                  <div>
+                    <label for="backtestTriggerHoldingBars">2H Hold Bars</label>
+                    <input id="backtestTriggerHoldingBars" type="number" min="1" step="1" value="6" />
+                  </div>
+                  <div>
+                    <label for="backtestTargetR">Target R</label>
+                    <input id="backtestTargetR" type="number" min="0.5" step="0.5" value="2" />
                   </div>
                 </div>
                 <label for="backtestLimitSymbols">Symbols</label>

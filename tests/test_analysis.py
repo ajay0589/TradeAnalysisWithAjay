@@ -14,11 +14,12 @@ from trading_analysis.analysis.backtest import (
     BacktestConfig,
     aggregate_krishna_backtests,
     backtest_krishna_bullish_setup,
+    backtest_krishna_bullish_setup_with_entry_trigger,
 )
 from trading_analysis.analysis.entry_context import build_entry_context
 from trading_analysis.analysis.fundamental import analyze_fundamentals
 from trading_analysis.analysis.indicator_suite import analyze_indicator_suite
-from trading_analysis.analysis.krishna_setup import scan_krishna_bullish_setup
+from trading_analysis.analysis.krishna_setup import scan_krishna_bullish_setup, scan_krishna_entry_trigger
 from trading_analysis.analysis.market_structure import analyze_market_structure
 from trading_analysis.analysis.options import (
     OptionContract,
@@ -870,6 +871,38 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(payload["confidence_buckets"])
         self.assertTrue(payload["summary"]["points"])
 
+    def test_krishna_entry_trigger_detects_two_hour_reclaim(self) -> None:
+        candles = self._intraday_candles([100 + (index * 0.5) for index in range(80)])
+
+        trigger = scan_krishna_entry_trigger("ABC", prepare_candles(candles, "2hour", candle_window()))
+
+        self.assertEqual(trigger.status, "entry_allowed")
+        self.assertGreater(trigger.close, trigger.yellow_line)
+        self.assertLess(trigger.yellow_line, trigger.vwma20)
+        self.assertTrue(trigger.reasons)
+
+    def test_krishna_backtest_can_use_two_hour_entry_trigger(self) -> None:
+        daily_closes = (
+            [100 + (index * 0.45) for index in range(70)]
+            + [152, 145, 144, 143, 142]
+            + [143 + (index * 1.0) for index in range(35)]
+        )
+        daily = self._scanner_candles(daily_closes)
+        intraday = self._intraday_candles([100 + (index * 0.5) for index in range(180)])
+
+        result = backtest_krishna_bullish_setup_with_entry_trigger(
+            "ABC",
+            daily,
+            prepare_candles(intraday, "2hour", candle_window()),
+            BacktestConfig(trigger_holding_bars=6),
+        )
+
+        self.assertEqual(result["symbol"], "ABC")
+        self.assertGreaterEqual(result["signal_count"], result["trade_count"])
+        if result["trades"]:
+            self.assertEqual(result["trades"][0]["entry_timeframe"], "120minute")
+            self.assertIn("trigger_date", result["trades"][0])
+
     def _scanner_candles(self, closes: list[float], volumes: list[int] | None = None) -> list[Candle]:
         volumes = volumes or [1000] * len(closes)
         output = []
@@ -880,6 +913,25 @@ class AnalysisTests(unittest.TestCase):
             output.append(
                 Candle(
                     timestamp=datetime(2026, 1, 1) + timedelta(days=index),
+                    open=previous,
+                    high=high,
+                    low=low,
+                    close=close,
+                    volume=volumes[index],
+                )
+            )
+        return output
+
+    def _intraday_candles(self, closes: list[float], volumes: list[int] | None = None) -> list[Candle]:
+        volumes = volumes or [1000] * len(closes)
+        output = []
+        for index, close in enumerate(closes):
+            previous = closes[index - 1] if index else close
+            high = max(previous, close) + 0.4
+            low = min(previous, close) - 0.4
+            output.append(
+                Candle(
+                    timestamp=datetime(2026, 1, 1, 9, 15) + timedelta(hours=index),
                     open=previous,
                     high=high,
                     low=low,

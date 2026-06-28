@@ -4,7 +4,12 @@ from dataclasses import asdict, dataclass
 from statistics import mean
 from typing import Any
 
-from trading_analysis.analysis.krishna_setup import KrishnaSetupMatch, scan_krishna_bullish_setup
+from trading_analysis.analysis.krishna_setup import (
+    KrishnaEntryTrigger,
+    KrishnaSetupMatch,
+    scan_krishna_bullish_setup,
+    scan_krishna_entry_trigger,
+)
 from trading_analysis.analysis.market_structure import MarketStructure, analyze_market_structure
 from trading_analysis.analysis.technical import ema
 from trading_analysis.models import Candle
@@ -18,6 +23,8 @@ class BacktestConfig:
     holding_days: int = 10
     forward_horizons: tuple[int, ...] = DEFAULT_FORWARD_HORIZONS
     min_candles: int = 60
+    trigger_holding_bars: int = 6
+    target_r_multiple: float = 2.0
 
 
 def backtest_krishna_bullish_setup(
@@ -82,6 +89,79 @@ def backtest_krishna_bullish_setup(
 
     baseline_trades = _ema_baseline_trades(symbol, candles, config.holding_days)
     return _symbol_result(symbol, candles, signals, trades, baseline_trades, "ok")
+
+
+def backtest_krishna_bullish_setup_with_entry_trigger(
+    symbol: str,
+    daily_candles: list[Candle],
+    entry_candles: list[Candle],
+    config: BacktestConfig | None = None,
+) -> dict[str, Any]:
+    config = config or BacktestConfig()
+    daily_candles = sorted(daily_candles, key=lambda candle: candle.timestamp)
+    entry_candles = sorted(entry_candles, key=lambda candle: candle.timestamp)
+    signals: list[dict[str, Any]] = []
+    trades: list[dict[str, Any]] = []
+
+    if config.trigger_holding_bars <= 0:
+        raise ValueError("trigger_holding_bars must be greater than zero.")
+    if len(daily_candles) < config.min_candles or len(entry_candles) < 35:
+        return _symbol_result(symbol, daily_candles, signals, trades, [], "insufficient_candles")
+
+    next_available_entry_time: datetime | None = None
+    for signal_index in range(config.min_candles - 1, len(daily_candles) - 1):
+        daily_history = daily_candles[: signal_index + 1]
+        structure = analyze_market_structure(daily_history) if len(daily_history) >= 10 else None
+        match = scan_krishna_bullish_setup(symbol, daily_history, structure)
+        if match is None:
+            continue
+
+        signal_time = daily_candles[signal_index].timestamp
+        forward = _forward_returns(daily_candles, signal_index, config.forward_horizons)
+        signal = _signal_row(symbol, daily_candles[signal_index], match, structure, forward)
+        signal["entry_timeframe"] = "120minute"
+        signal["entry_rule"] = "2h close above yellow Chande Kroll and yellow below VWMA20"
+        signals.append(signal)
+
+        trigger_index, trigger = _find_entry_trigger(symbol, entry_candles, signal_time, next_available_entry_time)
+        if trigger is None or trigger_index is None:
+            signal["trade_status"] = "waiting_for_2h_trigger"
+            continue
+        signal["entry_trigger"] = trigger.to_dict()
+
+        entry_index = trigger_index + 1
+        if entry_index >= len(entry_candles):
+            signal["trade_status"] = "skipped_no_entry"
+            continue
+        entry_price = entry_candles[entry_index].open
+        if entry_price <= 0:
+            signal["trade_status"] = "skipped_bad_entry"
+            continue
+        exit_data = _trigger_exit(entry_candles, entry_index, entry_price, trigger, config)
+        exit_index = exit_data["index"]
+        exit_price = exit_data["price"]
+        return_percent = ((exit_price - entry_price) / entry_price) * 100
+        risk = entry_price - trigger.stop_loss if trigger.stop_loss is not None else None
+        trade = {
+            **{key: signal[key] for key in signal if key not in {"forward_returns", "forward_success"}},
+            "trigger_date": trigger.trigger_date,
+            "entry_date": entry_candles[entry_index].timestamp.isoformat(),
+            "exit_date": entry_candles[exit_index].timestamp.isoformat(),
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "exit_reason": exit_data["reason"],
+            "holding_bars": max(0, exit_index - entry_index),
+            "return_percent": return_percent,
+            "r_multiple": ((exit_price - entry_price) / risk) if risk and risk > 0 else None,
+            "win": return_percent > 0,
+            "forward_returns": forward,
+            "forward_success": {str(days): row["success"] for days, row in forward.items()},
+        }
+        trades.append(trade)
+        signal["trade_status"] = "taken"
+        next_available_entry_time = entry_candles[exit_index].timestamp
+
+    return _symbol_result(symbol, daily_candles, signals, trades, [], "ok")
 
 
 def aggregate_krishna_backtests(
@@ -351,6 +431,49 @@ def _ema_baseline_trades(symbol: str, candles: list[Candle], holding_days: int) 
         )
         next_available_entry_index = exit_index + 1
     return trades
+
+
+def _find_entry_trigger(
+    symbol: str,
+    entry_candles: list[Candle],
+    after_time: datetime,
+    next_available_entry_time: datetime | None,
+) -> tuple[int | None, KrishnaEntryTrigger | None]:
+    for index in range(29, len(entry_candles) - 1):
+        candle_time = entry_candles[index].timestamp
+        if candle_time <= after_time:
+            continue
+        if next_available_entry_time is not None and candle_time <= next_available_entry_time:
+            continue
+        trigger = scan_krishna_entry_trigger(symbol, entry_candles[: index + 1], timeframe="120minute")
+        if trigger.status == "entry_allowed":
+            return index, trigger
+    return None, None
+
+
+def _trigger_exit(
+    entry_candles: list[Candle],
+    entry_index: int,
+    entry_price: float,
+    trigger: KrishnaEntryTrigger,
+    config: BacktestConfig,
+) -> dict[str, Any]:
+    stop_loss = trigger.stop_loss
+    target = None
+    if stop_loss is not None and entry_price > stop_loss:
+        target = entry_price + ((entry_price - stop_loss) * config.target_r_multiple)
+    max_exit_index = min(len(entry_candles) - 1, entry_index + config.trigger_holding_bars)
+    for index in range(entry_index, max_exit_index + 1):
+        candle = entry_candles[index]
+        stop_hit = stop_loss is not None and candle.low <= stop_loss
+        target_hit = target is not None and candle.high >= target
+        if stop_hit and target_hit:
+            return {"index": index, "price": stop_loss, "reason": "stop_loss_intrabar_ambiguous"}
+        if stop_hit:
+            return {"index": index, "price": stop_loss, "reason": "stop_loss"}
+        if target_hit:
+            return {"index": index, "price": target, "reason": "target_2r"}
+    return {"index": max_exit_index, "price": entry_candles[max_exit_index].close, "reason": "holding_bars"}
 
 
 def _buy_hold(candles: list[Candle]) -> dict[str, Any]:

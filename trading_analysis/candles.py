@@ -25,6 +25,11 @@ TIMEFRAME_ALIASES = {
     "1h": "60minute",
     "60min": "60minute",
     "60minute": "60minute",
+    "2hour": "120minute",
+    "2hours": "120minute",
+    "2h": "120minute",
+    "120min": "120minute",
+    "120minute": "120minute",
     "15min": "15minute",
     "15m": "15minute",
     "15minute": "15minute",
@@ -35,6 +40,7 @@ TIMEFRAME_LABELS = {
     "week": "Weekly",
     "day": "Daily",
     "60minute": "1 hour",
+    "120minute": "2 hour",
     "15minute": "15 min",
 }
 
@@ -68,6 +74,8 @@ def source_timeframe(timeframe: str) -> str:
     normalized = normalize_timeframe(timeframe)
     if normalized in {"month", "week"}:
         return "day"
+    if normalized == "120minute":
+        return "60minute"
     return normalized
 
 
@@ -138,6 +146,8 @@ def convert_timeframe(candles: list[Candle], timeframe: str) -> list[Candle]:
         return _resample(candles, lambda candle: candle.timestamp.isocalendar()[:2])
     if normalized == "month":
         return _resample(candles, lambda candle: (candle.timestamp.year, candle.timestamp.month))
+    if normalized == "120minute":
+        return _resample_intraday(candles, 120)
     return candles
 
 
@@ -149,6 +159,36 @@ def _resample(candles: list[Candle], key_fn) -> list[Candle]:
     groups: dict[tuple[int, int], list[Candle]] = {}
     for candle in sorted(candles, key=lambda item: item.timestamp):
         groups.setdefault(tuple(key_fn(candle)), []).append(candle)
+
+    output = []
+    for group in groups.values():
+        first = group[0]
+        last = group[-1]
+        output.append(
+            Candle(
+                timestamp=last.timestamp,
+                open=first.open,
+                high=max(candle.high for candle in group),
+                low=min(candle.low for candle in group),
+                close=last.close,
+                volume=sum(candle.volume for candle in group),
+                open_interest=last.open_interest,
+            )
+        )
+    return output
+
+
+def _resample_intraday(candles: list[Candle], minutes: int) -> list[Candle]:
+    groups: dict[tuple[int, int, int, int], list[Candle]] = {}
+    for candle in sorted(candles, key=lambda item: item.timestamp):
+        bucket_minute = ((candle.timestamp.hour * 60 + candle.timestamp.minute) // minutes) * minutes
+        key = (
+            candle.timestamp.year,
+            candle.timestamp.timetuple().tm_yday,
+            bucket_minute // 60,
+            bucket_minute % 60,
+        )
+        groups.setdefault(key, []).append(candle)
 
     output = []
     for group in groups.values():

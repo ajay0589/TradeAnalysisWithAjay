@@ -832,6 +832,11 @@ tr:last-child td {
   font-weight: 650;
 }
 
+.points-warn {
+  color: var(--amber);
+  font-weight: 650;
+}
+
 .points-zero {
   color: var(--muted);
   font-weight: 650;

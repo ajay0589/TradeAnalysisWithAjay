@@ -43,6 +43,26 @@ class KrishnaSetupMatch:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class KrishnaEntryTrigger:
+    symbol: str
+    timeframe: str
+    status: str
+    trigger_date: str | None
+    close: float | None
+    yellow_line: float | None
+    vwma20: float | None
+    score: int
+    confidence: str
+    entry_price: float | None
+    stop_loss: float | None
+    reasons: list[str]
+    warnings: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 def scan_krishna_bullish_setup(
     symbol: str,
     candles: list[Candle],
@@ -153,6 +173,98 @@ def scan_krishna_bullish_setup(
         donchian_lower20=levels["donchian_lower20"],
         volume_ratio20=levels["volume_ratio20"],
         structure_trend=structure.trend if structure else None,
+        reasons=reasons,
+        warnings=warnings,
+    )
+
+
+def scan_krishna_entry_trigger(
+    symbol: str,
+    candles: list[Candle],
+    timeframe: str = "120minute",
+) -> KrishnaEntryTrigger:
+    candles = sorted(candles, key=lambda candle: candle.timestamp)
+    if len(candles) < 30:
+        return KrishnaEntryTrigger(
+            symbol=symbol.upper(),
+            timeframe=timeframe,
+            status="insufficient",
+            trigger_date=None,
+            close=None,
+            yellow_line=None,
+            vwma20=None,
+            score=0,
+            confidence="low",
+            entry_price=None,
+            stop_loss=None,
+            reasons=[],
+            warnings=[f"Needs at least 30 {timeframe} candles for Krishna entry trigger."],
+        )
+
+    levels = _levels(candles)
+    ck_long, ck_short = _chande_kroll_stops(candles)
+    latest = candles[-1]
+    close = latest.close
+    yellow_candidates = [value for value in (ck_long, ck_short) if value is not None]
+    yellow_line = min(yellow_candidates) if yellow_candidates else None
+    vwma20 = levels["vwma20"]
+    atr14 = levels["atr14"]
+    reasons: list[str] = []
+    warnings: list[str] = []
+    score = 35
+
+    if yellow_line is None:
+        warnings.append("Yellow Chande Kroll line is not available.")
+    if vwma20 is None:
+        warnings.append("VWMA20 is not available.")
+    if warnings:
+        return KrishnaEntryTrigger(
+            symbol=symbol.upper(),
+            timeframe=timeframe,
+            status="wait",
+            trigger_date=latest.timestamp.isoformat(),
+            close=close,
+            yellow_line=yellow_line,
+            vwma20=vwma20,
+            score=score,
+            confidence="low",
+            entry_price=None,
+            stop_loss=None,
+            reasons=reasons,
+            warnings=warnings,
+        )
+
+    if close > yellow_line:
+        score += 30
+        reasons.append("2-hour candle closed above the yellow Chande Kroll line.")
+    else:
+        warnings.append("2-hour candle has not closed above the yellow Chande Kroll line.")
+
+    if yellow_line < vwma20:
+        score += 25
+        reasons.append("Yellow Chande Kroll line is below VWMA20.")
+    else:
+        warnings.append("Yellow Chande Kroll line is not below VWMA20 yet.")
+
+    if levels["volume_ratio20"] is not None and levels["volume_ratio20"] >= 1.0:
+        score += 5
+        reasons.append(f"2-hour volume is {levels['volume_ratio20']:.2f}x its 20-candle average.")
+
+    status = "entry_allowed" if close > yellow_line and yellow_line < vwma20 else "wait"
+    score = max(0, min(100, score))
+    stop_loss = yellow_line - (0.5 * atr14) if atr14 and yellow_line else yellow_line
+    return KrishnaEntryTrigger(
+        symbol=symbol.upper(),
+        timeframe=timeframe,
+        status=status,
+        trigger_date=latest.timestamp.isoformat(),
+        close=close,
+        yellow_line=yellow_line,
+        vwma20=vwma20,
+        score=score,
+        confidence=_confidence(score, warnings),
+        entry_price=close if status == "entry_allowed" else None,
+        stop_loss=stop_loss if status == "entry_allowed" else None,
         reasons=reasons,
         warnings=warnings,
     )
