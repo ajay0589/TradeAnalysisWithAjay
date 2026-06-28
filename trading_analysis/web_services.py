@@ -38,7 +38,7 @@ from trading_analysis.analysis.relative_strength import (
     load_sector_map,
     sector_config_for_symbol,
 )
-from trading_analysis.analysis.scanners import SETUP_LABELS, scan_symbol_for_setups
+from trading_analysis.analysis.scanners import SETUP_ALIASES, SETUP_LABELS, scan_symbol_for_setups
 from trading_analysis.analysis.technical import analyze_technical
 from trading_analysis.analysis.trade_decision import build_trade_decision
 from trading_analysis.brokers.zerodha import (
@@ -905,7 +905,8 @@ class AnalysisService:
         days: int | None = None,
     ) -> dict[str, Any]:
         requested_type = (opportunity_type or "all").strip().lower()
-        if requested_type not in {"all", *SETUP_LABELS.keys()}:
+        canonical_type = SETUP_ALIASES.get(requested_type, requested_type)
+        if canonical_type not in {"all", *SETUP_LABELS.keys()}:
             allowed = ", ".join(["all", *SETUP_LABELS.keys()])
             raise ValueError(f"opportunity_type must be one of: {allowed}")
 
@@ -928,7 +929,9 @@ class AnalysisService:
                 structure = analyze_market_structure(candles) if len(candles) >= 10 else None
                 relative_strength = None
                 try:
-                    relative_strength = asdict(self._relative_strength(symbol, candles, normalized_timeframe, window))
+                    relative_strength = asdict(
+                        self._relative_strength(symbol, candles, normalized_timeframe, window, write_sector_map=False)
+                    )
                 except Exception:
                     relative_strength = None
 
@@ -939,7 +942,7 @@ class AnalysisService:
                     relative_strength=relative_strength,
                 )
                 for match in matches:
-                    if requested_type != "all" and match.setup_type != requested_type:
+                    if canonical_type != "all" and match.setup_type != canonical_type:
                         continue
                     if requested_direction and match.direction != requested_direction:
                         continue
@@ -952,6 +955,8 @@ class AnalysisService:
         available_symbols = self._available_count(normalized_timeframe)
         return {
             "type": requested_type,
+            "opportunity_type": requested_type,
+            "canonical_type": canonical_type,
             "direction": requested_direction,
             "timeframe": normalized_timeframe,
             "timeframe_label": timeframe_label(normalized_timeframe),
@@ -1222,9 +1227,16 @@ class AnalysisService:
             )
         return load_instruments_csv(path)
 
-    def _relative_strength(self, symbol: str, chart_candles, timeframe: str, window) -> Any:
+    def _relative_strength(
+        self,
+        symbol: str,
+        chart_candles,
+        timeframe: str,
+        window,
+        write_sector_map: bool = True,
+    ) -> Any:
         benchmark = self._load_optional_timeframe(Path(self.benchmark_file).stem, timeframe, window)
-        sector_map = self._load_or_create_sector_map()
+        sector_map = self._load_or_create_sector_map() if write_sector_map else load_sector_map(self.sector_map_path)
         sector_config = sector_config_for_symbol(sector_map, symbol)
         sector = None
         if sector_config:
@@ -1925,6 +1937,9 @@ def _opportunity_scan_row(match, source: dict[str, Any]) -> dict[str, Any]:
     row = match.to_dict()
     row["setup"] = SETUP_LABELS.get(row["setup_type"], row["setup_type"])
     row["reasons_text"] = "; ".join(row.get("reasons") or [])
+    row["warnings_text"] = "; ".join(row.get("warnings") or [])
+    row["trigger"] = row.get("trigger")
+    row["risk_comment"] = row.get("risk_comment") or row.get("risk_reward_comment")
     row["timeframe"] = source.get("timeframe")
     row["timeframe_label"] = source.get("timeframe_label")
     row["candle_count"] = source.get("analyzed_count")

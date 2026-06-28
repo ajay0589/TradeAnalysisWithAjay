@@ -45,7 +45,9 @@ const OPPORTUNITY_LABELS = {
   bearish_trend: "Bearish Trend",
   neutral_range: "Neutral Range",
   compression: "Compression Watch",
+  compression_watch: "Compression Watch",
   avoid: "Avoid / Choppy",
+  avoid_choppy: "Avoid / Choppy",
 };
 
 function fmt(value) {
@@ -1465,8 +1467,9 @@ function renderScan(rows) {
       (row) => {
         const setup = row.setup || row.strategy || row.stance || row.setup_type || "-";
         const direction = row.direction || row.bias || "-";
-        const zone = row.trigger_zone || row.target_zone || row.option_zone || "-";
+        const zone = row.trigger_zone || row.target_zone || row.range_zone || row.option_zone || "-";
         const reasons = row.reasons_text || (row.reasons || []).join("; ") || row.reason || row.stock_vs_nifty || "-";
+        const warnings = (row.warnings || []).join("; ") || "-";
         const optionNote = row.option_chain_context ? `<div class="cell-note">${scanOptionChainCell(row.option_chain_context)}</div>` : "";
         return `
           <tr>
@@ -1481,6 +1484,7 @@ function renderScan(rows) {
             <td>${fmt(row.invalidation)}</td>
             <td>${zone}${optionNote}</td>
             <td>${reasons}</td>
+            <td>${warnings}</td>
           </tr>
         `;
       }
