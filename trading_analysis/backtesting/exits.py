@@ -45,18 +45,22 @@ def entry_price_for(signal: StrategySignal, candles: list[Candle], signal_index:
     entry_index = signal_index + 1
     if entry_index >= len(candles):
         return None, None
-    next_candle = candles[entry_index]
     wanted = signal.entry_price or candles[signal_index].close
     if config.entry == "breakout_stop":
-        if signal.side == "long" and next_candle.high >= wanted:
-            return entry_index, wanted
-        if signal.side == "short" and next_candle.low <= wanted:
-            return entry_index, wanted
+        for index in _entry_candidate_indexes(candles, entry_index, config.entry_valid_bars):
+            candle = candles[index]
+            if signal.side == "long" and candle.high >= wanted:
+                return index, wanted
+            if signal.side == "short" and candle.low <= wanted:
+                return index, wanted
         return None, None
     if config.entry == "limit_retest":
-        if next_candle.low <= wanted <= next_candle.high:
-            return entry_index, wanted
+        for index in _entry_candidate_indexes(candles, entry_index, config.entry_valid_bars):
+            candle = candles[index]
+            if candle.low <= wanted <= candle.high:
+                return index, wanted
         return None, None
+    next_candle = candles[entry_index]
     return entry_index, next_candle.open
 
 
@@ -104,3 +108,8 @@ def _target_hit(side: str, candle: Candle, target: float | None) -> bool:
 def _atr_from_signal(signal: StrategySignal) -> float | None:
     value = signal.indicators.get("atr14")
     return float(value) if isinstance(value, (int, float)) and value > 0 else None
+
+
+def _entry_candidate_indexes(candles: list[Candle], start_index: int, valid_bars: int):
+    end_index = min(len(candles), start_index + max(1, valid_bars))
+    return range(start_index, end_index)

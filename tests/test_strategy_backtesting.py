@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
+import tempfile
+import threading
 import unittest
 from datetime import datetime, timedelta
+from pathlib import Path
+from urllib.request import Request, urlopen
 
 from trading_analysis.backtesting.engine import backtest_strategy_for_symbol, backtest_strategy_for_symbols
 from trading_analysis.backtesting.metrics import score_bucket_performance
 from trading_analysis.backtesting.models import BacktestConfig
+from trading_analysis.web_app import ReusableThreadingHTTPServer, TradingRequestHandler
+from trading_analysis.web_services import AnalysisService
 from trading_analysis.models import Candle
 from trading_analysis.strategies.base import StrategyDefinition, StrategySignal
 from trading_analysis.strategies.registry import get_strategy, list_strategies
@@ -57,7 +65,20 @@ def engine_candles() -> list[Candle]:
     return rows
 
 
-def fixed_strategy(side: str = "long", strategy_id: str = "fixed_test", min_candles: int = 3) -> StrategyDefinition:
+def extended_breakout_candles() -> list[Candle]:
+    rows = breakout_candles()
+    for offset in range(20):
+        close = 102.8 + (offset * 0.2)
+        rows.append(candle(60 + offset, close - 0.2, close + 0.6, close - 0.8, close, 1200))
+    return rows
+
+
+def fixed_strategy(
+    side: str = "long",
+    strategy_id: str = "fixed_test",
+    min_candles: int = 3,
+    entry_price: float | None = None,
+) -> StrategyDefinition:
     def generate(symbol: str, candles: list[Candle], params: dict) -> StrategySignal | None:
         if len(candles) < min_candles:
             return None
@@ -70,7 +91,7 @@ def fixed_strategy(side: str = "long", strategy_id: str = "fixed_test", min_cand
             score=80,
             confidence="high",
             entry_type="next_open",
-            entry_price=latest.close,
+            entry_price=entry_price if entry_price is not None else latest.close,
             stop_loss=None,
             target=None,
             invalidation=None,
@@ -181,6 +202,151 @@ class StrategyBacktestingTests(unittest.TestCase):
         self.assertTrue(score_bucket_performance(payload["trades"]))
         json.dumps(payload, default=str)
 
+    def test_breakout_stop_entry_waits_for_valid_bars(self) -> None:
+        rows = engine_candles()
+        rows[3] = candle(3, 100, 101, 99, 100)
+        rows[4] = candle(4, 100, 102, 99, 101)
+        rows[5] = candle(5, 101, 104, 100, 103)
+        payload = backtest_strategy_for_symbol(
+            "TEST",
+            rows,
+            fixed_strategy(entry_price=103),
+            BacktestConfig(strategy_id="fixed_test", entry="breakout_stop", entry_valid_bars=3, holding_bars=2),
+        )
+        self.assertEqual(payload["trades"][0]["entry_date"], rows[5].timestamp.date().isoformat())
+
+    def test_pending_entry_expires_when_not_triggered(self) -> None:
+        rows = engine_candles()
+        rows[3] = candle(3, 100, 100.5, 99, 100)
+        rows[4] = candle(4, 100, 100.5, 99, 100)
+        payload = backtest_strategy_for_symbol(
+            "TEST",
+            rows,
+            fixed_strategy(entry_price=103),
+            BacktestConfig(strategy_id="fixed_test", entry="breakout_stop", entry_valid_bars=2, holding_bars=2),
+        )
+        self.assertEqual(payload["signals"][0]["trade_status"], "expired_no_entry")
+
+    def test_invalid_backtest_parameter_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            BacktestConfig.from_mapping("fixed_test", backtest_params={"entry": "bad_entry"})
+
+    def test_invalid_strategy_parameter_is_rejected(self) -> None:
+        strategy = get_strategy("bullish_breakout")
+        with self.assertRaises(ValueError):
+            strategy.validate_params({"not_a_param": 1})
+
+    def test_analysis_service_strategy_methods_and_backtest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_watchlist(root / "watchlist.json", ["TEST"])
+            _write_candles(root / "candles" / "TEST.csv", extended_breakout_candles())
+            service = AnalysisService(
+                watchlist_path=root / "watchlist.json",
+                daily_data_dir=root / "candles",
+                reports_dir=root / "reports",
+            )
+
+            self.assertTrue(service.strategies()["strategies"])
+            self.assertEqual(service.strategy_info("bullish_breakout")["strategy"]["strategy_id"], "bullish_breakout")
+            payload = service.backtest_strategy(
+                "bullish_breakout",
+                symbols=["TEST"],
+                days=5000,
+                backtest_params={"holding_bars": 2},
+            )
+
+            self.assertEqual(payload["analyzed_symbols"], 1)
+            self.assertIn("metrics", payload)
+            json.dumps(payload, default=str)
+
+    def test_web_strategy_endpoints(self) -> None:
+        class FakeService:
+            def strategies(self):
+                return {"strategies": [{"strategy_id": "bullish_breakout"}]}
+
+            def strategy_info(self, strategy_id):
+                return {"strategy": {"strategy_id": strategy_id}}
+
+            def backtest_strategy(self, **kwargs):
+                return {"strategy_id": kwargs["strategy_id"], "analyzed_symbols": 0, "signals": [], "trades": [], "metrics": {}, "errors": []}
+
+        original_service = TradingRequestHandler.service
+        TradingRequestHandler.service = FakeService()
+        server = ReusableThreadingHTTPServer(("127.0.0.1", 0), TradingRequestHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        try:
+            self.assertIn("bullish_breakout", _http_json(f"{base}/api/strategies")["strategies"][0]["strategy_id"])
+            self.assertEqual(_http_json(f"{base}/api/strategy-info?strategy=bullish_breakout")["strategy"]["strategy_id"], "bullish_breakout")
+            payload = _http_json(
+                f"{base}/api/backtest-strategy",
+                {"strategy_id": "bullish_breakout", "backtest_params": {"holding_bars": 2}},
+            )
+            self.assertEqual(payload["strategy_id"], "bullish_breakout")
+        finally:
+            server.shutdown()
+            server.server_close()
+            TradingRequestHandler.service = original_service
+
+    def test_cli_backtest_strategy_writes_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "backtest.json"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "trading_analysis.cli",
+                    "backtest-strategy",
+                    "--strategy",
+                    "bullish_breakout",
+                    "--timeframe",
+                    "day",
+                    "--days",
+                    "730",
+                    "--limit-symbols",
+                    "1",
+                    "--output-json",
+                    str(output),
+                ],
+                cwd=Path(__file__).resolve().parents[1],
+                text=True,
+                capture_output=True,
+                timeout=120,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["strategy_id"], "bullish_breakout")
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _write_watchlist(path: Path, symbols: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"symbols": [{"symbol": symbol, "data_file": f"{symbol}.csv"} for symbol in symbols]}),
+        encoding="utf-8",
+    )
+
+
+def _write_candles(path: Path, candles: list[Candle]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["date,open,high,low,close,volume"]
+    for item in candles:
+        lines.append(
+            f"{item.timestamp.date().isoformat()},{item.open},{item.high},{item.low},{item.close},{item.volume}"
+        )
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _http_json(url: str, payload: dict | None = None) -> dict:
+    if payload is None:
+        with urlopen(url, timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))
+    body = json.dumps(payload).encode("utf-8")
+    request = Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+    with urlopen(request, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8"))

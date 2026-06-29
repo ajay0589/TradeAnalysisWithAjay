@@ -23,7 +23,7 @@ def backtest_strategy_for_symbol(
     config: BacktestConfig,
 ) -> dict[str, Any]:
     candles = sorted(candles, key=lambda candle: candle.timestamp)
-    params = strategy.merged_params(config.strategy_params)
+    params = strategy.validate_params(config.strategy_params)
     signals: list[dict[str, Any]] = []
     trades: list[dict[str, Any]] = []
     next_available_signal_index = 0
@@ -50,7 +50,7 @@ def backtest_strategy_for_symbol(
 
         trade = _simulate_trade(symbol, candles, signal_index, signal, strategy, config)
         if trade is None:
-            signal_row["trade_status"] = "skipped_no_entry"
+            signal_row["trade_status"] = "expired_no_entry" if config.entry in {"breakout_stop", "limit_retest"} else "skipped_no_entry"
             continue
         trade_row = trade.to_dict()
         trades.append(trade_row)

@@ -1166,6 +1166,7 @@ class AnalysisService:
         limit_symbols: int | None = None,
     ) -> dict[str, Any]:
         strategy = get_strategy(strategy_id)
+        validated_strategy_params = strategy.validate_params(strategy_params)
         normalized_timeframe = normalize_timeframe(timeframe or strategy.default_timeframe)
         window = candle_window(from_date=from_date, to_date=to_date, days=days)
 
@@ -1186,7 +1187,7 @@ class AnalysisService:
             to_date=to_date,
             days=days,
             symbols=scan_symbols,
-            strategy_params=strategy_params,
+            strategy_params=validated_strategy_params,
             backtest_params=backtest_params,
         )
 

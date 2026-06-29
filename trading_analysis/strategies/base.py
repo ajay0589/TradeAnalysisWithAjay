@@ -67,6 +67,25 @@ class StrategyDefinition:
     def merged_params(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
         return {**self.default_params, **(params or {})}
 
+    def validate_params(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        provided = dict(params or {})
+        schema_by_name = {parameter.name: parameter for parameter in self.parameter_schema}
+        unknown = sorted(set(provided) - set(schema_by_name))
+        if unknown:
+            allowed = ", ".join(sorted(schema_by_name)) or "none"
+            raise ValueError(f"Unknown strategy parameter(s): {', '.join(unknown)}. Allowed parameters: {allowed}.")
+
+        validated = dict(self.default_params)
+        for name, value in provided.items():
+            parameter = schema_by_name[name]
+            converted = _convert_parameter_value(parameter, value)
+            if converted is not None and parameter.minimum is not None and converted < parameter.minimum:
+                raise ValueError(f"Strategy parameter '{name}' must be >= {parameter.minimum}.")
+            if converted is not None and parameter.maximum is not None and converted > parameter.maximum:
+                raise ValueError(f"Strategy parameter '{name}' must be <= {parameter.maximum}.")
+            validated[name] = converted
+        return validated
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "strategy_id": self.strategy_id,
@@ -78,3 +97,17 @@ class StrategyDefinition:
             "default_params": dict(self.default_params),
             "parameter_schema": [parameter.to_dict() for parameter in self.parameter_schema],
         }
+
+
+def _convert_parameter_value(parameter: StrategyParameter, value: Any) -> Any:
+    if value is None or value == "":
+        return None
+    if parameter.type == "int":
+        return int(value)
+    if parameter.type == "float":
+        return float(value)
+    if parameter.type == "bool":
+        return bool(value)
+    if parameter.type == "str":
+        return str(value)
+    return value

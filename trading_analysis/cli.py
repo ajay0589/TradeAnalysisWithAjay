@@ -483,7 +483,12 @@ def main() -> None:
         default="50",
         help="Number of watchlist symbols to test, or all. Ignored when --symbols is provided.",
     )
-    generic_backtest_parser.add_argument("--output-json", help="Optional path to write full backtest JSON")
+    generic_backtest_parser.add_argument(
+        "--output-json",
+        nargs="?",
+        const="auto",
+        help="Optional path to write full backtest JSON. Omit the value to save under reports/backtests.",
+    )
 
     args = parser.parse_args()
     if args.command == "analyze":
@@ -979,7 +984,7 @@ def run_backtest_strategy(args: argparse.Namespace) -> None:
     print(_render_generic_backtest(payload))
 
     if args.output_json:
-        output_path = Path(args.output_json)
+        output_path = _backtest_output_path(args.output_json, payload)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
         print(f"\nWrote strategy backtest JSON: {output_path}")
@@ -1037,6 +1042,14 @@ def _split_cli_symbols(value: str | None) -> list[str] | None:
         return None
     symbols = [part.strip() for part in value.split(",") if part.strip()]
     return symbols or None
+
+
+def _backtest_output_path(value: str, payload: dict) -> Path:
+    if value and value != "auto":
+        return Path(value)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    strategy_id = str(payload.get("strategy_id") or "strategy")
+    return Path("reports") / "backtests" / f"{strategy_id}_{timestamp}.json"
 
 
 def _load_optional_candles(path: Path):

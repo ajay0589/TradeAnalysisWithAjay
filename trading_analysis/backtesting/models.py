@@ -14,6 +14,7 @@ class BacktestConfig:
     symbols: list[str] | None = None
     strategy_params: dict[str, Any] = field(default_factory=dict)
     entry: str = "next_open"
+    entry_valid_bars: int = 1
     holding_bars: int = 10
     stop_type: str = "none"
     stop_percent: float | None = None
@@ -45,8 +46,11 @@ class BacktestConfig:
     ) -> "BacktestConfig":
         values = dict(backtest_params or {})
         allowed = set(cls.__dataclass_fields__) - {"strategy_id", "timeframe", "from_date", "to_date", "days", "symbols", "strategy_params"}
-        filtered = {key: values[key] for key in values if key in allowed}
-        return cls(
+        unknown = sorted(set(values) - allowed)
+        if unknown:
+            raise ValueError(f"Unknown backtest parameter(s): {', '.join(unknown)}. Allowed parameters: {', '.join(sorted(allowed))}.")
+        filtered = {key: _coerce_backtest_value(key, values[key]) for key in values if key in allowed}
+        config = cls(
             strategy_id=strategy_id,
             timeframe=timeframe,
             from_date=from_date,
@@ -56,6 +60,22 @@ class BacktestConfig:
             strategy_params=strategy_params or {},
             **filtered,
         )
+        config.validate()
+        return config
+
+    def validate(self) -> None:
+        _require_choice(self.entry, "entry", {"next_open", "signal_close", "breakout_stop", "limit_retest"})
+        _require_choice(self.stop_type, "stop_type", {"none", "percent", "atr", "signal"})
+        _require_choice(self.target_type, "target_type", {"none", "percent", "atr", "risk_multiple", "signal"})
+        _require_choice(self.position_sizing, "position_sizing", {"fixed_quantity", "fixed_capital", "fixed_risk"})
+        if self.entry_valid_bars < 1:
+            raise ValueError("backtest parameter 'entry_valid_bars' must be >= 1.")
+        if self.holding_bars < 1:
+            raise ValueError("backtest parameter 'holding_bars' must be >= 1.")
+        if self.capital <= 0:
+            raise ValueError("backtest parameter 'capital' must be > 0.")
+        if self.risk_per_trade_percent <= 0:
+            raise ValueError("backtest parameter 'risk_per_trade_percent' must be > 0.")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -111,3 +131,33 @@ class BacktestResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _require_choice(value: str, name: str, allowed: set[str]) -> None:
+    if value not in allowed:
+        raise ValueError(f"backtest parameter '{name}' must be one of: {', '.join(sorted(allowed))}.")
+
+
+def _coerce_backtest_value(key: str, value: Any) -> Any:
+    if value is None or value == "":
+        return None
+    if key in {"entry_valid_bars", "holding_bars", "fixed_quantity"}:
+        return int(value)
+    if key in {
+        "stop_percent",
+        "stop_atr",
+        "target_percent",
+        "target_atr",
+        "target_r_multiple",
+        "slippage_bps",
+        "brokerage_bps",
+        "capital",
+        "risk_per_trade_percent",
+        "fixed_capital",
+    }:
+        return float(value)
+    if key == "allow_overlap":
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+    return value
