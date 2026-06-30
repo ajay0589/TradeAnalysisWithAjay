@@ -14,7 +14,7 @@ class BacktestConfig:
     symbols: list[str] | None = None
     strategy_params: dict[str, Any] = field(default_factory=dict)
     entry: str = "next_open"
-    entry_valid_bars: int = 1
+    entry_valid_bars: int = 3
     holding_bars: int = 10
     stop_type: str = "none"
     stop_percent: float | None = None

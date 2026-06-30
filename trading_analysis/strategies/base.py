@@ -107,7 +107,18 @@ def _convert_parameter_value(parameter: StrategyParameter, value: Any) -> Any:
     if parameter.type == "float":
         return float(value)
     if parameter.type == "bool":
-        return bool(value)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        text = str(value).strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+        raise ValueError(f"Strategy parameter '{parameter.name}' must be boolean.")
+    if parameter.type in {"choice", "enum"}:
+        return str(value)
     if parameter.type == "str":
         return str(value)
     return value

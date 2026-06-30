@@ -52,6 +52,24 @@ def breakdown_candles() -> list[Candle]:
     return candles
 
 
+def bullish_pullback_candles() -> list[Candle]:
+    closes = [100 + (index * 0.5) for index in range(60)] + [130, 128, 126, 124, 125]
+    return _candles_from_closes(closes)
+
+
+def bearish_pullback_candles() -> list[Candle]:
+    closes = [150 - (index * 0.5) for index in range(60)] + [120, 122, 124, 126, 125]
+    return _candles_from_closes(closes)
+
+
+def _candles_from_closes(closes: list[float]) -> list[Candle]:
+    rows: list[Candle] = []
+    for index, close in enumerate(closes):
+        previous = closes[index - 1] if index else close
+        rows.append(candle(index, previous, max(previous, close) + 0.4, min(previous, close) - 0.4, close, 1000))
+    return rows
+
+
 def engine_candles() -> list[Candle]:
     rows = [candle(i, 100, 101, 99, 100, 1000) for i in range(3)]
     rows.extend(
@@ -131,6 +149,28 @@ class StrategyBacktestingTests(unittest.TestCase):
         self.assertEqual(signal.side, "short")
         self.assertTrue(signal.reasons)
 
+    def test_bullish_pullback_signal_generated_with_confirmation_entry(self) -> None:
+        candles = bullish_pullback_candles()
+        signal = get_strategy("bullish_pullback").generate_signal("TEST", candles, get_strategy("bullish_pullback").default_params)
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.side, "long")
+        self.assertEqual(signal.entry_type, "breakout_stop")
+        self.assertGreater(signal.entry_price, candles[-1].high)
+        self.assertLess(signal.stop_loss, signal.entry_price)
+        self.assertTrue(any("Confirmation trigger" in reason for reason in signal.reasons))
+
+    def test_bearish_pullback_signal_generated_with_confirmation_entry(self) -> None:
+        candles = bearish_pullback_candles()
+        signal = get_strategy("bearish_pullback").generate_signal("TEST", candles, get_strategy("bearish_pullback").default_params)
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.side, "short")
+        self.assertEqual(signal.entry_type, "breakout_stop")
+        self.assertLess(signal.entry_price, candles[-1].low)
+        self.assertGreater(signal.stop_loss, signal.entry_price)
+        self.assertTrue(any("Confirmation trigger" in reason for reason in signal.reasons))
+
     def test_backtest_enters_on_next_candle_open_without_lookahead(self) -> None:
         payload = backtest_strategy_for_symbol(
             "TEST",
@@ -141,6 +181,17 @@ class StrategyBacktestingTests(unittest.TestCase):
         first_trade = payload["trades"][0]
         self.assertEqual(first_trade["entry_price"], 100)
         self.assertGreater(first_trade["entry_date"], first_trade["signal_date"])
+
+    def test_next_open_entry_still_works(self) -> None:
+        payload = backtest_strategy_for_symbol(
+            "TEST",
+            engine_candles(),
+            fixed_strategy(),
+            BacktestConfig(strategy_id="fixed_test", entry="next_open", holding_bars=1),
+        )
+
+        self.assertEqual(payload["trades"][0]["entry_price"], engine_candles()[3].open)
+        self.assertEqual(payload["signals"][0]["trade_status"], "taken")
 
     def test_stop_loss_exit(self) -> None:
         rows = engine_candles()
@@ -225,6 +276,20 @@ class StrategyBacktestingTests(unittest.TestCase):
             fixed_strategy(entry_price=103),
             BacktestConfig(strategy_id="fixed_test", entry="breakout_stop", entry_valid_bars=2, holding_bars=2),
         )
+        self.assertEqual(payload["signals"][0]["trade_status"], "expired_no_entry")
+
+    def test_breakout_stop_entry_expires_after_valid_window(self) -> None:
+        rows = engine_candles()
+        rows[3] = candle(3, 100, 100.5, 99, 100)
+        rows[4] = candle(4, 100, 100.5, 99, 100)
+        rows[5] = candle(5, 100, 104, 99, 103)
+        payload = backtest_strategy_for_symbol(
+            "TEST",
+            rows,
+            fixed_strategy(entry_price=103),
+            BacktestConfig(strategy_id="fixed_test", entry="breakout_stop", entry_valid_bars=2, holding_bars=2),
+        )
+
         self.assertEqual(payload["signals"][0]["trade_status"], "expired_no_entry")
 
     def test_invalid_backtest_parameter_is_rejected(self) -> None:
