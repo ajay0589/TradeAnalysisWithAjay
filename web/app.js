@@ -10,6 +10,12 @@ const state = {
   lastGenericBacktest: null,
   optionMonitorJobId: null,
   optionMonitorPollTimer: null,
+  nifty: {
+    context: null,
+    candidates: [],
+    payoff: null,
+    backtest: null,
+  },
 };
 
 const $ = (id) => document.getElementById(id);
@@ -149,7 +155,7 @@ function scanParams() {
 async function api(path) {
   const response = await fetch(path);
   const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error || "Request failed");
+  if (!response.ok) throw new Error(niftyRestartHint(path, payload.error || "Request failed"));
   return payload;
 }
 
@@ -160,8 +166,15 @@ async function postApi(path, body) {
     body: JSON.stringify(body),
   });
   const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error || "Request failed");
+  if (!response.ok) throw new Error(niftyRestartHint(path, payload.error || "Request failed"));
   return payload;
+}
+
+function niftyRestartHint(path, message) {
+  if (String(path).includes("/api/nifty") && message === "Not found") {
+    return "NIFTY API is not active in the running server. Restart the UI with scripts/start_web_ui.ps1 so web_app.py reloads.";
+  }
+  return message;
 }
 
 async function loadZerodhaLoginUrl() {
@@ -1707,6 +1720,281 @@ function scanOptionChainCell(context) {
   `;
 }
 
+async function loadNiftyExpiries() {
+  const weekly = $("niftyWeeklyExpiry");
+  const monthly = $("niftyMonthlyExpiry");
+  if (!weekly || !monthly) return;
+  weekly.innerHTML = `<option value="">Auto weekly</option>`;
+  monthly.innerHTML = `<option value="">Auto monthly</option>`;
+  try {
+    const data = await api("/api/option-expiries?symbol=NIFTY");
+    (data.expiries || []).forEach((expiry, index) => {
+      const weeklyOption = document.createElement("option");
+      weeklyOption.value = expiry;
+      weeklyOption.textContent = expiry === data.nearest ? `${expiry} (nearest)` : expiry;
+      weekly.appendChild(weeklyOption);
+
+      const monthlyOption = document.createElement("option");
+      monthlyOption.value = expiry;
+      monthlyOption.textContent = index === (data.expiries || []).length - 1 ? `${expiry} (furthest loaded)` : expiry;
+      monthly.appendChild(monthlyOption);
+    });
+  } catch (error) {
+    $("niftyMeta").textContent = `Expiry load failed: ${error.message}`;
+  }
+}
+
+function niftyContextParams() {
+  const params = new URLSearchParams({
+    mode: $("niftyMode").value,
+    weekly_expiry: $("niftyWeeklyExpiry").value,
+    monthly_expiry: $("niftyMonthlyExpiry").value,
+    include_option_chain: $("niftyIncludeOptionChain").checked ? "true" : "false",
+    include_iv: $("niftyIncludeIv").checked ? "true" : "false",
+    refresh: $("niftyRefresh").checked ? "true" : "false",
+    timeframe: $("niftyTimeframe").value,
+    days: $("niftyDays").value || "45",
+  });
+  if ($("niftyToDate").value) params.set("to_date", $("niftyToDate").value);
+  return params;
+}
+
+async function runNiftyContext() {
+  setNotes("Loading NIFTY desk context...");
+  $("niftyMeta").textContent = "Running";
+  try {
+    const data = await api(`/api/nifty/context?${niftyContextParams().toString()}`);
+    state.nifty.context = data;
+    renderNiftyContext(data);
+    setNotes((data.summary && data.summary.points) || data.warnings || []);
+  } catch (error) {
+    $("niftyMeta").textContent = "Failed";
+    setNotes([error.message], true);
+  }
+}
+
+async function runNiftySuggestions() {
+  setNotes("Building NIFTY strategy suitability candidates...");
+  $("niftyStrategyMeta").textContent = "Running";
+  try {
+    const data = await postApi("/api/nifty/strategy-suggestions", {
+      mode: $("niftyMode").value,
+      weekly_expiry: $("niftyWeeklyExpiry").value || null,
+      monthly_expiry: $("niftyMonthlyExpiry").value || null,
+      risk_profile: $("niftyRiskProfile").value,
+      refresh: $("niftyRefresh").checked,
+      to_date: $("niftyToDate").value || null,
+    });
+    state.nifty.context = data;
+    state.nifty.candidates = data.candidates || [];
+    renderNiftyContext(data);
+    renderNiftyStrategies(data.candidates || []);
+    setNotes(`${(data.candidates || []).length} NIFTY strategy candidate(s) loaded.`);
+  } catch (error) {
+    $("niftyStrategyMeta").textContent = "Failed";
+    setNotes([error.message], true);
+  }
+}
+
+function renderNiftyContext(data) {
+  const technical = data.technical || {};
+  const options = data.options || {};
+  const iv = data.iv || {};
+  const source = (data.summary && data.summary.candle_sources && data.summary.candle_sources.daily) || {};
+  $("niftyMeta").textContent = `${data.mode || "auto"} / latest daily ${fmtDateTime(source.to || data.as_of)}`;
+  $("niftyContextCards").innerHTML = [
+    ["Spot", fmt(technical.spot)],
+    ["Intraday Bias", technical.bias_intraday || "-"],
+    ["Swing Bias", technical.bias_swing || "-"],
+    ["Positional Bias", technical.bias_positional || "-"],
+    ["ATR", fmt(technical.atr14)],
+    ["RSI", fmt(technical.rsi14)],
+    ["VWAP", fmt(technical.vwap)],
+    ["ATM IV", fmt(iv.atm_iv)],
+    ["Latest Candle", fmtDateTime(source.to)],
+  ]
+    .map(([label, value]) => `<div class="metric"><span>${label}</span><strong>${value}</strong></div>`)
+    .join("");
+  $("niftyContextMeta").textContent = `${technical.timeframe || "-"} / structure ${technical.market_structure || "-"}`;
+  $("niftyContextBody").innerHTML = [
+    ["Support", (technical.support_levels || []).join(", ") || "-", "Nearby levels where buyers may defend."],
+    ["Resistance", (technical.resistance_levels || []).join(", ") || "-", "Nearby levels where sellers may defend."],
+    ["Previous Day", `${fmt(technical.previous_day_high)} / ${fmt(technical.previous_day_low)} / ${fmt(technical.previous_day_close)}`, "High / low / close reference for intraday range."],
+    ["Day Open", fmt(technical.day_open), "Used for gap and opening context."],
+    ["Candle Signal", technical.candle_signal || "-", "Latest candle location and momentum context."],
+    ["Data Used", candleSourceText(data.summary && data.summary.candle_sources), "Shows candle count and latest timestamp actually analyzed."],
+    ["Refresh", refreshResultText(data.summary && data.summary.refresh_results), "Shows whether latest candles were pulled in this run."],
+    ["Notes", (technical.notes || []).join(" | ") || "-", "Derived from cached candle data."],
+  ]
+    .map(([area, value, read]) => `<tr><td>${area}</td><td>${value}</td><td>${read}</td></tr>`)
+    .join("");
+  $("niftyFactorMeta").textContent = `${(technical.factors || []).length} factor(s) used for bias`;
+  $("niftyFactorBody").innerHTML = (technical.factors || [])
+    .map((factor) => `
+      <tr>
+        <td>${factor.factor}</td>
+        <td><span class="status-badge status-${statusKey(factor.signal)}">${statusLabel(factor.signal)}</span></td>
+        <td>${factor.value || "-"}</td>
+        <td>${factor.purpose || "-"}</td>
+      </tr>
+    `)
+    .join("");
+  $("niftyOptionMeta").textContent = `${options.option_bias || "-"} / IV ${iv.iv_regime || "-"}`;
+  $("niftyOptionBody").innerHTML = [
+    ["Weekly PCR", fmt(options.pcr_oi), "Put/call OI ratio from selected cached snapshot."],
+    ["PCR Volume", fmt(options.pcr_volume), "Put/call volume ratio from selected cached snapshot."],
+    ["Max Pain", fmt(options.max_pain), "Strike with lowest aggregate option pain from current OI."],
+    ["ATM Strike", fmt(options.atm_strike), "Nearest available strike to inferred spot."],
+    ["ATM IV", fmt(options.atm_iv), "Approximate ATM implied volatility from cached chain."],
+    ["IV Rank", fmt(iv.iv_rank), "Current IV location versus saved IV history."],
+    ["IV Percentile", fmt(iv.iv_percentile), "Percent of saved IV observations below current IV."],
+    ["OI Support", fmt(options.support_by_oi), "Highest PE OI at/below spot."],
+    ["OI Resistance", fmt(options.resistance_by_oi), "Highest CE OI at/above spot."],
+    ["CE Writing", (options.ce_writing_strikes || []).join(", ") || "-", "Call strikes with positive OI change."],
+    ["PE Writing", (options.pe_writing_strikes || []).join(", ") || "-", "Put strikes with positive OI change."],
+  ]
+    .map(([metric, value, read]) => `<tr><td>${metric}</td><td>${value}</td><td>${read}</td></tr>`)
+    .join("");
+  renderNiftyStrategies(data.candidates || state.nifty.candidates || []);
+}
+
+function candleSourceText(sources) {
+  if (!sources) return "-";
+  return Object.entries(sources)
+    .map(([frame, row]) => `${frame}: ${fmtInt(row.count)} candles, latest ${fmtDateTime(row.to)}`)
+    .join(" | ");
+}
+
+function refreshResultText(rows) {
+  if (!rows || !rows.length) return $("niftyRefresh").checked ? "Refresh requested but no candle pull completed." : "Refresh not requested.";
+  return rows.map((row) => `${row.timeframe}: ${row.candles} candles -> ${row.output}`).join(" | ");
+}
+
+function renderNiftyStrategies(candidates) {
+  $("niftyStrategyMeta").textContent = `${candidates.length} candidate(s)`;
+  $("niftyStrategyBody").innerHTML = candidates
+    .map((candidate, index) => `
+      <tr>
+        <td>${candidate.label}</td>
+        <td>${candidate.horizon}</td>
+        <td>${candidate.structure}</td>
+        <td>${candidate.suitability_score}</td>
+        <td>${candidate.confidence}</td>
+        <td>${candidate.expiry_plan}</td>
+        <td>${candidate.best_when}</td>
+        <td>${candidate.avoid_when}</td>
+        <td>${(candidate.reasons || []).join("; ")}</td>
+        <td>${(candidate.risks || []).join("; ") || "-"}</td>
+        <td>${(candidate.required_confirmations || []).join("; ") || "-"}</td>
+        <td>
+          <button class="linkBtn nifty-payoff-btn" data-index="${index}">Payoff</button>
+          <button class="linkBtn nifty-backtest-btn" data-index="${index}">Backtest</button>
+        </td>
+      </tr>
+    `)
+    .join("");
+  document.querySelectorAll(".nifty-payoff-btn").forEach((button) => {
+    button.addEventListener("click", () => runNiftyPayoff(candidates[Number(button.dataset.index)]));
+  });
+  document.querySelectorAll(".nifty-backtest-btn").forEach((button) => {
+    button.addEventListener("click", () => runNiftyBacktest(candidates[Number(button.dataset.index)]));
+  });
+}
+
+async function runNiftyPayoff(candidate) {
+  const spot = Number((state.nifty.context && state.nifty.context.technical && state.nifty.context.technical.spot) || 24500);
+  const legs = defaultNiftyPayoffLegs(candidate, spot);
+  try {
+    const data = await postApi("/api/nifty/payoff", { spot, lot_size: 75, legs });
+    state.nifty.payoff = data;
+    renderNiftyPayoff(data);
+  } catch (error) {
+    setNotes([error.message], true);
+  }
+}
+
+function defaultNiftyPayoffLegs(candidate, spot) {
+  const base = Math.round(spot / 50) * 50;
+  if ((candidate.strategy_id || "").includes("bull_call")) {
+    return [
+      { side: "buy", option_type: "CE", strike: base, premium: 120 },
+      { side: "sell", option_type: "CE", strike: base + 200, premium: 50 },
+    ];
+  }
+  if ((candidate.strategy_id || "").includes("bear_put")) {
+    return [
+      { side: "buy", option_type: "PE", strike: base, premium: 120 },
+      { side: "sell", option_type: "PE", strike: base - 200, premium: 50 },
+    ];
+  }
+  if ((candidate.strategy_id || "").includes("strangle")) {
+    return [
+      { side: "sell", option_type: "PE", strike: base - 300, premium: 80 },
+      { side: "sell", option_type: "CE", strike: base + 300, premium: 80 },
+    ];
+  }
+  return [
+    { side: "sell", option_type: "PE", strike: base - 200, premium: 70 },
+    { side: "buy", option_type: "PE", strike: base - 400, premium: 30 },
+    { side: "sell", option_type: "CE", strike: base + 200, premium: 70 },
+    { side: "buy", option_type: "CE", strike: base + 400, premium: 30 },
+  ];
+}
+
+function renderNiftyPayoff(data) {
+  $("niftyPayoffMeta").textContent = `Net premium ${fmt(data.net_premium)} / lot ${data.lot_size}`;
+  $("niftyPayoffNotes").innerHTML = [data.max_profit_note, data.max_loss_note, data.breakeven_note]
+    .map((item) => `<div>${item}</div>`)
+    .join("");
+  $("niftyPayoffBody").innerHTML = (data.payoff_table || [])
+    .map((row) => `<tr><td>${fmt(row.spot)}</td><td>${fmt(row.payoff)}</td></tr>`)
+    .join("");
+}
+
+async function runNiftyBacktest(candidate) {
+  $("niftyBacktestMeta").textContent = "Running";
+  try {
+    const data = await postApi("/api/nifty/backtest", {
+      strategy_id: candidate.strategy_id,
+      mode: candidate.horizon || $("niftyMode").value,
+      days: 365,
+      exit_rules: { holding_bars: 5 },
+    });
+    state.nifty.backtest = data;
+    renderNiftyBacktest(data);
+  } catch (error) {
+    $("niftyBacktestMeta").textContent = "Failed";
+    setNotes([error.message], true);
+  }
+}
+
+function renderNiftyBacktest(data) {
+  const metrics = data.metrics || {};
+  $("niftyBacktestMeta").textContent = `${metrics.signals || 0} signal(s) / context-only`;
+  $("niftyBacktestCards").innerHTML = [
+    ["Signals", fmtInt(metrics.signals)],
+    ["Forward Accuracy", fmtPct(metrics.accuracy)],
+    ["Avg Forward Move", fmtPct(metrics.avg_forward_return)],
+    ["Trades", fmtInt(metrics.trade_count)],
+  ]
+    .map(([label, value]) => `<div class="metric"><span>${label}</span><strong>${value}</strong></div>`)
+    .join("");
+  $("niftyBacktestBody").innerHTML = (data.context_forward_returns || [])
+    .slice(-25)
+    .map((row) => `
+      <tr>
+        <td>${fmtDateTime(row.signal_date)}</td>
+        <td>${row.side}</td>
+        <td>${fmt(row.entry_reference)}</td>
+        <td>${fmt(row.exit_reference)}</td>
+        <td>${fmtPct(row.forward_return)}</td>
+        <td>${row.success ? "favorable" : "unfavorable"}</td>
+      </tr>
+    `)
+    .join("");
+  if ((data.warnings || []).length) setNotes(data.warnings);
+}
+
 function setNotes(value, isError = false) {
   const notes = $("notes");
   notes.className = isError ? "notes error" : "notes";
@@ -1803,6 +2091,8 @@ $("genericBacktestRunBtn").addEventListener("click", runGenericBacktest);
 $("backtestRunBtn").addEventListener("click", runKrishnaBacktest);
 $("backtestDownloadTradesBtn").addEventListener("click", downloadBacktestTrades);
 $("backtestDownloadSignalsBtn").addEventListener("click", downloadBacktestSignals);
+$("niftyRunContextBtn").addEventListener("click", runNiftyContext);
+$("niftySuggestBtn").addEventListener("click", runNiftySuggestions);
 $("startOptionMonitorBtn").addEventListener("click", startOptionMonitor);
 $("stopOptionMonitorBtn").addEventListener("click", stopOptionMonitor);
 $("optionMonitorSymbols").addEventListener("keydown", (event) => {
@@ -1833,7 +2123,7 @@ document.querySelectorAll("[data-tab-target]").forEach((button) => {
 });
 enhanceCollapsibleSections();
 
-Promise.all([loadZerodhaLoginUrl(), checkZerodhaStatus(), loadSymbols(), loadStrategies(), loadSectorStatus(), loadFiiDii(false)])
+Promise.all([loadZerodhaLoginUrl(), checkZerodhaStatus(), loadSymbols(), loadStrategies(), loadNiftyExpiries(), loadSectorStatus(), loadFiiDii(false)])
   .then(() => {
     const first = state.symbols.find((row) => row.has_daily);
     if (first) {

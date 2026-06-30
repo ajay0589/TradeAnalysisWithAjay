@@ -54,6 +54,7 @@ from trading_analysis.data_sources.nse_equity import (
     fetch_metadata_for_symbols,
 )
 from trading_analysis.data_sources.nse_fii_dii import fetch_fii_dii_activity, write_fii_dii_csv
+from trading_analysis.nifty.service import NiftyDeskService
 from trading_analysis.reporting.console import render_signal_table
 from trading_analysis.strategies.registry import get_strategy, list_strategies, strategy_info
 from trading_analysis.web_services import AnalysisService
@@ -490,6 +491,41 @@ def main() -> None:
         help="Optional path to write full backtest JSON. Omit the value to save under reports/backtests.",
     )
 
+    nifty_context_parser = subparsers.add_parser("nifty-context", help="Show NIFTY desk technical/option/IV context")
+    nifty_context_parser.add_argument("--mode", default="auto", choices=["auto", "intraday", "swing", "positional"])
+    nifty_context_parser.add_argument("--weekly-expiry")
+    nifty_context_parser.add_argument("--monthly-expiry")
+    nifty_context_parser.add_argument("--timeframe", default="15minute")
+    nifty_context_parser.add_argument("--days", type=int, default=30)
+    nifty_context_parser.add_argument("--to-date", help="Analyze candles up to this date YYYY-MM-DD")
+    nifty_context_parser.add_argument("--refresh", action="store_true")
+    nifty_context_parser.add_argument("--skip-option-chain", action="store_true")
+    nifty_context_parser.add_argument("--skip-iv", action="store_true")
+
+    nifty_strategies_parser = subparsers.add_parser("nifty-strategies", help="Show NIFTY strategy suitability candidates")
+    nifty_strategies_parser.add_argument("--mode", default="auto", choices=["auto", "intraday", "swing", "positional"])
+    nifty_strategies_parser.add_argument("--weekly-expiry")
+    nifty_strategies_parser.add_argument("--monthly-expiry")
+    nifty_strategies_parser.add_argument("--risk-profile", default="defined", choices=["defined", "undefined", "any"])
+    nifty_strategies_parser.add_argument("--allowed-strategies", help="Comma-separated strategy ids")
+    nifty_strategies_parser.add_argument("--to-date", help="Analyze candles up to this date YYYY-MM-DD")
+    nifty_strategies_parser.add_argument("--refresh", action="store_true")
+
+    nifty_payoff_parser = subparsers.add_parser("nifty-payoff", help="Calculate expiry payoff for NIFTY option legs")
+    nifty_payoff_parser.add_argument("--spot", type=float, required=True)
+    nifty_payoff_parser.add_argument("--lot-size", type=int, default=75)
+    nifty_payoff_parser.add_argument("--legs", required=True, help="JSON array of option legs")
+
+    nifty_backtest_parser = subparsers.add_parser("nifty-backtest", help="Run context-only NIFTY strategy simulation")
+    nifty_backtest_parser.add_argument("--strategy", required=True)
+    nifty_backtest_parser.add_argument("--mode", default="swing", choices=["intraday", "swing", "positional", "auto"])
+    nifty_backtest_parser.add_argument("--days", type=int, default=365)
+    nifty_backtest_parser.add_argument("--from-date")
+    nifty_backtest_parser.add_argument("--to-date")
+    nifty_backtest_parser.add_argument("--params", default="{}")
+    nifty_backtest_parser.add_argument("--exit-rules", default="{}")
+    nifty_backtest_parser.add_argument("--output-json")
+
     args = parser.parse_args()
     if args.command == "analyze":
         run_analyze(args)
@@ -529,6 +565,14 @@ def main() -> None:
         run_strategy_info(args)
     elif args.command == "backtest-strategy":
         run_backtest_strategy(args)
+    elif args.command == "nifty-context":
+        run_nifty_context(args)
+    elif args.command == "nifty-strategies":
+        run_nifty_strategies(args)
+    elif args.command == "nifty-payoff":
+        run_nifty_payoff(args)
+    elif args.command == "nifty-backtest":
+        run_nifty_backtest(args)
 
 
 def run_analyze(args: argparse.Namespace) -> None:
@@ -990,6 +1034,61 @@ def run_backtest_strategy(args: argparse.Namespace) -> None:
         print(f"\nWrote strategy backtest JSON: {output_path}")
 
 
+def run_nifty_context(args: argparse.Namespace) -> None:
+    payload = NiftyDeskService(analysis_service=AnalysisService()).nifty_context(
+        mode=args.mode,
+        weekly_expiry=args.weekly_expiry,
+        monthly_expiry=args.monthly_expiry,
+        include_option_chain=not args.skip_option_chain,
+        include_iv=not args.skip_iv,
+        refresh=args.refresh,
+        timeframe=args.timeframe,
+        days=args.days,
+        to_date=args.to_date,
+    )
+    print(json.dumps(payload, indent=2, default=str))
+
+
+def run_nifty_strategies(args: argparse.Namespace) -> None:
+    allowed = _split_cli_symbols(args.allowed_strategies)
+    payload = NiftyDeskService(analysis_service=AnalysisService()).nifty_strategy_suggestions(
+        mode=args.mode,
+        weekly_expiry=args.weekly_expiry,
+        monthly_expiry=args.monthly_expiry,
+        allowed_strategies=allowed,
+        risk_profile=args.risk_profile,
+        refresh=args.refresh,
+        to_date=args.to_date,
+    )
+    print(_render_nifty_strategies(payload))
+
+
+def run_nifty_payoff(args: argparse.Namespace) -> None:
+    legs = _parse_json_array(args.legs, "--legs")
+    payload = NiftyDeskService().nifty_payoff({"spot": args.spot, "lot_size": args.lot_size, "legs": legs})
+    print(json.dumps(payload, indent=2, default=str))
+
+
+def run_nifty_backtest(args: argparse.Namespace) -> None:
+    payload = NiftyDeskService().nifty_backtest(
+        {
+            "strategy_id": args.strategy,
+            "mode": args.mode,
+            "days": args.days,
+            "from_date": args.from_date,
+            "to_date": args.to_date,
+            "params": _parse_json_object(args.params, "--params"),
+            "exit_rules": _parse_json_object(args.exit_rules, "--exit-rules"),
+        }
+    )
+    print(json.dumps(payload, indent=2, default=str))
+    if args.output_json:
+        output_path = Path(args.output_json)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        print(f"\nWrote NIFTY backtest JSON: {output_path}")
+
+
 def _zerodha_client_from_settings() -> ZerodhaKiteClient:
     creds = load_settings().broker_credentials
     missing = [
@@ -1034,6 +1133,16 @@ def _parse_json_object(value: str, label: str) -> dict:
         raise SystemExit(f"{label} must be a JSON object: {exc}") from exc
     if not isinstance(parsed, dict):
         raise SystemExit(f"{label} must be a JSON object.")
+    return parsed
+
+
+def _parse_json_array(value: str, label: str) -> list:
+    try:
+        parsed = json.loads(value or "[]")
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"{label} must be a JSON array: {exc}") from exc
+    if not isinstance(parsed, list):
+        raise SystemExit(f"{label} must be a JSON array.")
     return parsed
 
 
@@ -1416,6 +1525,37 @@ def _render_generic_backtest(payload: dict) -> str:
     if points:
         lines.extend(["", "Notes:"])
         lines.extend(f"- {point}" for point in points)
+    return "\n".join(lines)
+
+
+def _render_nifty_strategies(payload: dict) -> str:
+    rows = [
+        [
+            row.get("label", "-"),
+            row.get("horizon", "-"),
+            row.get("structure", "-"),
+            str(row.get("suitability_score", "-")),
+            row.get("confidence", "-"),
+            _short_text(row.get("expiry_plan"), 42),
+            _short_text("; ".join(row.get("reasons") or []), 70),
+        ]
+        for row in payload.get("candidates") or []
+    ]
+    lines = [
+        f"NIFTY Desk: {payload.get('mode')} | Candidates: {len(rows)} | Warnings: {len(payload.get('warnings') or [])}",
+    ]
+    if rows:
+        lines.extend(
+            [
+                "",
+                _plain_table(["Strategy", "Horizon", "Structure", "Score", "Confidence", "Expiry", "Reasons"], rows),
+            ]
+        )
+    else:
+        lines.append("\nNo strategy candidates matched the current context.")
+    warnings = payload.get("warnings") or []
+    if warnings:
+        lines.extend(["", "Warnings:", *[f"- {warning}" for warning in warnings]])
     return "\n".join(lines)
 
 

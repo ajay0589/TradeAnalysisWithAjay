@@ -197,6 +197,7 @@ Use this same URL going forward. The script stops any older UI process already l
 The dashboard supports:
 
 - analyzing one F&O stock by symbol, or by company name when the Zerodha NSE instrument cache is present
+- a dedicated NIFTY Desk tab for intraday, swing, and positional NIFTY context
 - checking whether the Zerodha access token is valid, expired, missing, or unreachable
 - opening the Zerodha login URL and updating `.env` by pasting the redirected URL containing `request_token`
 - scanning bullish candidates for put selling
@@ -228,6 +229,44 @@ python -m trading_analysis.cli bulk-fno-candles --timeframes day --days 1460
 ```
 
 Option-chain analytics currently includes PCR, max pain, total option volume, ATM IV, IV change from the previous snapshot, OI change, and OI percent change. IV percentile needs accumulated historical IV snapshots before it can be calculated reliably.
+
+## NIFTY Desk
+
+The NIFTY Desk is a read-only analysis workspace for NIFTY-specific setup planning. It combines cached NIFTY candles, cached NIFTY option-chain snapshots, IV history, and strategy suitability rules. It does not place orders and does not produce advisory language.
+
+Required data:
+
+- NIFTY spot candles: `data\raw\candles\NIFTY_50.csv`
+- Optional intraday candles: `data\raw\candles\60minute\NIFTY_50.csv` and `data\raw\candles\15minute\NIFTY_50.csv`
+- NIFTY option-chain snapshots under `data\raw\option_chain`, for example `NIFTY_2026-07-02.csv`
+- IV history under `data\raw\iv_history\NIFTY_iv_history.csv` for IV rank and IV percentile
+
+UI usage:
+
+1. Open the Web UI and select `NIFTY Desk`.
+2. Choose `Auto`, `Intraday`, `Swing`, or `Positional`.
+3. Select weekly/monthly expiries when cached snapshots exist, or leave them on auto.
+4. Keep `Include option chain` and `Include IV context` checked when those datasets are available.
+5. Click `Run NIFTY Analysis` for market, OI, and IV context.
+6. Click `Suggest Strategies` to see strategy candidates with suitability score, reasons, risks, and required confirmations.
+7. Use `Payoff` only after reviewing or editing exact legs/premiums; default UI legs are illustrative placeholders.
+8. Use `Backtest` as a context-only historical simulation unless historical option premiums are available.
+
+CLI examples:
+
+```powershell
+python -m trading_analysis.cli nifty-context --mode intraday --weekly-expiry 2026-07-02
+python -m trading_analysis.cli nifty-strategies --mode swing --risk-profile defined
+python -m trading_analysis.cli nifty-payoff --spot 24500 --legs '[{"side":"buy","option_type":"CE","strike":24500,"premium":120},{"side":"sell","option_type":"CE","strike":24700,"premium":50}]'
+python -m trading_analysis.cli nifty-backtest --strategy nifty_short_strangle --mode swing --days 365 --params "{}"
+```
+
+Limitations:
+
+- Strategy suggestions are candidates only; they require confirmation and manual risk review.
+- Accurate options strategy P&L requires historical option premium snapshots. Without them, NIFTY backtests report forward spot movement and signal quality only.
+- IV rank and IV percentile require enough saved IV observations. The tool warns instead of faking values when history is insufficient.
+- Greeks are placeholders until a reliable live or historical Greeks source is added.
 
 Sector map CSV upload expects a symbol column plus sector/industry/index detail. Supported columns are the same as `generate-sector-map-from-csv`, including `symbol`, `industry`, `sector`, `macro`, and optional `index_symbol`.
 

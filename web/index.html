@@ -21,6 +21,7 @@
 
       <nav class="activity-tabs" aria-label="Decision desk activities">
         <button class="tab-btn active" data-tab-target="analyze" type="button">Analyze</button>
+        <button class="tab-btn" data-tab-target="nifty" type="button">NIFTY Desk</button>
         <button class="tab-btn" data-tab-target="scans" type="button">Scans</button>
         <button class="tab-btn" data-tab-target="krishna" type="button">Krishna Setup</button>
         <button class="tab-btn" data-tab-target="backtest" type="button">Backtest</button>
@@ -395,6 +396,197 @@
                     </tr>
                   </thead>
                   <tbody id="optionBody"></tbody>
+                </table>
+              </section>
+            </section>
+          </section>
+        </section>
+
+        <section id="tab-nifty" class="tab-pane" data-tab-panel="nifty">
+          <section class="workspace">
+            <aside class="sidebar">
+              <div class="panel">
+                <label title="Choose how the desk weighs NIFTY data. Intraday emphasizes 15-minute/1-hour candles, Swing blends daily and 1-hour, Positional emphasizes daily trend.">NIFTY Controls</label>
+                <label for="niftyMode" title="Auto lets the desk choose the most useful horizon from available candles.">Mode</label>
+                <select id="niftyMode">
+                  <option value="auto">Auto</option>
+                  <option value="intraday">Intraday</option>
+                  <option value="swing">Swing</option>
+                  <option value="positional">Positional</option>
+                </select>
+                <label for="niftyWeeklyExpiry" title="Optional. Select a cached NIFTY option-chain expiry. Leave auto to use the latest cached NIFTY snapshot.">Weekly expiry</label>
+                <select id="niftyWeeklyExpiry">
+                  <option value="">Auto weekly</option>
+                </select>
+                <label for="niftyMonthlyExpiry" title="Optional. Used when comparing weekly and monthly option context for positional/calendar candidates.">Monthly expiry</label>
+                <select id="niftyMonthlyExpiry">
+                  <option value="">Auto monthly</option>
+                </select>
+                <label for="niftyRiskProfile" title="Defined risk shows spread/iron candidates. Undefined risk shows short straddle/strangle candidates for analysis only.">Risk profile</label>
+                <select id="niftyRiskProfile">
+                  <option value="defined">Defined risk</option>
+                  <option value="undefined">Undefined risk</option>
+                  <option value="any">Any</option>
+                </select>
+                <label class="check-row">
+                  <input id="niftyRefresh" type="checkbox" />
+                  <span title="When checked, the server pulls latest read-only NIFTY candles via Zerodha before analysis, then reads the updated local CSV cache. Option-chain refresh still uses the existing option-chain monitor/data tools.">Pull latest NIFTY candles</span>
+                </label>
+                <label class="check-row">
+                  <input id="niftyIncludeOptionChain" type="checkbox" checked />
+                  <span title="Uses cached NIFTY option-chain CSV snapshots under data/raw/option_chain for PCR, max pain, IV, OI support/resistance, and writing/unwinding context.">Include option chain</span>
+                </label>
+                <label class="check-row">
+                  <input id="niftyIncludeIv" type="checkbox" checked />
+                  <span title="Uses data/raw/iv_history/NIFTY_iv_history.csv to calculate IV rank and percentile. Needs at least 30 observations.">Include IV context</span>
+                </label>
+                <div class="date-grid">
+                  <div>
+                    <label for="niftyDays" title="Lookback window for loading cached candles. Use more days for swing/positional context.">Days</label>
+                    <input id="niftyDays" type="number" min="1" step="1" value="45" />
+                  </div>
+                  <div>
+                    <label for="niftyTimeframe" title="Primary intraday frame to load alongside daily candles. 15-minute is useful for intraday trigger context.">Frame</label>
+                    <select id="niftyTimeframe">
+                      <option value="15minute" selected>15 min</option>
+                      <option value="60minute">1 hour</option>
+                      <option value="day">Daily</option>
+                    </select>
+                  </div>
+                </div>
+                <label for="niftyToDate" title="Optional. Pick a historical date to understand whether NIFTY was bullish, bearish, or neutral as of that day. Leave blank for latest cached candle.">Analysis date</label>
+                <input id="niftyToDate" type="date" />
+                <button id="niftyRunContextBtn" class="full-btn">Run NIFTY Analysis</button>
+                <button id="niftySuggestBtn" class="full-btn">Suggest Strategies</button>
+              </div>
+            </aside>
+
+            <section class="content">
+              <section class="activity-hero">
+                <div>
+                  <h2>NIFTY Desk</h2>
+                  <p>Read-only NIFTY context for intraday, swing, and positional setup planning.</p>
+                </div>
+                <span id="niftyMeta">Idle</span>
+              </section>
+
+              <section class="summary-grid" id="niftyContextCards"></section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Market Context</h2>
+                  <span id="niftyContextMeta"></span>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Area</th>
+                      <th>Value</th>
+                      <th>Risk Context</th>
+                    </tr>
+                  </thead>
+                  <tbody id="niftyContextBody"></tbody>
+                </table>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Analysis Factors</h2>
+                  <span id="niftyFactorMeta">Shows each input used for NIFTY bias.</span>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Factor</th>
+                      <th>Signal</th>
+                      <th>Value</th>
+                      <th>Purpose</th>
+                    </tr>
+                  </thead>
+                  <tbody id="niftyFactorBody"></tbody>
+                </table>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Option & IV Context</h2>
+                  <span id="niftyOptionMeta"></span>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Metric</th>
+                      <th>Value</th>
+                      <th>Read</th>
+                    </tr>
+                  </thead>
+                  <tbody id="niftyOptionBody"></tbody>
+                </table>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Strategy Candidates</h2>
+                  <span id="niftyStrategyMeta"></span>
+                </div>
+                <div class="wide-table">
+                  <table class="readable-table">
+                    <thead>
+                      <tr>
+                        <th>Strategy</th>
+                        <th>Horizon</th>
+                        <th>Structure</th>
+                        <th>Score</th>
+                        <th>Confidence</th>
+                        <th>Expiry Plan</th>
+                        <th>Best When</th>
+                        <th>Avoid When</th>
+                        <th>Reasons</th>
+                        <th>Risks</th>
+                        <th>Confirmations</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="niftyStrategyBody"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Payoff Viewer</h2>
+                  <span id="niftyPayoffMeta">Enter exact legs through a strategy action or API payload.</span>
+                </div>
+                <div id="niftyPayoffNotes" class="mini-list"></div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Spot</th>
+                      <th>Payoff</th>
+                    </tr>
+                  </thead>
+                  <tbody id="niftyPayoffBody"></tbody>
+                </table>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Backtest Results</h2>
+                  <span id="niftyBacktestMeta">Context-only until premium history exists.</span>
+                </div>
+                <div id="niftyBacktestCards" class="compact-metrics"></div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Side</th>
+                      <th>Entry Ref</th>
+                      <th>Exit Ref</th>
+                      <th>Forward Return</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="niftyBacktestBody"></tbody>
                 </table>
               </section>
             </section>

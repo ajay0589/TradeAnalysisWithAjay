@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from trading_analysis.nifty.service import NiftyDeskService
 from trading_analysis.web_services import AnalysisService
 
 
@@ -20,6 +21,7 @@ class ReusableThreadingHTTPServer(ThreadingHTTPServer):
 
 class TradingRequestHandler(BaseHTTPRequestHandler):
     service = AnalysisService()
+    nifty_service = NiftyDeskService(analysis_service=service)
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -160,6 +162,21 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         limit_symbols=_optional_limit(params.get("limit_symbols", ["50"])[0]),
                     )
                 )
+            elif parsed.path == "/api/nifty/context":
+                params = parse_qs(parsed.query)
+                self._send_json(
+                    self.nifty_service.nifty_context(
+                        mode=params.get("mode", ["auto"])[0],
+                        weekly_expiry=params.get("weekly_expiry", [None])[0] or None,
+                        monthly_expiry=params.get("monthly_expiry", [None])[0] or None,
+                        include_option_chain=params.get("include_option_chain", ["true"])[0].lower() == "true",
+                        include_iv=params.get("include_iv", ["true"])[0].lower() == "true",
+                        refresh=params.get("refresh", ["false"])[0].lower() == "true",
+                        timeframe=params.get("timeframe", ["15minute"])[0],
+                        days=_optional_int(params.get("days", [None])[0]) or 30,
+                        to_date=params.get("to_date", [None])[0] or None,
+                    )
+                )
             else:
                 self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
         except Exception as exc:
@@ -241,6 +258,23 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/option-chain-monitor/stop":
                 payload = self._read_json()
                 self._send_json(self.service.stop_job(str(payload.get("job_id") or "")))
+            elif parsed.path == "/api/nifty/strategy-suggestions":
+                payload = self._read_json()
+                self._send_json(
+                    self.nifty_service.nifty_strategy_suggestions(
+                        mode=str(payload.get("mode") or "auto"),
+                        weekly_expiry=payload.get("weekly_expiry") or None,
+                        monthly_expiry=payload.get("monthly_expiry") or None,
+                        allowed_strategies=list(payload.get("allowed_strategies") or []),
+                        risk_profile=str(payload.get("risk_profile") or "defined"),
+                        refresh=bool(payload.get("refresh")),
+                        to_date=payload.get("to_date") or None,
+                    )
+                )
+            elif parsed.path == "/api/nifty/payoff":
+                self._send_json(self.nifty_service.nifty_payoff(self._read_json()))
+            elif parsed.path == "/api/nifty/backtest":
+                self._send_json(self.nifty_service.nifty_backtest(self._read_json()))
             else:
                 self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
         except Exception as exc:
