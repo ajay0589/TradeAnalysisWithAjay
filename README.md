@@ -261,6 +261,49 @@ python -m trading_analysis.cli nifty-payoff --spot 24500 --legs '[{"side":"buy",
 python -m trading_analysis.cli nifty-backtest --strategy nifty_short_strangle --mode swing --days 365 --params "{}"
 ```
 
+## NIFTY Auto Scan
+
+NIFTY Auto Scan is a local market-hour scheduler for the NIFTY Desk. It uses SQLite storage at `data\db\trading_analysis.db`, enables WAL mode, and stores job history plus generated analysis alerts. It is read-only: it refreshes local data caches where configured, analyzes context, records IV observations, creates alert candidates, and never places orders.
+
+Default scan behavior:
+
+- Market hours: Monday-Friday, 09:15 to 15:30 Asia/Kolkata. Holidays are a TODO/configurable calendar.
+- Candles: every 1 minute.
+- NIFTY option chain: every 3 minutes when refresh is available through the attached analysis service.
+- IV snapshot/context: every 5 minutes.
+- NIFTY context and opportunity scan: every 1 minute.
+- Job cleanup: every 30 minutes, keeping recent job history.
+
+SQLite tables:
+
+- `market_jobs`: every scheduler job run, status, duration, error, and result JSON.
+- `nifty_alerts`: generated NIFTY context/setup alerts, reasons, risks, trigger/invalidation levels, and acknowledgement state.
+
+Web UI usage:
+
+1. Open `NIFTY Desk`.
+2. Use `Start Auto Scan` during market hours to start the local scheduler in the web server process.
+3. Use `Run Once` to test one forced scan cycle outside market hours.
+4. Review `Auto Scan` job history to see what data was refreshed/analyzed.
+5. Review `Alerts`; use `Acknowledge` after you have reviewed an alert candidate.
+
+CLI examples:
+
+```powershell
+python -m trading_analysis.cli nifty-auto-status
+python -m trading_analysis.cli nifty-auto-run-once --force
+python -m trading_analysis.cli nifty-auto-start
+python -m trading_analysis.cli nifty-alerts --limit 20
+```
+
+Auto-scan limitations:
+
+- Alerts are analysis candidates only and require confirmation and manual risk review.
+- Option-chain and IV context depend on cached snapshots/source availability.
+- Duplicate alerts are suppressed for 15 minutes unless severity increases or score improves materially.
+- Historical IV rank needs accumulated IV history.
+- The initial holiday calendar is weekday-only and should be extended manually later.
+
 Limitations:
 
 - Strategy suggestions are candidates only; they require confirmation and manual risk review.

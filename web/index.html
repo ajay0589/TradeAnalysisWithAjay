@@ -554,6 +554,61 @@
 
               <section class="table-panel">
                 <div class="panel-head">
+                  <h2 title="Runs read-only NIFTY refresh, context, strategy suitability, IV snapshot, and alert checks during Indian market hours.">Auto Scan</h2>
+                  <span id="niftyAutoMeta">Stopped</span>
+                </div>
+                <div class="compact-metrics" id="niftyAutoCards"></div>
+                <div class="button-row">
+                  <button id="niftyAutoStartBtn" title="Starts a lightweight local scheduler in this web server process. It runs only during market hours.">Start Auto Scan</button>
+                  <button id="niftyAutoStopBtn" title="Stops the local scheduler. Existing SQLite job history and alerts remain available.">Stop Auto Scan</button>
+                  <button id="niftyAutoRunOnceBtn" title="Runs one immediate scan cycle. This button forces a run even outside market hours for testing.">Run Once</button>
+                </div>
+                <div class="wide-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th title="Name of the scheduled step.">Job</th>
+                        <th title="Latest stored status from SQLite.">Status</th>
+                        <th title="When the job started.">Started</th>
+                        <th title="How long the job took.">Duration</th>
+                        <th title="Short result or error context.">Result</th>
+                      </tr>
+                    </thead>
+                    <tbody id="niftyAutoJobBody"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2 title="Alerts are analysis candidates generated from technical, option-chain, and IV context. They are not order instructions.">Alerts</h2>
+                  <span id="niftyAlertsMeta">No alerts loaded</span>
+                </div>
+                <div class="wide-table">
+                  <table class="readable-table">
+                    <thead>
+                      <tr>
+                        <th title="When this alert was stored locally.">Time</th>
+                        <th title="Info, watch, important, or risk context.">Severity</th>
+                        <th title="Directional or neutral/volatile read.">Direction</th>
+                        <th title="Related strategy candidate when applicable.">Strategy</th>
+                        <th title="Suitability score from 0 to 100 where available.">Score</th>
+                        <th title="Short alert title.">Title</th>
+                        <th title="Why the alert exists.">Message</th>
+                        <th title="Human-readable factors used.">Reasons</th>
+                        <th title="Risk context and caveats.">Risks</th>
+                        <th title="Reference level for confirmation where available.">Trigger</th>
+                        <th title="Reference level where the setup context weakens.">Invalidation</th>
+                        <th title="Mark alert inactive after reviewing it.">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody id="niftyAlertsBody"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
                   <h2>Payoff Viewer</h2>
                   <span id="niftyPayoffMeta">Enter exact legs through a strategy action or API payload.</span>
                 </div>

@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from trading_analysis.nifty.auto_scan_service import NiftyAutoScanService
 from trading_analysis.nifty.service import NiftyDeskService
 from trading_analysis.web_services import AnalysisService
 
@@ -22,6 +23,7 @@ class ReusableThreadingHTTPServer(ThreadingHTTPServer):
 class TradingRequestHandler(BaseHTTPRequestHandler):
     service = AnalysisService()
     nifty_service = NiftyDeskService(analysis_service=service)
+    nifty_auto_service = NiftyAutoScanService(nifty_service=nifty_service)
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -177,6 +179,16 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         to_date=params.get("to_date", [None])[0] or None,
                     )
                 )
+            elif parsed.path == "/api/nifty/auto/status":
+                self._send_json(self.nifty_auto_service.status())
+            elif parsed.path == "/api/nifty/alerts":
+                params = parse_qs(parsed.query)
+                self._send_json(
+                    self.nifty_auto_service.recent_alerts(
+                        limit=_optional_int(params.get("limit", ["50"])[0]) or 50,
+                        active_only=params.get("active_only", ["false"])[0].lower() == "true",
+                    )
+                )
             else:
                 self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
         except Exception as exc:
@@ -275,6 +287,16 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(self.nifty_service.nifty_payoff(self._read_json()))
             elif parsed.path == "/api/nifty/backtest":
                 self._send_json(self.nifty_service.nifty_backtest(self._read_json()))
+            elif parsed.path == "/api/nifty/auto/start":
+                self._send_json(self.nifty_auto_service.start())
+            elif parsed.path == "/api/nifty/auto/stop":
+                self._send_json(self.nifty_auto_service.stop())
+            elif parsed.path == "/api/nifty/auto/run-once":
+                payload = self._read_json()
+                self._send_json(self.nifty_auto_service.run_once(force=bool(payload.get("force"))))
+            elif parsed.path.startswith("/api/nifty/alerts/") and parsed.path.endswith("/ack"):
+                alert_id = _alert_id_from_path(parsed.path)
+                self._send_json(self.nifty_auto_service.acknowledge_alert(alert_id))
             else:
                 self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
         except Exception as exc:
@@ -345,6 +367,13 @@ def _optional_json(value: str | None) -> dict:
     if not isinstance(loaded, dict):
         raise ValueError("JSON parameter must be an object.")
     return loaded
+
+
+def _alert_id_from_path(path: str) -> int:
+    parts = [part for part in path.split("/") if part]
+    if len(parts) < 4:
+        raise ValueError("Missing alert id.")
+    return int(parts[3])
 
 
 def main() -> None:

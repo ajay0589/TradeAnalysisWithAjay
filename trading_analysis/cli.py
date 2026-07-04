@@ -54,6 +54,7 @@ from trading_analysis.data_sources.nse_equity import (
     fetch_metadata_for_symbols,
 )
 from trading_analysis.data_sources.nse_fii_dii import fetch_fii_dii_activity, write_fii_dii_csv
+from trading_analysis.nifty.auto_scan_service import NiftyAutoScanService
 from trading_analysis.nifty.service import NiftyDeskService
 from trading_analysis.reporting.console import render_signal_table
 from trading_analysis.strategies.registry import get_strategy, list_strategies, strategy_info
@@ -526,6 +527,20 @@ def main() -> None:
     nifty_backtest_parser.add_argument("--exit-rules", default="{}")
     nifty_backtest_parser.add_argument("--output-json")
 
+    subparsers.add_parser("nifty-auto-status", help="Show NIFTY auto-scan scheduler and alert status")
+
+    nifty_auto_run_parser = subparsers.add_parser("nifty-auto-run-once", help="Run one NIFTY auto-scan cycle")
+    nifty_auto_run_parser.add_argument("--force", action="store_true", help="Run even outside market hours")
+
+    subparsers.add_parser(
+        "nifty-auto-start",
+        help="Start NIFTY auto-scan scheduler in the foreground until Ctrl+C",
+    )
+
+    nifty_alerts_parser = subparsers.add_parser("nifty-alerts", help="Show recent NIFTY auto-scan alerts")
+    nifty_alerts_parser.add_argument("--limit", type=int, default=20)
+    nifty_alerts_parser.add_argument("--active-only", action="store_true")
+
     args = parser.parse_args()
     if args.command == "analyze":
         run_analyze(args)
@@ -573,6 +588,14 @@ def main() -> None:
         run_nifty_payoff(args)
     elif args.command == "nifty-backtest":
         run_nifty_backtest(args)
+    elif args.command == "nifty-auto-status":
+        run_nifty_auto_status()
+    elif args.command == "nifty-auto-run-once":
+        run_nifty_auto_run_once(args)
+    elif args.command == "nifty-auto-start":
+        run_nifty_auto_start()
+    elif args.command == "nifty-alerts":
+        run_nifty_alerts(args)
 
 
 def run_analyze(args: argparse.Namespace) -> None:
@@ -1087,6 +1110,33 @@ def run_nifty_backtest(args: argparse.Namespace) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
         print(f"\nWrote NIFTY backtest JSON: {output_path}")
+
+
+def run_nifty_auto_status() -> None:
+    payload = NiftyAutoScanService(nifty_service=NiftyDeskService(analysis_service=AnalysisService())).status()
+    print(json.dumps(payload, indent=2, default=str))
+
+
+def run_nifty_auto_run_once(args: argparse.Namespace) -> None:
+    payload = NiftyAutoScanService(nifty_service=NiftyDeskService(analysis_service=AnalysisService())).run_once(force=args.force)
+    print(json.dumps(payload, indent=2, default=str))
+
+
+def run_nifty_auto_start() -> None:
+    service = NiftyAutoScanService(nifty_service=NiftyDeskService(analysis_service=AnalysisService()))
+    payload = service.start()
+    print(json.dumps(payload, indent=2, default=str))
+    print("NIFTY auto-scan scheduler is running in the foreground. Press Ctrl+C to stop.")
+    try:
+        while True:
+            time.sleep(5)
+    except KeyboardInterrupt:
+        print(json.dumps(service.stop(), indent=2, default=str))
+
+
+def run_nifty_alerts(args: argparse.Namespace) -> None:
+    payload = NiftyAutoScanService().recent_alerts(limit=args.limit, active_only=args.active_only)
+    print(json.dumps(payload, indent=2, default=str))
 
 
 def _zerodha_client_from_settings() -> ZerodhaKiteClient:

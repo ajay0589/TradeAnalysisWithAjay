@@ -560,6 +560,21 @@ label {
   font-size: 15px;
 }
 
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.alert-important td {
+  background: #fff7e6;
+}
+
+.alert-risk td {
+  background: #fff1f1;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

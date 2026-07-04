@@ -8,6 +8,8 @@ __pycache__/
 venv/
 reports/
 logs/
+data/db/
 data/raw/
 data/processed/
+web_server.log
 *.zip

@@ -15,6 +15,9 @@ const state = {
     candidates: [],
     payoff: null,
     backtest: null,
+    autoStatus: null,
+    alerts: [],
+    autoPollTimer: null,
   },
 };
 
@@ -29,6 +32,13 @@ function activateTab(name) {
   document.querySelectorAll("[data-tab-panel]").forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.tabPanel === name);
   });
+  if (name === "nifty") {
+    loadNiftyAutoStatus();
+    loadNiftyAlerts();
+    startNiftyAutoPolling();
+  } else {
+    stopNiftyAutoPolling();
+  }
 }
 
 const BULK_TIMEFRAME_LABELS = {
@@ -1995,6 +2005,158 @@ function renderNiftyBacktest(data) {
   if ((data.warnings || []).length) setNotes(data.warnings);
 }
 
+async function loadNiftyAutoStatus() {
+  try {
+    const data = await api("/api/nifty/auto/status");
+    state.nifty.autoStatus = data;
+    renderNiftyAutoStatus(data);
+  } catch (error) {
+    $("niftyAutoMeta").textContent = "Failed";
+  }
+}
+
+async function loadNiftyAlerts() {
+  try {
+    const data = await api("/api/nifty/alerts?limit=50");
+    state.nifty.alerts = data.alerts || [];
+    renderNiftyAlerts(data);
+  } catch (error) {
+    $("niftyAlertsMeta").textContent = "Failed";
+  }
+}
+
+async function startNiftyAutoScan() {
+  $("niftyAutoMeta").textContent = "Starting";
+  try {
+    const data = await postApi("/api/nifty/auto/start", {});
+    state.nifty.autoStatus = data;
+    renderNiftyAutoStatus(data);
+    startNiftyAutoPolling();
+  } catch (error) {
+    setNotes([error.message], true);
+  }
+}
+
+async function stopNiftyAutoScan() {
+  $("niftyAutoMeta").textContent = "Stopping";
+  try {
+    const data = await postApi("/api/nifty/auto/stop", {});
+    state.nifty.autoStatus = data;
+    renderNiftyAutoStatus(data);
+    stopNiftyAutoPolling();
+  } catch (error) {
+    setNotes([error.message], true);
+  }
+}
+
+async function runNiftyAutoOnce() {
+  $("niftyAutoMeta").textContent = "Running one cycle";
+  try {
+    const data = await postApi("/api/nifty/auto/run-once", { force: true });
+    state.nifty.autoStatus = data;
+    renderNiftyAutoStatus(data);
+    await loadNiftyAlerts();
+  } catch (error) {
+    setNotes([error.message], true);
+  }
+}
+
+async function acknowledgeNiftyAlert(alertId) {
+  try {
+    await postApi(`/api/nifty/alerts/${alertId}/ack`, {});
+    await loadNiftyAlerts();
+    await loadNiftyAutoStatus();
+  } catch (error) {
+    setNotes([error.message], true);
+  }
+}
+
+function startNiftyAutoPolling() {
+  if (state.nifty.autoPollTimer) return;
+  state.nifty.autoPollTimer = window.setInterval(() => {
+    loadNiftyAutoStatus();
+    loadNiftyAlerts();
+  }, 20000);
+}
+
+function stopNiftyAutoPolling() {
+  if (!state.nifty.autoPollTimer) return;
+  window.clearInterval(state.nifty.autoPollTimer);
+  state.nifty.autoPollTimer = null;
+}
+
+function renderNiftyAutoStatus(data) {
+  const running = Boolean(data.running);
+  $("niftyAutoMeta").textContent = `${running ? "Running" : "Stopped"} / market ${data.market_hours ? "open" : "closed"}`;
+  $("niftyAutoCards").innerHTML = [
+    ["Status", running ? "Running" : "Stopped"],
+    ["Market Hours", data.market_hours ? "Open" : "Closed"],
+    ["Last Run", fmtDateTime(data.last_job_run)],
+    ["Active Alerts", fmtInt(data.active_alerts_count)],
+  ]
+    .map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${value}</strong></div>`)
+    .join("");
+  $("niftyAutoJobBody").innerHTML = (data.recent_jobs || [])
+    .slice(0, 12)
+    .map((job) => `
+      <tr>
+        <td>${job.job_name}</td>
+        <td><span class="status-badge status-${statusKey(job.status)}">${statusLabel(job.status)}</span></td>
+        <td>${fmtDateTime(job.started_at)}</td>
+        <td>${job.duration_ms === null || job.duration_ms === undefined ? "-" : `${job.duration_ms} ms`}</td>
+        <td>${autoJobSummary(job)}</td>
+      </tr>
+    `)
+    .join("");
+}
+
+function renderNiftyAlerts(data) {
+  const alerts = data.alerts || [];
+  $("niftyAlertsMeta").textContent = `${alerts.length} shown / ${fmtInt(data.active_count)} active`;
+  $("niftyAlertsBody").innerHTML = alerts
+    .map((alert) => `
+      <tr class="alert-${statusKey(alert.severity)}">
+        <td>${fmtDateTime(alert.created_at)}</td>
+        <td><span class="status-badge status-${statusKey(alert.severity)}">${statusLabel(alert.severity)}</span></td>
+        <td>${alert.direction || "-"}</td>
+        <td>${alert.strategy_id || "-"}</td>
+        <td>${fmt(alert.score)}</td>
+        <td>${escapeHtml(alert.title)}</td>
+        <td>${escapeHtml(alert.message)}</td>
+        <td>${escapeHtml((alert.reasons || []).join("; ") || "-")}</td>
+        <td>${escapeHtml((alert.risks || []).join("; ") || "-")}</td>
+        <td>${fmt(alert.trigger_level)}</td>
+        <td>${fmt(alert.invalidation_level)}</td>
+        <td>${alert.is_active ? `<button class="linkBtn nifty-alert-ack" data-alert-id="${alert.id}">Acknowledge</button>` : "Ack"}</td>
+      </tr>
+    `)
+    .join("");
+  document.querySelectorAll(".nifty-alert-ack").forEach((button) => {
+    button.addEventListener("click", () => acknowledgeNiftyAlert(Number(button.dataset.alertId)));
+  });
+}
+
+function autoJobSummary(job) {
+  if (job.error) return escapeHtml(job.error);
+  const result = job.result && job.result.result ? job.result.result : job.result || {};
+  if (result.alerts_created !== undefined) {
+    return `${result.alerts_created} alert(s), ${result.alerts_suppressed || 0} duplicate(s) suppressed`;
+  }
+  if (result.candle_sources) {
+    return candleSourceText(result.candle_sources);
+  }
+  if (result.cached_snapshots !== undefined) {
+    return `${result.cached_snapshots} cached snapshot(s)`;
+  }
+  if (result.iv_regime) {
+    return `IV ${result.iv_regime}, rank ${fmt(result.iv_rank)}`;
+  }
+  if (result.deleted !== undefined) {
+    return `${result.deleted} old job row(s) removed`;
+  }
+  return "-";
+}
+
 function setNotes(value, isError = false) {
   const notes = $("notes");
   notes.className = isError ? "notes error" : "notes";
@@ -2093,6 +2255,9 @@ $("backtestDownloadTradesBtn").addEventListener("click", downloadBacktestTrades)
 $("backtestDownloadSignalsBtn").addEventListener("click", downloadBacktestSignals);
 $("niftyRunContextBtn").addEventListener("click", runNiftyContext);
 $("niftySuggestBtn").addEventListener("click", runNiftySuggestions);
+$("niftyAutoStartBtn").addEventListener("click", startNiftyAutoScan);
+$("niftyAutoStopBtn").addEventListener("click", stopNiftyAutoScan);
+$("niftyAutoRunOnceBtn").addEventListener("click", runNiftyAutoOnce);
 $("startOptionMonitorBtn").addEventListener("click", startOptionMonitor);
 $("stopOptionMonitorBtn").addEventListener("click", stopOptionMonitor);
 $("optionMonitorSymbols").addEventListener("keydown", (event) => {
