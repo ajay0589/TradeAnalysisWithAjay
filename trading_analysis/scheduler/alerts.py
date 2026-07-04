@@ -23,10 +23,12 @@ def generate_nifty_alerts(
         confidence = str(candidate.get("confidence") or "low")
         severity = _candidate_severity(score, confidence, direction, technical, options, iv)
         label = str(candidate.get("label") or candidate.get("strategy_id") or "NIFTY setup")
+        horizon = str(candidate.get("horizon") or context_result.get("mode") or "auto")
         alerts.append(
             {
                 "alert_type": "strategy_candidate",
                 "mode": mode,
+                "horizon": horizon,
                 "severity": severity,
                 "symbol": "NIFTY",
                 "spot": spot,
@@ -50,6 +52,7 @@ def generate_nifty_alerts(
             {
                 "alert_type": "iv_regime",
                 "mode": mode,
+                "horizon": mode,
                 "severity": "risk" if iv_regime == "extreme" else "important",
                 "symbol": "NIFTY",
                 "spot": spot,
@@ -83,6 +86,7 @@ def generate_nifty_alerts(
                 {
                     "alert_type": "bias_alignment",
                     "mode": mode,
+                    "horizon": mode,
                     "severity": "info",
                     "symbol": "NIFTY",
                     "spot": spot,

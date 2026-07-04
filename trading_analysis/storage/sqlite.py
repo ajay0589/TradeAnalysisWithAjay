@@ -44,6 +44,7 @@ def initialize_database(path: str | Path = DEFAULT_DB_PATH) -> None:
                 created_at TEXT NOT NULL,
                 alert_type TEXT NOT NULL,
                 mode TEXT,
+                horizon TEXT,
                 severity TEXT NOT NULL,
                 symbol TEXT NOT NULL DEFAULT 'NIFTY',
                 spot REAL,
@@ -64,6 +65,7 @@ def initialize_database(path: str | Path = DEFAULT_DB_PATH) -> None:
             )
             """
         )
+        _ensure_column(conn, "nifty_alerts", "horizon", "TEXT")
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_nifty_alerts_recent
@@ -155,6 +157,7 @@ class NiftyAlertRepository:
         alert_type: str,
         mode: str | None,
         severity: str,
+        horizon: str | None = None,
         title: str,
         message: str,
         symbol: str = "NIFTY",
@@ -174,16 +177,17 @@ class NiftyAlertRepository:
             cursor = conn.execute(
                 """
                 INSERT INTO nifty_alerts(
-                    created_at, alert_type, mode, severity, symbol, spot, strategy_id, direction,
+                    created_at, alert_type, mode, horizon, severity, symbol, spot, strategy_id, direction,
                     score, confidence, title, message, trigger_level, invalidation_level, expiry,
                     reasons_json, risks_json, context_snapshot_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _now(),
                     alert_type,
                     mode,
+                    horizon,
                     severity,
                     symbol,
                     spot,
@@ -270,6 +274,12 @@ def _connect(path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, column_type: str) -> None:
+    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
+
+
 @contextmanager
 def _connection(path: Path):
     conn = _connect(path)
@@ -322,6 +332,7 @@ def _alert_row(row: sqlite3.Row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "alert_type": row["alert_type"],
         "mode": row["mode"],
+        "horizon": (row["horizon"] if "horizon" in row.keys() else None) or row["mode"],
         "severity": row["severity"],
         "symbol": row["symbol"],
         "spot": row["spot"],

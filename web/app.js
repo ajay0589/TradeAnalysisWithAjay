@@ -2119,6 +2119,7 @@ function renderNiftyAlerts(data) {
         <td>${fmtDateTime(alert.created_at)}</td>
         <td><span class="status-badge status-${statusKey(alert.severity)}">${statusLabel(alert.severity)}</span></td>
         <td>${alert.direction || "-"}</td>
+        <td>${alert.horizon || alert.mode || "-"}</td>
         <td>${alert.strategy_id || "-"}</td>
         <td>${fmt(alert.score)}</td>
         <td>${escapeHtml(alert.title)}</td>

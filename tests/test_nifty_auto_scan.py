@@ -38,6 +38,7 @@ class NiftyAutoScanTests(unittest.TestCase):
 
         self.assertTrue(alerts)
         self.assertEqual(alerts[0]["direction"], "bullish")
+        self.assertEqual(alerts[0]["horizon"], "swing")
         self.assertEqual(alerts[0]["alert_type"], "strategy_candidate")
 
     def test_duplicate_alert_suppressed_within_15_minutes(self) -> None:
@@ -215,6 +216,7 @@ def _candidate(strategy_id: str, direction: str, score: int) -> dict:
         "strategy_id": strategy_id,
         "label": strategy_id.replace("_", " ").title(),
         "required_view": direction,
+        "horizon": "swing",
         "structure": "directional",
         "suitability_score": score,
         "confidence": "high",
@@ -228,6 +230,7 @@ def _alert(score: int, severity: str) -> dict:
     return {
         "alert_type": "strategy_candidate",
         "mode": "auto",
+        "horizon": "swing",
         "severity": severity,
         "title": "Bullish spread candidate",
         "message": "NIFTY bullish setup candidate; wait for confirmation.",
