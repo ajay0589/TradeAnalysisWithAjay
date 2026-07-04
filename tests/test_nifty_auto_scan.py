@@ -4,11 +4,13 @@ import json
 import tempfile
 import threading
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
+from trading_analysis.models import Candle
+from trading_analysis.nifty.alert_backtest import backtest_nifty_alert_signals
 from trading_analysis.nifty.auto_scan_service import NiftyAutoScanService
 from trading_analysis.scheduler.alerts import generate_nifty_alerts
 from trading_analysis.scheduler.market_hours import is_market_hours
@@ -108,6 +110,9 @@ class NiftyAutoScanTests(unittest.TestCase):
             def acknowledge_alert(self, alert_id):
                 return {"alert": {"id": alert_id, "is_active": False}}
 
+            def alert_backtest(self, **kwargs):
+                return {"timeframe": kwargs["timeframe"], "metrics": {"overall": {"signals": 0}}, "rows": []}
+
             def start(self):
                 return self.status()
 
@@ -126,6 +131,7 @@ class NiftyAutoScanTests(unittest.TestCase):
         try:
             self.assertFalse(_http_json(f"{base}/api/nifty/auto/status")["running"])
             self.assertEqual(_http_json(f"{base}/api/nifty/alerts")["count"], 1)
+            self.assertEqual(_http_json(f"{base}/api/nifty/alerts/backtest?timeframe=15minute")["timeframe"], "15minute")
             self.assertFalse(_http_json(f"{base}/api/nifty/alerts/7/ack", {})["alert"]["is_active"])
             self.assertTrue(_http_json(f"{base}/api/nifty/auto/run-once", {"force": True})["ran"])
         finally:
@@ -142,6 +148,32 @@ class NiftyAutoScanTests(unittest.TestCase):
 
             json.dumps(payload)
             self.assertEqual(payload["count"], 1)
+
+    def test_alert_signal_backtest_detects_favorable_bullish_move(self) -> None:
+        alert = {"id": 1, "created_at": "2026-07-06T09:16:00", "direction": "bullish", "horizon": "intraday", "score": 80}
+        candles = _candles([100, 101, 102, 103, 104, 105])
+
+        payload = backtest_nifty_alert_signals([alert], candles, horizons=[3])
+
+        self.assertEqual(payload["metrics"]["overall"]["signals"], 1)
+        self.assertEqual(payload["metrics"]["overall"]["successes"], 1)
+        self.assertGreater(payload["rows"][0]["directional_return_percent"], 0)
+
+    def test_auto_scan_service_alert_backtest_uses_cached_candles(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "candles"
+            _write_candle_csv(root / "15minute" / "NIFTY_50.csv", _candles([100, 101, 102, 103, 104, 105]))
+            service = NiftyAutoScanService(
+                nifty_service=FakeNiftyDeskService(root),
+                db_path=Path(tmp) / "service.db",
+                scheduler=FakeScheduler(),
+            )
+            service.alert_repository.create_alert(**_alert(score=80, severity="watch"))
+
+            payload = service.alert_backtest(timeframe="15minute", horizons=[3])
+
+            json.dumps(payload)
+            self.assertGreaterEqual(payload["metrics"]["overall"]["signals"], 1)
 
 
 class FakeJobs:
@@ -185,6 +217,11 @@ class FakeScheduler:
 
     def run_once(self, force=False):
         return {"ran": True, "running": False, "market_hours": True, "force": force}
+
+
+class FakeNiftyDeskService:
+    def __init__(self, candle_root: Path) -> None:
+        self.candle_root = candle_root
 
 
 def _context(bias: str) -> dict:
@@ -251,3 +288,31 @@ def _http_json(url: str, payload: dict | None = None) -> dict:
     request = Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
     with urlopen(request, timeout=5) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _candles(closes: list[float]) -> list[Candle]:
+    rows: list[Candle] = []
+    start = datetime(2026, 7, 6, 9, 15)
+    for index, close in enumerate(closes):
+        previous = closes[index - 1] if index else close
+        rows.append(
+            Candle(
+                timestamp=start + timedelta(minutes=15 * index),
+                open=previous,
+                high=max(previous, close) + 1,
+                low=min(previous, close) - 1,
+                close=close,
+                volume=1000,
+            )
+        )
+    return rows
+
+
+def _write_candle_csv(path: Path, candles: list[Candle]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = ["date,open,high,low,close,volume,open_interest"]
+    for candle in candles:
+        rows.append(
+            f"{candle.timestamp.isoformat()},{candle.open},{candle.high},{candle.low},{candle.close},{candle.volume},"
+        )
+    path.write_text("\n".join(rows), encoding="utf-8")

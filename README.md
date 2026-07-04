@@ -294,7 +294,15 @@ python -m trading_analysis.cli nifty-auto-status
 python -m trading_analysis.cli nifty-auto-run-once --force
 python -m trading_analysis.cli nifty-auto-start
 python -m trading_analysis.cli nifty-alerts --limit 20
+python -m trading_analysis.cli nifty-alert-backtest --timeframe 15minute --limit 500 --horizons 3,5,10,15
 ```
+
+Alert signal-quality backtest:
+
+- Evaluates stored NIFTY alerts against cached NIFTY spot candles.
+- Uses the next candle after the alert as the entry reference to avoid look-ahead bias.
+- Reports directional accuracy, average forward move, average directional move, max favorable move, and max adverse move by holding window.
+- This is not an option strategy P&L backtest. It does not model option premium, IV decay, margin, slippage, or exact strike selection.
 
 Auto-scan limitations:
 

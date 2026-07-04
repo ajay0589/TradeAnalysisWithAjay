@@ -181,6 +181,19 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 )
             elif parsed.path == "/api/nifty/auto/status":
                 self._send_json(self.nifty_auto_service.status())
+            elif parsed.path == "/api/nifty/alerts/backtest":
+                params = parse_qs(parsed.query)
+                self._send_json(
+                    self.nifty_auto_service.alert_backtest(
+                        timeframe=params.get("timeframe", ["15minute"])[0],
+                        limit=_optional_int(params.get("limit", ["500"])[0]) or 500,
+                        horizons=_optional_int_list(params.get("horizons", ["3,5,10,15"])[0]),
+                        horizon=params.get("horizon", [None])[0] or None,
+                        strategy_id=params.get("strategy_id", [None])[0] or None,
+                        direction=params.get("direction", [None])[0] or None,
+                        alert_type=params.get("alert_type", [None])[0] or None,
+                    )
+                )
             elif parsed.path == "/api/nifty/alerts":
                 params = parse_qs(parsed.query)
                 self._send_json(
@@ -367,6 +380,12 @@ def _optional_json(value: str | None) -> dict:
     if not isinstance(loaded, dict):
         raise ValueError("JSON parameter must be an object.")
     return loaded
+
+
+def _optional_int_list(value: str | None) -> list[int] | None:
+    if not value or not value.strip():
+        return None
+    return [int(part.strip()) for part in value.split(",") if part.strip()]
 
 
 def _alert_id_from_path(path: str) -> int:

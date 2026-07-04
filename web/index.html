@@ -610,6 +610,63 @@
 
               <section class="table-panel">
                 <div class="panel-head">
+                  <h2 title="Measures whether stored NIFTY alerts were followed by favorable spot movement in cached candles. This is not an option P&L simulation.">Alert Signal Backtest</h2>
+                  <span id="niftyAlertBacktestMeta">Not run</span>
+                </div>
+                <div class="date-grid compact-controls">
+                  <div>
+                    <label for="niftyAlertBacktestFrame" title="Cached NIFTY candle timeframe used after each alert timestamp.">Frame</label>
+                    <select id="niftyAlertBacktestFrame">
+                      <option value="15minute" selected>15 min</option>
+                      <option value="60minute">1 hour</option>
+                      <option value="day">Daily</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="niftyAlertBacktestLimit" title="Number of recent stored alert rows to evaluate.">Alerts</label>
+                    <input id="niftyAlertBacktestLimit" type="number" min="1" step="1" value="500" />
+                  </div>
+                </div>
+                <button id="niftyAlertBacktestBtn" title="Runs a signal-quality backtest from stored alerts and cached NIFTY spot candles.">Run Alert Backtest</button>
+                <div id="niftyAlertBacktestCards" class="compact-metrics"></div>
+                <div class="wide-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Group</th>
+                        <th>Signals</th>
+                        <th>Accuracy</th>
+                        <th>Avg Directional</th>
+                        <th>Avg Favorable</th>
+                        <th>Avg Adverse</th>
+                      </tr>
+                    </thead>
+                    <tbody id="niftyAlertBacktestMetricBody"></tbody>
+                  </table>
+                </div>
+                <div class="wide-table">
+                  <table class="readable-table">
+                    <thead>
+                      <tr>
+                        <th>Alert Time</th>
+                        <th>Horizon</th>
+                        <th>Strategy</th>
+                        <th>Direction</th>
+                        <th>Hold</th>
+                        <th>Entry</th>
+                        <th>Exit</th>
+                        <th>Forward</th>
+                        <th>Directional</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody id="niftyAlertBacktestBody"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
                   <h2>Payoff Viewer</h2>
                   <span id="niftyPayoffMeta">Enter exact legs through a strategy action or API payload.</span>
                 </div>

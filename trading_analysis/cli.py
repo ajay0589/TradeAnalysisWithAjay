@@ -541,6 +541,19 @@ def main() -> None:
     nifty_alerts_parser.add_argument("--limit", type=int, default=20)
     nifty_alerts_parser.add_argument("--active-only", action="store_true")
 
+    nifty_alert_backtest_parser = subparsers.add_parser(
+        "nifty-alert-backtest",
+        help="Backtest stored NIFTY auto-scan alerts against cached NIFTY candles",
+    )
+    nifty_alert_backtest_parser.add_argument("--timeframe", default="15minute", help="15minute, 60minute, or day")
+    nifty_alert_backtest_parser.add_argument("--limit", type=int, default=500, help="Recent alert rows to evaluate")
+    nifty_alert_backtest_parser.add_argument("--horizons", default="3,5,10,15", help="Comma-separated candle horizons")
+    nifty_alert_backtest_parser.add_argument("--horizon", help="Filter alert horizon: intraday, swing, positional, auto")
+    nifty_alert_backtest_parser.add_argument("--strategy-id", help="Filter strategy id")
+    nifty_alert_backtest_parser.add_argument("--direction", help="Filter direction")
+    nifty_alert_backtest_parser.add_argument("--alert-type", help="Filter alert type")
+    nifty_alert_backtest_parser.add_argument("--output-json")
+
     args = parser.parse_args()
     if args.command == "analyze":
         run_analyze(args)
@@ -596,6 +609,8 @@ def main() -> None:
         run_nifty_auto_start()
     elif args.command == "nifty-alerts":
         run_nifty_alerts(args)
+    elif args.command == "nifty-alert-backtest":
+        run_nifty_alert_backtest(args)
 
 
 def run_analyze(args: argparse.Namespace) -> None:
@@ -1137,6 +1152,24 @@ def run_nifty_auto_start() -> None:
 def run_nifty_alerts(args: argparse.Namespace) -> None:
     payload = NiftyAutoScanService().recent_alerts(limit=args.limit, active_only=args.active_only)
     print(json.dumps(payload, indent=2, default=str))
+
+
+def run_nifty_alert_backtest(args: argparse.Namespace) -> None:
+    payload = NiftyAutoScanService().alert_backtest(
+        timeframe=args.timeframe,
+        limit=args.limit,
+        horizons=[int(part.strip()) for part in args.horizons.split(",") if part.strip()],
+        horizon=args.horizon,
+        strategy_id=args.strategy_id,
+        direction=args.direction,
+        alert_type=args.alert_type,
+    )
+    print(json.dumps(payload, indent=2, default=str))
+    if args.output_json:
+        output_path = Path(args.output_json)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        print(f"\nWrote NIFTY alert backtest JSON: {output_path}")
 
 
 def _zerodha_client_from_settings() -> ZerodhaKiteClient:

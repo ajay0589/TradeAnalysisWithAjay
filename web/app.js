@@ -15,6 +15,7 @@ const state = {
     candidates: [],
     payoff: null,
     backtest: null,
+    alertBacktest: null,
     autoStatus: null,
     alerts: [],
     autoPollTimer: null,
@@ -2137,6 +2138,67 @@ function renderNiftyAlerts(data) {
   });
 }
 
+async function runNiftyAlertBacktest() {
+  $("niftyAlertBacktestMeta").textContent = "Running";
+  const params = new URLSearchParams({
+    timeframe: $("niftyAlertBacktestFrame").value,
+    limit: $("niftyAlertBacktestLimit").value || "500",
+    horizons: "3,5,10,15",
+  });
+  try {
+    const data = await api(`/api/nifty/alerts/backtest?${params.toString()}`);
+    state.nifty.alertBacktest = data;
+    renderNiftyAlertBacktest(data);
+  } catch (error) {
+    $("niftyAlertBacktestMeta").textContent = "Failed";
+    setNotes([error.message], true);
+  }
+}
+
+function renderNiftyAlertBacktest(data) {
+  const overall = (data.metrics && data.metrics.overall) || {};
+  $("niftyAlertBacktestMeta").textContent = `${data.evaluated_alerts || 0} alert(s) evaluated / ${data.timeframe}`;
+  $("niftyAlertBacktestCards").innerHTML = [
+    ["Alerts", fmtInt(data.alert_count)],
+    ["Rows", fmtInt(overall.signals)],
+    ["Accuracy", fmtPct(overall.accuracy)],
+    ["Avg Directional", fmtPct(overall.avg_directional_return)],
+  ]
+    .map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${value}</strong></div>`)
+    .join("");
+  const byHold = (data.metrics && data.metrics.by_holding_bars) || [];
+  $("niftyAlertBacktestMetricBody").innerHTML = byHold
+    .map((row) => `
+      <tr>
+        <td>${row.group} candle(s)</td>
+        <td>${fmtInt(row.signals)}</td>
+        <td>${fmtPct(row.accuracy)}</td>
+        <td>${fmtPct(row.avg_directional_return)}</td>
+        <td>${fmtPct(row.avg_max_favorable)}</td>
+        <td>${fmtPct(row.avg_max_adverse)}</td>
+      </tr>
+    `)
+    .join("");
+  $("niftyAlertBacktestBody").innerHTML = (data.rows || [])
+    .slice(0, 50)
+    .map((row) => `
+      <tr>
+        <td>${fmtDateTime(row.alert_time)}</td>
+        <td>${row.horizon || "-"}</td>
+        <td>${row.strategy_id || "-"}</td>
+        <td>${row.direction || "-"}</td>
+        <td>${row.holding_bars || "-"}</td>
+        <td>${fmt(row.entry_price)}</td>
+        <td>${fmt(row.exit_price)}</td>
+        <td>${fmtPct(row.forward_return_percent)}</td>
+        <td>${fmtPct(row.directional_return_percent)}</td>
+        <td>${row.status}${row.reason ? `: ${escapeHtml(row.reason)}` : ""}</td>
+      </tr>
+    `)
+    .join("");
+  if ((data.warnings || []).length) setNotes(data.warnings);
+}
+
 function autoJobSummary(job) {
   if (job.error) return escapeHtml(job.error);
   const result = job.result && job.result.result ? job.result.result : job.result || {};
@@ -2259,6 +2321,7 @@ $("niftySuggestBtn").addEventListener("click", runNiftySuggestions);
 $("niftyAutoStartBtn").addEventListener("click", startNiftyAutoScan);
 $("niftyAutoStopBtn").addEventListener("click", stopNiftyAutoScan);
 $("niftyAutoRunOnceBtn").addEventListener("click", runNiftyAutoOnce);
+$("niftyAlertBacktestBtn").addEventListener("click", runNiftyAlertBacktest);
 $("startOptionMonitorBtn").addEventListener("click", startOptionMonitor);
 $("stopOptionMonitorBtn").addEventListener("click", stopOptionMonitor);
 $("optionMonitorSymbols").addEventListener("keydown", (event) => {
