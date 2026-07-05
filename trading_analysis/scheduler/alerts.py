@@ -26,7 +26,7 @@ def generate_nifty_alerts(
         horizon = str(candidate.get("horizon") or context_result.get("mode") or "auto")
         alerts.append(
             {
-                "alert_type": "strategy_candidate",
+                "alert_type": _candidate_alert_type(candidate, direction),
                 "mode": mode,
                 "horizon": horizon,
                 "severity": severity,
@@ -124,6 +124,20 @@ def _candidate_direction(candidate: dict[str, Any]) -> str:
     if "volatility" in text or "long straddle" in text:
         return "volatile"
     return "watch"
+
+
+def _candidate_alert_type(candidate: dict[str, Any], direction: str) -> str:
+    text = " ".join(
+        str(candidate.get(key) or "")
+        for key in ("strategy_id", "label", "structure", "required_view")
+    ).lower()
+    if direction == "neutral":
+        return "neutral_range_candidate"
+    if direction == "bullish" and "breakout" in text:
+        return "bullish_breakout_watch"
+    if direction == "bearish" and ("breakdown" in text or "breakout" in text):
+        return "bearish_breakdown_watch"
+    return "strategy_candidate"
 
 
 def _candidate_severity(

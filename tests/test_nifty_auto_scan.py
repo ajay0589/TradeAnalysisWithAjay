@@ -15,8 +15,9 @@ from trading_analysis.nifty.auto_scan_service import NiftyAutoScanService
 from trading_analysis.scheduler.alerts import generate_nifty_alerts
 from trading_analysis.scheduler.market_hours import is_market_hours
 from trading_analysis.scheduler.runner import MarketScanScheduler
-from trading_analysis.storage import MarketJobRepository, NiftyAlertRepository
+from trading_analysis.storage import MarketJobRepository, NiftyAlertOutcomeRepository, NiftyAlertRepository, NiftyContextRepository
 from trading_analysis.web_app import ReusableThreadingHTTPServer, TradingRequestHandler
+from trading_analysis.web_services import AnalysisService
 
 
 class NiftyAutoScanTests(unittest.TestCase):
@@ -75,6 +76,23 @@ class NiftyAutoScanTests(unittest.TestCase):
 
             self.assertFalse(suppressed)
 
+    def test_duplicate_alert_suppressed_after_acknowledgement_within_window(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = NiftyAlertRepository(Path(tmp) / "auto.db")
+            alert = repo.create_alert(**_alert(score=80, severity="watch"))
+            repo.acknowledge_alert(alert["id"])
+
+            suppressed = repo.suppress_duplicate(
+                "strategy_candidate",
+                "nifty_bull_call_spread",
+                "bullish",
+                min_minutes=15,
+                score=85,
+                severity="watch",
+            )
+
+            self.assertTrue(suppressed)
+
     def test_market_job_start_finish_fail_stored(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = MarketJobRepository(Path(tmp) / "jobs.db")
@@ -86,6 +104,19 @@ class NiftyAutoScanTests(unittest.TestCase):
             self.assertEqual(finished["status"], "completed")
             self.assertEqual(failed["status"], "failed")
             self.assertEqual(len(repo.latest_jobs()), 2)
+            self.assertIn("+05:30", finished["started_at"])
+
+    def test_context_snapshot_and_candidates_save_load(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = NiftyContextRepository(Path(tmp) / "context.db")
+            context_id = repo.save_context_result(_context("bullish"))
+            candidate_ids = repo.save_strategy_candidates(context_id, [_candidate("nifty_bull_call_spread", "bullish", 85)])
+            snapshot = repo.load_context_snapshot(context_id)
+
+            self.assertEqual(snapshot["id"], context_id)
+            self.assertEqual(len(candidate_ids), 1)
+            self.assertEqual(snapshot["candidates"][0]["strategy_id"], "nifty_bull_call_spread")
+            self.assertIn("+05:30", snapshot["captured_at"])
 
     def test_scheduler_run_once_executes_jobs_in_order(self) -> None:
         fake = FakeJobs()
@@ -111,7 +142,16 @@ class NiftyAutoScanTests(unittest.TestCase):
                 return {"alert": {"id": alert_id, "is_active": False}}
 
             def alert_backtest(self, **kwargs):
-                return {"timeframe": kwargs["timeframe"], "metrics": {"overall": {"signals": 0}}, "rows": []}
+                return {"timeframe": kwargs["timeframe"], "saved_outcomes": 0, "metrics": {"overall": {"signals": 0}}, "rows": []}
+
+            def context_snapshots(self, limit=50):
+                return {"snapshots": [{"id": 9, "mode": "auto"}], "count": 1}
+
+            def context_snapshot(self, context_snapshot_id):
+                return {"snapshot": {"id": context_snapshot_id, "summary": {"points": []}}}
+
+            def alert_outcomes(self, alert_id):
+                return {"alert_id": alert_id, "outcomes": [{"alert_id": alert_id}], "count": 1}
 
             def start(self):
                 return self.status()
@@ -132,6 +172,9 @@ class NiftyAutoScanTests(unittest.TestCase):
             self.assertFalse(_http_json(f"{base}/api/nifty/auto/status")["running"])
             self.assertEqual(_http_json(f"{base}/api/nifty/alerts")["count"], 1)
             self.assertEqual(_http_json(f"{base}/api/nifty/alerts/backtest?timeframe=15minute")["timeframe"], "15minute")
+            self.assertEqual(_http_json(f"{base}/api/nifty/context-snapshots")["count"], 1)
+            self.assertEqual(_http_json(f"{base}/api/nifty/context-snapshots/9")["snapshot"]["id"], 9)
+            self.assertEqual(_http_json(f"{base}/api/nifty/alerts/7/outcomes")["count"], 1)
             self.assertFalse(_http_json(f"{base}/api/nifty/alerts/7/ack", {})["alert"]["is_active"])
             self.assertTrue(_http_json(f"{base}/api/nifty/auto/run-once", {"force": True})["ran"])
         finally:
@@ -174,6 +217,32 @@ class NiftyAutoScanTests(unittest.TestCase):
 
             json.dumps(payload)
             self.assertGreaterEqual(payload["metrics"]["overall"]["signals"], 1)
+            self.assertEqual(payload["saved_outcomes"], 1)
+            self.assertEqual(len(service.alert_outcomes(1)["outcomes"]), 1)
+
+    def test_alert_backtest_outcome_repository_deduplicates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = NiftyAlertOutcomeRepository(Path(tmp) / "outcomes.db")
+            row = {
+                "holding_bars": 3,
+                "entry_time": "2026-07-06T09:30:00",
+                "entry_price": 100,
+                "exit_time": "2026-07-06T10:15:00",
+                "exit_price": 103,
+                "forward_return_percent": 3,
+                "directional_return_percent": 3,
+                "max_favorable_percent": 3,
+                "max_adverse_percent": 0,
+                "success": True,
+                "status": "evaluated",
+            }
+
+            self.assertTrue(repo.save_alert_backtest_result(1, row, timeframe="15minute"))
+            self.assertFalse(repo.save_alert_backtest_result(1, row, timeframe="15minute"))
+            self.assertEqual(len(repo.load_alert_outcomes(1)), 1)
+
+    def test_public_option_chain_refresh_method_exists(self) -> None:
+        self.assertTrue(hasattr(AnalysisService, "refresh_option_chain_snapshot"))
 
 
 class FakeJobs:

@@ -5,7 +5,7 @@ from typing import Any, Callable
 
 from trading_analysis.nifty.service import NiftyDeskService
 from trading_analysis.scheduler.alerts import generate_nifty_alerts
-from trading_analysis.storage import DEFAULT_DB_PATH, MarketJobRepository, NiftyAlertRepository
+from trading_analysis.storage import DEFAULT_DB_PATH, MarketJobRepository, NiftyAlertRepository, NiftyContextRepository
 
 
 class NiftyMarketJobs:
@@ -14,10 +14,12 @@ class NiftyMarketJobs:
         nifty_service: NiftyDeskService | None = None,
         job_repository: MarketJobRepository | None = None,
         alert_repository: NiftyAlertRepository | None = None,
+        context_repository: NiftyContextRepository | None = None,
     ) -> None:
         self.nifty_service = nifty_service or NiftyDeskService()
         self.job_repository = job_repository or MarketJobRepository(DEFAULT_DB_PATH)
         self.alert_repository = alert_repository or NiftyAlertRepository(DEFAULT_DB_PATH)
+        self.context_repository = context_repository or NiftyContextRepository(DEFAULT_DB_PATH)
 
     def update_nifty_candles_job(self, refresh: bool = False) -> dict[str, Any]:
         return self._record(
@@ -40,7 +42,7 @@ class NiftyMarketJobs:
         return self._record(
             "run_nifty_context",
             {"mode": mode},
-            lambda: self.nifty_service.nifty_context(mode=mode, include_option_chain=True, include_iv=True),
+            lambda: self._run_nifty_context(mode=mode),
         )
 
     def run_nifty_opportunity_scan_job(self, mode: str = "auto", min_score: int = 70) -> dict[str, Any]:
@@ -89,23 +91,14 @@ class NiftyMarketJobs:
     def _update_nifty_option_chain(self, refresh: bool) -> dict[str, Any]:
         fetched: dict[str, Any] | None = None
         analysis_service = getattr(self.nifty_service, "analysis_service", None)
-        if refresh and analysis_service is not None and hasattr(analysis_service, "_option_chain"):
-            analysis, snapshot = analysis_service._option_chain(
-                "NIFTY",
-                previous_snapshot=None,
-                strikes_around=20,
+        if refresh and analysis_service is not None and hasattr(analysis_service, "refresh_option_chain_snapshot"):
+            fetched = analysis_service.refresh_option_chain_snapshot(
+                symbol="NIFTY",
                 expiry=None,
+                strikes_around=20,
                 all_strikes=False,
                 max_snapshots=5,
             )
-            fetched = {
-                "expiry": snapshot.get("expiry"),
-                "latest_snapshot": snapshot.get("latest_snapshot"),
-                "history_snapshot": snapshot.get("history_snapshot"),
-                "contracts": getattr(analysis, "contract_count", None),
-                "pcr_oi": getattr(analysis, "pcr_oi", None),
-                "max_pain": getattr(analysis, "max_pain", None),
-            }
         files = _latest_option_files(self.nifty_service.option_chain_dir)
         return {
             "symbol": "NIFTY",
@@ -114,6 +107,16 @@ class NiftyMarketJobs:
             "cached_snapshots": len(files),
             "latest_snapshot": str(files[0]) if files else None,
         }
+
+    def _run_nifty_context(self, mode: str) -> dict[str, Any]:
+        context = self.nifty_service.nifty_context(mode=mode, include_option_chain=True, include_iv=True)
+        warnings = list(context.get("warnings") or [])
+        try:
+            context["context_snapshot_id"] = self.context_repository.save_context_result(context)
+        except Exception as exc:
+            warnings.append(f"Context snapshot persistence failed: {exc}")
+        context["warnings"] = warnings
+        return context
 
     def _record_nifty_iv(self) -> dict[str, Any]:
         context = self.nifty_service.nifty_context(
@@ -138,10 +141,21 @@ class NiftyMarketJobs:
     def _run_nifty_opportunity_scan(self, mode: str, min_score: int) -> dict[str, Any]:
         context = self.nifty_service.nifty_strategy_suggestions(mode=mode, refresh=False)
         candidates = list(context.get("candidates") or [])
+        warnings = list(context.get("warnings") or [])
+        context_snapshot_id = None
+        candidate_ids: list[int] = []
+        try:
+            context_snapshot_id = self.context_repository.save_context_result(context)
+            candidate_ids = self.context_repository.save_strategy_candidates(context_snapshot_id, candidates)
+            context["context_snapshot_id"] = context_snapshot_id
+        except Exception as exc:
+            warnings.append(f"Context/candidate persistence failed: {exc}")
         generated = generate_nifty_alerts(context, candidates, min_score=min_score)
         created = []
         suppressed = 0
         for alert in generated:
+            if context_snapshot_id is not None:
+                alert["context_snapshot_id"] = context_snapshot_id
             if self.alert_repository.suppress_duplicate(
                 str(alert.get("alert_type") or ""),
                 alert.get("strategy_id"),
@@ -161,7 +175,9 @@ class NiftyMarketJobs:
             "alerts_created": len(created),
             "alerts_suppressed": suppressed,
             "alerts": created,
-            "warnings": context.get("warnings") or [],
+            "context_snapshot_id": context_snapshot_id,
+            "candidate_ids": candidate_ids,
+            "warnings": warnings,
             "errors": context.get("errors") or [],
         }
 

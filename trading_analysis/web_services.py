@@ -375,6 +375,37 @@ class AnalysisService:
             "snapshots": snapshots,
         }
 
+    def refresh_option_chain_snapshot(
+        self,
+        symbol: str = "NIFTY",
+        expiry: str | None = None,
+        strikes_around: int = 20,
+        all_strikes: bool = False,
+        max_snapshots: int = 5,
+    ) -> dict[str, Any]:
+        symbol = self.resolve_symbol(symbol)
+        analysis, snapshot = self._option_chain(
+            symbol=symbol,
+            previous_snapshot=None,
+            strikes_around=strikes_around,
+            expiry=expiry,
+            all_strikes=all_strikes,
+            max_snapshots=max_snapshots,
+        )
+        return {
+            "symbol": symbol,
+            "expiry": snapshot.get("expiry"),
+            "latest_snapshot": snapshot.get("latest_snapshot"),
+            "history_snapshot": snapshot.get("history_snapshot"),
+            "previous_snapshot": snapshot.get("previous_snapshot"),
+            "previous_snapshot_found": snapshot.get("previous_snapshot_found"),
+            "contracts": getattr(analysis, "contract_count", None),
+            "pcr_oi": getattr(analysis, "pcr_oi", None),
+            "max_pain": getattr(analysis, "max_pain", None),
+            "atm_iv": getattr(analysis, "atm_iv", None),
+            "buildup_analysis": snapshot.get("buildup_analysis"),
+        }
+
     def export_report(self, payload: dict[str, Any]) -> dict[str, str]:
         symbol = str(payload.get("symbol") or "REPORT").upper()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

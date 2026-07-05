@@ -16,6 +16,7 @@ const state = {
     payoff: null,
     backtest: null,
     alertBacktest: null,
+    snapshots: [],
     autoStatus: null,
     alerts: [],
     autoPollTimer: null,
@@ -36,6 +37,7 @@ function activateTab(name) {
   if (name === "nifty") {
     loadNiftyAutoStatus();
     loadNiftyAlerts();
+    loadNiftyContextSnapshots();
     startNiftyAutoPolling();
   } else {
     stopNiftyAutoPolling();
@@ -2077,6 +2079,7 @@ function startNiftyAutoPolling() {
   state.nifty.autoPollTimer = window.setInterval(() => {
     loadNiftyAutoStatus();
     loadNiftyAlerts();
+    loadNiftyContextSnapshots();
   }, 20000);
 }
 
@@ -2122,6 +2125,7 @@ function renderNiftyAlerts(data) {
         <td>${alert.direction || "-"}</td>
         <td>${alert.horizon || alert.mode || "-"}</td>
         <td>${alert.strategy_id || "-"}</td>
+        <td>${alert.context_snapshot_id || "-"}</td>
         <td>${fmt(alert.score)}</td>
         <td>${escapeHtml(alert.title)}</td>
         <td>${escapeHtml(alert.message)}</td>
@@ -2129,12 +2133,18 @@ function renderNiftyAlerts(data) {
         <td>${escapeHtml((alert.risks || []).join("; ") || "-")}</td>
         <td>${fmt(alert.trigger_level)}</td>
         <td>${fmt(alert.invalidation_level)}</td>
-        <td>${alert.is_active ? `<button class="linkBtn nifty-alert-ack" data-alert-id="${alert.id}">Acknowledge</button>` : "Ack"}</td>
+        <td>
+          ${alert.context_snapshot_id ? `<button class="linkBtn nifty-context-view" data-context-id="${alert.context_snapshot_id}">View Context</button>` : ""}
+          ${alert.is_active ? `<button class="linkBtn nifty-alert-ack" data-alert-id="${alert.id}">Acknowledge</button>` : "Ack"}
+        </td>
       </tr>
     `)
     .join("");
   document.querySelectorAll(".nifty-alert-ack").forEach((button) => {
     button.addEventListener("click", () => acknowledgeNiftyAlert(Number(button.dataset.alertId)));
+  });
+  document.querySelectorAll(".nifty-context-view").forEach((button) => {
+    button.addEventListener("click", () => viewNiftyContextSnapshot(Number(button.dataset.contextId)));
   });
 }
 
@@ -2149,6 +2159,7 @@ async function runNiftyAlertBacktest() {
     const data = await api(`/api/nifty/alerts/backtest?${params.toString()}`);
     state.nifty.alertBacktest = data;
     renderNiftyAlertBacktest(data);
+    await loadNiftyAlerts();
   } catch (error) {
     $("niftyAlertBacktestMeta").textContent = "Failed";
     setNotes([error.message], true);
@@ -2163,6 +2174,7 @@ function renderNiftyAlertBacktest(data) {
     ["Rows", fmtInt(overall.signals)],
     ["Accuracy", fmtPct(overall.accuracy)],
     ["Avg Directional", fmtPct(overall.avg_directional_return)],
+    ["Saved Outcomes", fmtInt(data.saved_outcomes)],
   ]
     .map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${value}</strong></div>`)
     .join("");
@@ -2197,6 +2209,50 @@ function renderNiftyAlertBacktest(data) {
     `)
     .join("");
   if ((data.warnings || []).length) setNotes(data.warnings);
+}
+
+async function loadNiftyContextSnapshots() {
+  try {
+    const data = await api("/api/nifty/context-snapshots?limit=10");
+    state.nifty.snapshots = data.snapshots || [];
+    renderNiftyContextSnapshots(data);
+  } catch (error) {
+    $("niftySnapshotMeta").textContent = "Failed";
+  }
+}
+
+async function viewNiftyContextSnapshot(contextId) {
+  try {
+    const data = await api(`/api/nifty/context-snapshots/${contextId}`);
+    const snapshot = data.snapshot || {};
+    const points = (snapshot.summary && snapshot.summary.points) || [];
+    setNotes([
+      `Context #${contextId}: spot ${fmt(snapshot.spot)}, intraday ${snapshot.intraday_bias}, swing ${snapshot.swing_bias}, positional ${snapshot.positional_bias}, option ${snapshot.option_bias}, IV ${snapshot.iv_regime}.`,
+      ...points,
+    ]);
+  } catch (error) {
+    setNotes([error.message], true);
+  }
+}
+
+function renderNiftyContextSnapshots(data) {
+  const rows = data.snapshots || [];
+  $("niftySnapshotMeta").textContent = `${rows.length} shown`;
+  $("niftySnapshotBody").innerHTML = rows
+    .map((row) => `
+      <tr>
+        <td>${row.id}</td>
+        <td>${fmtDateTime(row.captured_at)}</td>
+        <td>${row.mode || "-"}</td>
+        <td>${fmt(row.spot)}</td>
+        <td>${row.intraday_bias || "-"}</td>
+        <td>${row.swing_bias || "-"}</td>
+        <td>${row.positional_bias || "-"}</td>
+        <td>${row.option_bias || "-"}</td>
+        <td>${row.iv_regime || "-"}</td>
+      </tr>
+    `)
+    .join("");
 }
 
 function autoJobSummary(job) {

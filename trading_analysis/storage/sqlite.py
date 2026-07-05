@@ -6,11 +6,13 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 
 DEFAULT_DB_PATH = Path("data/db/trading_analysis.db")
 
 _SEVERITY_RANK = {"info": 1, "watch": 2, "important": 3, "risk": 4}
+IST = ZoneInfo("Asia/Kolkata")
 
 
 def initialize_database(path: str | Path = DEFAULT_DB_PATH) -> None:
@@ -76,6 +78,95 @@ def initialize_database(path: str | Path = DEFAULT_DB_PATH) -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_nifty_alerts_duplicate
             ON nifty_alerts(alert_type, strategy_id, direction, created_at DESC)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nifty_context_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                captured_at TEXT NOT NULL,
+                mode TEXT,
+                spot REAL,
+                intraday_bias TEXT,
+                swing_bias TEXT,
+                positional_bias TEXT,
+                option_bias TEXT,
+                iv_rank REAL,
+                iv_percentile REAL,
+                iv_regime TEXT,
+                technical_json TEXT,
+                options_json TEXT,
+                iv_json TEXT,
+                summary_json TEXT,
+                warnings_json TEXT,
+                errors_json TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_nifty_context_snapshots_captured
+            ON nifty_context_snapshots(captured_at DESC)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nifty_strategy_candidates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                context_snapshot_id INTEGER NOT NULL,
+                strategy_id TEXT,
+                label TEXT,
+                horizon TEXT,
+                structure TEXT,
+                suitability_score INTEGER,
+                confidence TEXT,
+                direction TEXT,
+                expiry_plan TEXT,
+                legs_json TEXT,
+                reasons_json TEXT,
+                risks_json TEXT,
+                confirmations_json TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_nifty_strategy_candidates_context
+            ON nifty_strategy_candidates(context_snapshot_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nifty_alert_outcomes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                alert_id INTEGER NOT NULL,
+                evaluated_at TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                horizon_bars INTEGER,
+                entry_time TEXT,
+                entry_price REAL,
+                exit_time TEXT,
+                exit_price REAL,
+                forward_return_percent REAL,
+                directional_return_percent REAL,
+                max_favorable_percent REAL,
+                max_adverse_percent REAL,
+                success INTEGER,
+                status TEXT,
+                notes TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_nifty_alert_outcomes_lookup
+            ON nifty_alert_outcomes(alert_id, timeframe, horizon_bars)
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_nifty_alert_outcomes_unique
+            ON nifty_alert_outcomes(alert_id, timeframe, horizon_bars, entry_time)
             """
         )
 
@@ -246,7 +337,6 @@ class NiftyAlertRepository:
                   AND COALESCE(strategy_id, '') = COALESCE(?, '')
                   AND COALESCE(direction, '') = COALESCE(?, '')
                   AND created_at >= ?
-                  AND is_active = 1
                 ORDER BY created_at DESC
                 """,
                 (alert_type, strategy_id, direction, cutoff),
@@ -262,6 +352,154 @@ class NiftyAlertRepository:
             if not materially_better and not more_severe:
                 return True
         return False
+
+
+class NiftyContextRepository:
+    def __init__(self, db_path: str | Path = DEFAULT_DB_PATH) -> None:
+        self.db_path = Path(db_path)
+        initialize_database(self.db_path)
+
+    def save_context_result(self, context_result: dict[str, Any]) -> int:
+        technical = context_result.get("technical") or {}
+        options = context_result.get("options") or {}
+        iv = context_result.get("iv") or {}
+        with _connection(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO nifty_context_snapshots(
+                    captured_at, mode, spot, intraday_bias, swing_bias, positional_bias,
+                    option_bias, iv_rank, iv_percentile, iv_regime, technical_json,
+                    options_json, iv_json, summary_json, warnings_json, errors_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _now(),
+                    context_result.get("mode"),
+                    _optional_float(technical.get("spot") or options.get("spot")),
+                    technical.get("bias_intraday"),
+                    technical.get("bias_swing"),
+                    technical.get("bias_positional"),
+                    options.get("option_bias"),
+                    _optional_float(iv.get("iv_rank")),
+                    _optional_float(iv.get("iv_percentile")),
+                    iv.get("iv_regime"),
+                    _json(technical),
+                    _json(options),
+                    _json(iv),
+                    _json(context_result.get("summary") or {}),
+                    _json(context_result.get("warnings") or []),
+                    _json(context_result.get("errors") or []),
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def save_strategy_candidates(self, context_snapshot_id: int, candidates: list[dict[str, Any]]) -> list[int]:
+        ids: list[int] = []
+        with _connection(self.db_path) as conn:
+            for candidate in candidates:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO nifty_strategy_candidates(
+                        context_snapshot_id, strategy_id, label, horizon, structure,
+                        suitability_score, confidence, direction, expiry_plan, legs_json,
+                        reasons_json, risks_json, confirmations_json
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        context_snapshot_id,
+                        candidate.get("strategy_id"),
+                        candidate.get("label"),
+                        candidate.get("horizon"),
+                        candidate.get("structure"),
+                        _optional_int(candidate.get("suitability_score")),
+                        candidate.get("confidence"),
+                        _candidate_direction(candidate),
+                        candidate.get("expiry_plan"),
+                        _json(candidate.get("legs") or []),
+                        _json(candidate.get("reasons") or []),
+                        _json(candidate.get("risks") or []),
+                        _json(candidate.get("required_confirmations") or []),
+                    ),
+                )
+                ids.append(int(cursor.lastrowid))
+        return ids
+
+    def load_context_snapshot(self, context_snapshot_id: int) -> dict[str, Any]:
+        with _connection(self.db_path) as conn:
+            snapshot = conn.execute(
+                "SELECT * FROM nifty_context_snapshots WHERE id = ?",
+                (context_snapshot_id,),
+            ).fetchone()
+            candidates = conn.execute(
+                "SELECT * FROM nifty_strategy_candidates WHERE context_snapshot_id = ? ORDER BY suitability_score DESC",
+                (context_snapshot_id,),
+            ).fetchall()
+        if snapshot is None:
+            return {}
+        return {**_context_row(snapshot), "candidates": [_candidate_row(row) for row in candidates]}
+
+    def list_context_snapshots(self, limit: int = 50) -> list[dict[str, Any]]:
+        with _connection(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT * FROM nifty_context_snapshots ORDER BY captured_at DESC, id DESC LIMIT ?",
+                (max(1, int(limit)),),
+            ).fetchall()
+        return [_context_row(row) for row in rows]
+
+
+class NiftyAlertOutcomeRepository:
+    def __init__(self, db_path: str | Path = DEFAULT_DB_PATH) -> None:
+        self.db_path = Path(db_path)
+        initialize_database(self.db_path)
+
+    def save_alert_backtest_result(self, alert_id: int, row: dict[str, Any], timeframe: str | None = None) -> bool:
+        with _connection(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO nifty_alert_outcomes(
+                    alert_id, evaluated_at, timeframe, horizon_bars, entry_time, entry_price,
+                    exit_time, exit_price, forward_return_percent, directional_return_percent,
+                    max_favorable_percent, max_adverse_percent, success, status, notes
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    alert_id,
+                    _now(),
+                    timeframe or row.get("timeframe") or "",
+                    _optional_int(row.get("holding_bars")),
+                    _string_or_none(row.get("entry_time")),
+                    _optional_float(row.get("entry_price")),
+                    _string_or_none(row.get("exit_time")),
+                    _optional_float(row.get("exit_price")),
+                    _optional_float(row.get("forward_return_percent")),
+                    _optional_float(row.get("directional_return_percent")),
+                    _optional_float(row.get("max_favorable_percent")),
+                    _optional_float(row.get("max_adverse_percent")),
+                    1 if row.get("success") else 0 if row.get("success") is not None else None,
+                    row.get("status"),
+                    row.get("reason") or row.get("notes"),
+                ),
+            )
+            return bool(cursor.rowcount)
+
+    def load_alert_outcomes(self, alert_id: int) -> list[dict[str, Any]]:
+        with _connection(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT * FROM nifty_alert_outcomes WHERE alert_id = ? ORDER BY evaluated_at DESC",
+                (alert_id,),
+            ).fetchall()
+        return [_outcome_row(row) for row in rows]
+
+    def list_recent_outcomes(self, limit: int = 100) -> list[dict[str, Any]]:
+        with _connection(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT * FROM nifty_alert_outcomes ORDER BY evaluated_at DESC, id DESC LIMIT ?",
+                (max(1, int(limit)),),
+            ).fetchall()
+        return [_outcome_row(row) for row in rows]
 
 
 def _connect(path: Path) -> sqlite3.Connection:
@@ -291,7 +529,7 @@ def _connection(path: Path):
 
 
 def _now() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return datetime.now(IST).isoformat(timespec="seconds")
 
 
 def _json(value: Any) -> str:
@@ -311,6 +549,37 @@ def _duration_ms(started_at: str, finished_at: str) -> int:
     start = datetime.fromisoformat(started_at)
     finish = datetime.fromisoformat(finished_at)
     return int((finish - start).total_seconds() * 1000)
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    return float(value)
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    return int(float(value))
+
+
+def _string_or_none(value: Any) -> str | None:
+    if value is None or value == "":
+        return None
+    return str(value)
+
+
+def _candidate_direction(candidate: dict[str, Any]) -> str | None:
+    text = " ".join(str(candidate.get(key) or "") for key in ("strategy_id", "label", "required_view", "structure")).lower()
+    if "bull" in text:
+        return "bullish"
+    if "bear" in text:
+        return "bearish"
+    if "neutral" in text or "condor" in text or "strangle" in text or "straddle" in text:
+        return "neutral"
+    if "volatility" in text:
+        return "volatile"
+    return None
 
 
 def _job_row(row: sqlite3.Row) -> dict[str, Any]:
@@ -350,4 +619,66 @@ def _alert_row(row: sqlite3.Row) -> dict[str, Any]:
         "context_snapshot_id": row["context_snapshot_id"],
         "is_active": bool(row["is_active"]),
         "acknowledged_at": row["acknowledged_at"],
+    }
+
+
+def _context_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "captured_at": row["captured_at"],
+        "mode": row["mode"],
+        "spot": row["spot"],
+        "intraday_bias": row["intraday_bias"],
+        "swing_bias": row["swing_bias"],
+        "positional_bias": row["positional_bias"],
+        "option_bias": row["option_bias"],
+        "iv_rank": row["iv_rank"],
+        "iv_percentile": row["iv_percentile"],
+        "iv_regime": row["iv_regime"],
+        "technical": _loads(row["technical_json"], {}),
+        "options": _loads(row["options_json"], {}),
+        "iv": _loads(row["iv_json"], {}),
+        "summary": _loads(row["summary_json"], {}),
+        "warnings": _loads(row["warnings_json"], []),
+        "errors": _loads(row["errors_json"], []),
+    }
+
+
+def _candidate_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "context_snapshot_id": row["context_snapshot_id"],
+        "strategy_id": row["strategy_id"],
+        "label": row["label"],
+        "horizon": row["horizon"],
+        "structure": row["structure"],
+        "suitability_score": row["suitability_score"],
+        "confidence": row["confidence"],
+        "direction": row["direction"],
+        "expiry_plan": row["expiry_plan"],
+        "legs": _loads(row["legs_json"], []),
+        "reasons": _loads(row["reasons_json"], []),
+        "risks": _loads(row["risks_json"], []),
+        "required_confirmations": _loads(row["confirmations_json"], []),
+    }
+
+
+def _outcome_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "alert_id": row["alert_id"],
+        "evaluated_at": row["evaluated_at"],
+        "timeframe": row["timeframe"],
+        "horizon_bars": row["horizon_bars"],
+        "entry_time": row["entry_time"],
+        "entry_price": row["entry_price"],
+        "exit_time": row["exit_time"],
+        "exit_price": row["exit_price"],
+        "forward_return_percent": row["forward_return_percent"],
+        "directional_return_percent": row["directional_return_percent"],
+        "max_favorable_percent": row["max_favorable_percent"],
+        "max_adverse_percent": row["max_adverse_percent"],
+        "success": bool(row["success"]) if row["success"] is not None else None,
+        "status": row["status"],
+        "notes": row["notes"],
     }

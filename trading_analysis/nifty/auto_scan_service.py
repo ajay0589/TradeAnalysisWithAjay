@@ -11,7 +11,13 @@ from trading_analysis.nifty.service import NiftyDeskService
 from trading_analysis.scheduler.jobs import NiftyMarketJobs
 from trading_analysis.scheduler.market_hours import is_market_hours
 from trading_analysis.scheduler.runner import MarketScanScheduler
-from trading_analysis.storage import DEFAULT_DB_PATH, MarketJobRepository, NiftyAlertRepository
+from trading_analysis.storage import (
+    DEFAULT_DB_PATH,
+    MarketJobRepository,
+    NiftyAlertOutcomeRepository,
+    NiftyAlertRepository,
+    NiftyContextRepository,
+)
 
 
 class NiftyAutoScanService:
@@ -23,11 +29,14 @@ class NiftyAutoScanService:
     ) -> None:
         self.job_repository = MarketJobRepository(db_path)
         self.alert_repository = NiftyAlertRepository(db_path)
+        self.context_repository = NiftyContextRepository(db_path)
+        self.outcome_repository = NiftyAlertOutcomeRepository(db_path)
         self.nifty_service = nifty_service or NiftyDeskService()
         self.job_runner = NiftyMarketJobs(
             nifty_service=self.nifty_service,
             job_repository=self.job_repository,
             alert_repository=self.alert_repository,
+            context_repository=self.context_repository,
         )
         self.scheduler = scheduler or MarketScanScheduler(job_runner=self.job_runner)
 
@@ -55,6 +64,18 @@ class NiftyAutoScanService:
 
     def acknowledge_alert(self, alert_id: int) -> dict[str, Any]:
         return {"alert": self.alert_repository.acknowledge_alert(alert_id)}
+
+    def context_snapshots(self, limit: int = 50) -> dict[str, Any]:
+        rows = self.context_repository.list_context_snapshots(limit=limit)
+        return {"snapshots": rows, "count": len(rows)}
+
+    def context_snapshot(self, context_snapshot_id: int) -> dict[str, Any]:
+        snapshot = self.context_repository.load_context_snapshot(context_snapshot_id)
+        return {"snapshot": snapshot} if snapshot else {"error": "Context snapshot not found", "id": context_snapshot_id}
+
+    def alert_outcomes(self, alert_id: int) -> dict[str, Any]:
+        rows = self.outcome_repository.load_alert_outcomes(alert_id)
+        return {"alert_id": alert_id, "outcomes": rows, "count": len(rows)}
 
     def alert_backtest(
         self,
@@ -84,9 +105,16 @@ class NiftyAutoScanService:
             candles = []
             warnings.append(f"Missing NIFTY {timeframe} candles at {path}.")
         payload = backtest_nifty_alert_signals(filtered, candles, horizons=horizons or list(DEFAULT_ALERT_HORIZONS))
+        saved_outcomes = 0
+        for row in payload.get("rows") or []:
+            if row.get("status") != "evaluated" or row.get("alert_id") is None:
+                continue
+            if self.outcome_repository.save_alert_backtest_result(int(row["alert_id"]), row, timeframe=timeframe):
+                saved_outcomes += 1
         return to_jsonable(
             {
                 **payload,
+                "saved_outcomes": saved_outcomes,
                 "timeframe": timeframe,
                 "alert_filter": {
                     "limit": limit,

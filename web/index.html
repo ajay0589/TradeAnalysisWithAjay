@@ -593,6 +593,7 @@
                         <th title="Directional or neutral/volatile read.">Direction</th>
                         <th title="Horizon from the matched strategy candidate: intraday, swing, positional, or auto context.">Horizon</th>
                         <th title="Related strategy candidate when applicable.">Strategy</th>
+                        <th title="SQLite context snapshot linked to this alert. Use View Context to inspect exact technical/options/IV data.">Context</th>
                         <th title="Suitability score from 0 to 100 where available.">Score</th>
                         <th title="Short alert title.">Title</th>
                         <th title="Why the alert exists.">Message</th>
@@ -600,7 +601,7 @@
                         <th title="Risk context and caveats.">Risks</th>
                         <th title="Reference level for confirmation where available.">Trigger</th>
                         <th title="Reference level where the setup context weakens.">Invalidation</th>
-                        <th title="Mark alert inactive after reviewing it.">Action</th>
+                        <th title="Inspect linked context or mark alert inactive after reviewing it.">Action</th>
                       </tr>
                     </thead>
                     <tbody id="niftyAlertsBody"></tbody>
@@ -661,6 +662,31 @@
                       </tr>
                     </thead>
                     <tbody id="niftyAlertBacktestBody"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2 title="Recent saved NIFTY context snapshots produced by Auto Scan jobs.">Recent Context Snapshots</h2>
+                  <span id="niftySnapshotMeta">Not loaded</span>
+                </div>
+                <div class="wide-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Captured</th>
+                        <th>Mode</th>
+                        <th>Spot</th>
+                        <th>Intraday</th>
+                        <th>Swing</th>
+                        <th>Positional</th>
+                        <th>Option</th>
+                        <th>IV Regime</th>
+                      </tr>
+                    </thead>
+                    <tbody id="niftySnapshotBody"></tbody>
                   </table>
                 </div>
               </section>

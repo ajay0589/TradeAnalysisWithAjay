@@ -181,6 +181,16 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 )
             elif parsed.path == "/api/nifty/auto/status":
                 self._send_json(self.nifty_auto_service.status())
+            elif parsed.path == "/api/nifty/context-snapshots":
+                params = parse_qs(parsed.query)
+                self._send_json(
+                    self.nifty_auto_service.context_snapshots(
+                        limit=_optional_int(params.get("limit", ["50"])[0]) or 50,
+                    )
+                )
+            elif parsed.path.startswith("/api/nifty/context-snapshots/"):
+                snapshot_id = _tail_id_from_path(parsed.path, "context-snapshots")
+                self._send_json(self.nifty_auto_service.context_snapshot(snapshot_id))
             elif parsed.path == "/api/nifty/alerts/backtest":
                 params = parse_qs(parsed.query)
                 self._send_json(
@@ -194,6 +204,9 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         alert_type=params.get("alert_type", [None])[0] or None,
                     )
                 )
+            elif parsed.path.startswith("/api/nifty/alerts/") and parsed.path.endswith("/outcomes"):
+                alert_id = _alert_id_from_path(parsed.path)
+                self._send_json(self.nifty_auto_service.alert_outcomes(alert_id))
             elif parsed.path == "/api/nifty/alerts":
                 params = parse_qs(parsed.query)
                 self._send_json(
@@ -393,6 +406,12 @@ def _alert_id_from_path(path: str) -> int:
     if len(parts) < 4:
         raise ValueError("Missing alert id.")
     return int(parts[3])
+
+
+def _tail_id_from_path(path: str, marker: str) -> int:
+    parts = [part for part in path.split("/") if part]
+    index = parts.index(marker)
+    return int(parts[index + 1])
 
 
 def main() -> None:

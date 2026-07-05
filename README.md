@@ -278,6 +278,15 @@ SQLite tables:
 
 - `market_jobs`: every scheduler job run, status, duration, error, and result JSON.
 - `nifty_alerts`: generated NIFTY context/setup alerts, reasons, risks, trigger/invalidation levels, and acknowledgement state.
+- `nifty_context_snapshots`: exact technical, option-chain, IV, summary, warning, and error context captured during Auto Scan.
+- `nifty_strategy_candidates`: strategy candidates linked to the context snapshot that produced them.
+- `nifty_alert_outcomes`: saved signal-quality backtest outcomes for stored alerts.
+
+Alert traceability:
+
+- Every newly generated alert can link to a `context_snapshot_id`.
+- Use the NIFTY Desk `View Context` action to inspect the exact technical/options/IV context behind an alert.
+- Recent context snapshots are shown in the NIFTY Desk so you can audit what Auto Scan saw at that time.
 
 Web UI usage:
 
@@ -302,6 +311,7 @@ Alert signal-quality backtest:
 - Evaluates stored NIFTY alerts against cached NIFTY spot candles.
 - Uses the next candle after the alert as the entry reference to avoid look-ahead bias.
 - Reports directional accuracy, average forward move, average directional move, max favorable move, and max adverse move by holding window.
+- Saves evaluated alert outcomes to local SQLite so each alert can build a review history over time.
 - This is not an option strategy P&L backtest. It does not model option premium, IV decay, margin, slippage, or exact strike selection.
 
 Auto-scan limitations:

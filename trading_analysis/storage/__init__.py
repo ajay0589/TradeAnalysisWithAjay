@@ -2,6 +2,8 @@
 
 from trading_analysis.storage.sqlite import (
     DEFAULT_DB_PATH,
+    NiftyAlertOutcomeRepository,
+    NiftyContextRepository,
     MarketJobRepository,
     NiftyAlertRepository,
     initialize_database,
@@ -9,6 +11,8 @@ from trading_analysis.storage.sqlite import (
 
 __all__ = [
     "DEFAULT_DB_PATH",
+    "NiftyAlertOutcomeRepository",
+    "NiftyContextRepository",
     "MarketJobRepository",
     "NiftyAlertRepository",
     "initialize_database",
