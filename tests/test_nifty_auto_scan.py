@@ -11,11 +11,21 @@ from zoneinfo import ZoneInfo
 
 from trading_analysis.models import Candle
 from trading_analysis.nifty.alert_backtest import backtest_nifty_alert_signals
+from trading_analysis.nifty.iv_context import build_nifty_iv_context
 from trading_analysis.nifty.auto_scan_service import NiftyAutoScanService
 from trading_analysis.scheduler.alerts import generate_nifty_alerts
+from trading_analysis.scheduler.jobs import NiftyMarketJobs
 from trading_analysis.scheduler.market_hours import is_market_hours
 from trading_analysis.scheduler.runner import MarketScanScheduler
-from trading_analysis.storage import MarketJobRepository, NiftyAlertOutcomeRepository, NiftyAlertRepository, NiftyContextRepository
+from trading_analysis.storage import (
+    MarketJobRepository,
+    NiftyAlertOutcomeRepository,
+    NiftyAlertRepository,
+    NiftyCandleRepository,
+    NiftyContextRepository,
+    NiftyIVObservationRepository,
+    NiftyOptionChainRepository,
+)
 from trading_analysis.web_app import ReusableThreadingHTTPServer, TradingRequestHandler
 from trading_analysis.web_services import AnalysisService
 
@@ -153,6 +163,23 @@ class NiftyAutoScanTests(unittest.TestCase):
             def alert_outcomes(self, alert_id):
                 return {"alert_id": alert_id, "outcomes": [{"alert_id": alert_id}], "count": 1}
 
+            def latest_data(self):
+                return {
+                    "latest_candles": {"15minute": "2026-07-06T09:30:00"},
+                    "latest_option_snapshot": {"id": 3},
+                    "latest_iv_observation": {"id": 4},
+                    "counts": {"candles": {"15minute": 2}, "context_snapshots": 1, "alerts": 1},
+                }
+
+            def option_snapshots(self, limit=20, expiry=None):
+                return {"snapshots": [{"id": 3, "expiry": expiry}], "count": 1}
+
+            def option_snapshot(self, snapshot_id):
+                return {"snapshot": {"id": snapshot_id}, "rows": [{"strike": 24500}], "row_count": 1}
+
+            def iv_history(self, lookback_days=252):
+                return {"observations": [{"atm_iv": 15}], "count": 1, "lookback_days": lookback_days}
+
             def start(self):
                 return self.status()
 
@@ -175,6 +202,10 @@ class NiftyAutoScanTests(unittest.TestCase):
             self.assertEqual(_http_json(f"{base}/api/nifty/context-snapshots")["count"], 1)
             self.assertEqual(_http_json(f"{base}/api/nifty/context-snapshots/9")["snapshot"]["id"], 9)
             self.assertEqual(_http_json(f"{base}/api/nifty/alerts/7/outcomes")["count"], 1)
+            self.assertEqual(_http_json(f"{base}/api/nifty/data/latest")["latest_option_snapshot"]["id"], 3)
+            self.assertEqual(_http_json(f"{base}/api/nifty/option-snapshots")["count"], 1)
+            self.assertEqual(_http_json(f"{base}/api/nifty/option-snapshots/3")["row_count"], 1)
+            self.assertEqual(_http_json(f"{base}/api/nifty/iv-history?lookback_days=30")["lookback_days"], 30)
             self.assertFalse(_http_json(f"{base}/api/nifty/alerts/7/ack", {})["alert"]["is_active"])
             self.assertTrue(_http_json(f"{base}/api/nifty/auto/run-once", {"force": True})["ran"])
         finally:
@@ -244,6 +275,125 @@ class NiftyAutoScanTests(unittest.TestCase):
     def test_public_option_chain_refresh_method_exists(self) -> None:
         self.assertTrue(hasattr(AnalysisService, "refresh_option_chain_snapshot"))
 
+    def test_nifty_candle_repository_upsert_and_load(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = NiftyCandleRepository(Path(tmp) / "data.db")
+            candles = _candles([100, 101, 102])
+
+            self.assertEqual(repo.upsert_candles("NIFTY", "15minute", candles), 3)
+            loaded = repo.load_candles("NIFTY", "15minute")
+
+            self.assertEqual(len(loaded), 3)
+            self.assertEqual(loaded[-1].close, 102)
+            self.assertEqual(repo.latest_timestamp("NIFTY", "15minute"), candles[-1].timestamp.isoformat(timespec="seconds"))
+            self.assertEqual(repo.counts("NIFTY")["15minute"], 3)
+
+    def test_option_chain_snapshot_and_rows_save_load(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = NiftyOptionChainRepository(Path(tmp) / "options.db")
+            analysis = {
+                "symbol": "NIFTY",
+                "expiry": "2026-07-09",
+                "spot": 24510,
+                "pcr_oi": 1.15,
+                "max_pain": 24500,
+                "atm_iv": 14.5,
+                "rows": _option_rows(),
+            }
+
+            snapshot_id = repo.save_snapshot(analysis, raw_file="data/raw/option_chain/NIFTY_2026-07-09.csv")
+            saved_rows = repo.save_rows(snapshot_id, analysis["rows"])
+            latest = repo.load_latest_snapshot("NIFTY", "2026-07-09")
+            rows = repo.load_snapshot_rows(snapshot_id)
+
+            self.assertGreater(snapshot_id, 0)
+            self.assertEqual(saved_rows, 2)
+            self.assertEqual(latest["id"], snapshot_id)
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["option_type"], "CE")
+
+    def test_iv_observation_repository_save_load(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = NiftyIVObservationRepository(Path(tmp) / "iv.db")
+            observation_id = repo.record_observation(
+                expiry="2026-07-09",
+                atm_strike=24500,
+                atm_iv=15.2,
+                captured_at="2026-07-06T10:00:00+05:30",
+            )
+
+            latest = repo.latest("NIFTY")
+            history = repo.load_history("NIFTY", lookback_days=30)
+
+            self.assertGreater(observation_id, 0)
+            self.assertEqual(latest["atm_iv"], 15.2)
+            self.assertEqual(len(history), 1)
+
+    def test_iv_context_prefers_database_observations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = NiftyIVObservationRepository(Path(tmp) / "iv_context.db")
+            now = datetime.now(ZoneInfo("Asia/Kolkata"))
+            for index in range(35):
+                repo.record_observation(
+                    expiry="2026-07-09",
+                    atm_iv=10 + index * 0.2,
+                    captured_at=(now - timedelta(days=34 - index)).isoformat(timespec="seconds"),
+                )
+
+            context = build_nifty_iv_context(current_atm_iv=17, iv_repository=repo)
+
+            self.assertTrue(context.enough_history)
+            self.assertIsNotNone(context.iv_rank)
+            self.assertIn("35 observation", context.notes[0])
+
+    def test_auto_scan_job_persists_option_snapshot_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            option_file = root / "NIFTY_2026-07-09.csv"
+            _write_option_csv(option_file)
+            db_path = root / "jobs.db"
+            service = FakeNiftyDeskForJobs(root, option_file)
+            jobs = NiftyMarketJobs(
+                nifty_service=service,
+                job_repository=MarketJobRepository(db_path),
+                alert_repository=NiftyAlertRepository(db_path),
+                context_repository=NiftyContextRepository(db_path),
+                candle_repository=NiftyCandleRepository(db_path),
+                option_repository=NiftyOptionChainRepository(db_path),
+                iv_repository=NiftyIVObservationRepository(db_path),
+            )
+
+            payload = jobs.update_nifty_option_chain_job(refresh=True)
+
+            self.assertGreater(payload["result"]["option_snapshot_id"], 0)
+            self.assertEqual(payload["result"]["saved_rows"], 2)
+
+    def test_alert_metadata_links_latest_market_data_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "links.db"
+            candle_repo = NiftyCandleRepository(db_path)
+            option_repo = NiftyOptionChainRepository(db_path)
+            iv_repo = NiftyIVObservationRepository(db_path)
+            candle_repo.upsert_candles("NIFTY", "15minute", _candles([100, 101, 102]))
+            snapshot_id = option_repo.save_snapshot({"symbol": "NIFTY", "expiry": "2026-07-09", "rows": _option_rows()})
+            iv_id = iv_repo.record_observation(expiry="2026-07-09", atm_iv=15.5, source_snapshot_id=snapshot_id)
+            jobs = NiftyMarketJobs(
+                nifty_service=FakeNiftyDeskForJobs(Path(tmp), None),
+                job_repository=MarketJobRepository(db_path),
+                alert_repository=NiftyAlertRepository(db_path),
+                context_repository=NiftyContextRepository(db_path),
+                candle_repository=candle_repo,
+                option_repository=option_repo,
+                iv_repository=iv_repo,
+            )
+
+            payload = jobs.run_nifty_opportunity_scan_job(mode="auto", min_score=70)
+            alert = payload["result"]["alerts"][0]
+
+            self.assertEqual(alert["metadata"]["latest_option_snapshot_id"], snapshot_id)
+            self.assertEqual(alert["metadata"]["latest_iv_observation_id"], iv_id)
+            self.assertIsNotNone(alert["metadata"]["latest_candle_timestamp"])
+
 
 class FakeJobs:
     def __init__(self) -> None:
@@ -291,6 +441,39 @@ class FakeScheduler:
 class FakeNiftyDeskService:
     def __init__(self, candle_root: Path) -> None:
         self.candle_root = candle_root
+
+
+class FakeAnalysisServiceForJobs:
+    def __init__(self, option_file: Path | None) -> None:
+        self.option_file = option_file
+
+    def refresh_option_chain_snapshot(self, **kwargs):
+        if self.option_file is None:
+            return {}
+        return {
+            "symbol": "NIFTY",
+            "expiry": "2026-07-09",
+            "latest_snapshot": str(self.option_file),
+            "spot": 24510,
+            "pcr_oi": 1.1,
+            "max_pain": 24500,
+            "atm_iv": 15.0,
+        }
+
+
+class FakeNiftyDeskForJobs:
+    def __init__(self, root: Path, option_file: Path | None) -> None:
+        self.candle_root = root / "candles"
+        self.option_chain_dir = root
+        self.analysis_service = FakeAnalysisServiceForJobs(option_file)
+
+    def nifty_context(self, **kwargs):
+        return _context("bullish")
+
+    def nifty_strategy_suggestions(self, **kwargs):
+        context = _context("bullish")
+        context["candidates"] = [_candidate("nifty_bull_call_spread", "bullish", 85)]
+        return context
 
 
 def _context(bias: str) -> dict:
@@ -385,3 +568,56 @@ def _write_candle_csv(path: Path, candles: list[Candle]) -> None:
             f"{candle.timestamp.isoformat()},{candle.open},{candle.high},{candle.low},{candle.close},{candle.volume},"
         )
     path.write_text("\n".join(rows), encoding="utf-8")
+
+
+def _option_rows() -> list[dict]:
+    return [
+        {
+            "snapshot_time": "2026-07-06T10:00:00+05:30",
+            "strike": "24500",
+            "option_type": "CE",
+            "tradingsymbol": "NIFTY2670924500CE",
+            "last_price": "80",
+            "previous_close": "75",
+            "price_change": "5",
+            "oi": "1000",
+            "previous_oi": "900",
+            "oi_change": "100",
+            "oi_change_percent": "11.11",
+            "implied_volatility": "15",
+            "iv_change": "0.5",
+            "volume": "500",
+            "bid_price": "79",
+            "ask_price": "81",
+            "buildup": "short_build_up",
+        },
+        {
+            "snapshot_time": "2026-07-06T10:00:00+05:30",
+            "strike": "24500",
+            "option_type": "PE",
+            "tradingsymbol": "NIFTY2670924500PE",
+            "last_price": "70",
+            "previous_close": "72",
+            "price_change": "-2",
+            "oi": "1200",
+            "previous_oi": "1000",
+            "oi_change": "200",
+            "oi_change_percent": "20",
+            "implied_volatility": "15.5",
+            "iv_change": "0.3",
+            "volume": "650",
+            "bid_price": "69",
+            "ask_price": "71",
+            "buildup": "long_build_up",
+        },
+    ]
+
+
+def _write_option_csv(path: Path) -> None:
+    rows = _option_rows()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    headers = list(rows[0].keys())
+    lines = [",".join(headers)]
+    for row in rows:
+        lines.append(",".join(str(row.get(header, "")) for header in headers))
+    path.write_text("\n".join(lines), encoding="utf-8")

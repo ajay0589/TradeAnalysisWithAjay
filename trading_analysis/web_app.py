@@ -181,6 +181,26 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 )
             elif parsed.path == "/api/nifty/auto/status":
                 self._send_json(self.nifty_auto_service.status())
+            elif parsed.path == "/api/nifty/data/latest":
+                self._send_json(self.nifty_auto_service.latest_data())
+            elif parsed.path == "/api/nifty/option-snapshots":
+                params = parse_qs(parsed.query)
+                self._send_json(
+                    self.nifty_auto_service.option_snapshots(
+                        limit=_optional_int(params.get("limit", ["20"])[0]) or 20,
+                        expiry=params.get("expiry", [None])[0] or None,
+                    )
+                )
+            elif parsed.path.startswith("/api/nifty/option-snapshots/"):
+                snapshot_id = _tail_id_from_path(parsed.path, "option-snapshots")
+                self._send_json(self.nifty_auto_service.option_snapshot(snapshot_id))
+            elif parsed.path == "/api/nifty/iv-history":
+                params = parse_qs(parsed.query)
+                self._send_json(
+                    self.nifty_auto_service.iv_history(
+                        lookback_days=_optional_int(params.get("lookback_days", ["252"])[0]) or 252,
+                    )
+                )
             elif parsed.path == "/api/nifty/context-snapshots":
                 params = parse_qs(parsed.query)
                 self._send_json(

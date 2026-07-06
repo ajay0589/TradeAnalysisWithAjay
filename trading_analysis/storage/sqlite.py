@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
+
+from trading_analysis.models import Candle
 
 
 DEFAULT_DB_PATH = Path("data/db/trading_analysis.db")
@@ -61,6 +63,7 @@ def initialize_database(path: str | Path = DEFAULT_DB_PATH) -> None:
                 expiry TEXT,
                 reasons_json TEXT,
                 risks_json TEXT,
+                metadata_json TEXT,
                 context_snapshot_id INTEGER,
                 is_active INTEGER NOT NULL DEFAULT 1,
                 acknowledged_at TEXT
@@ -68,6 +71,7 @@ def initialize_database(path: str | Path = DEFAULT_DB_PATH) -> None:
             """
         )
         _ensure_column(conn, "nifty_alerts", "horizon", "TEXT")
+        _ensure_column(conn, "nifty_alerts", "metadata_json", "TEXT")
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_nifty_alerts_recent
@@ -169,6 +173,116 @@ def initialize_database(path: str | Path = DEFAULT_DB_PATH) -> None:
             ON nifty_alert_outcomes(alert_id, timeframe, horizon_bars, entry_time)
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nifty_candles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL DEFAULT 'NIFTY',
+                timeframe TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                oi INTEGER,
+                source TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(symbol, timeframe, ts)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_nifty_candles_lookup
+            ON nifty_candles(symbol, timeframe, ts)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nifty_option_chain_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL DEFAULT 'NIFTY',
+                expiry TEXT,
+                spot REAL,
+                captured_at TEXT NOT NULL,
+                source TEXT,
+                pcr_oi REAL,
+                pcr_volume REAL,
+                max_pain REAL,
+                atm_strike REAL,
+                atm_iv REAL,
+                atm_iv_change REAL,
+                total_ce_oi INTEGER,
+                total_pe_oi INTEGER,
+                total_ce_oi_change INTEGER,
+                total_pe_oi_change INTEGER,
+                raw_file TEXT,
+                UNIQUE(symbol, expiry, captured_at)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_nifty_option_snapshots_lookup
+            ON nifty_option_chain_snapshots(symbol, expiry, captured_at)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nifty_option_chain_rows (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_id INTEGER NOT NULL,
+                strike REAL,
+                option_type TEXT,
+                tradingsymbol TEXT,
+                last_price REAL,
+                previous_close REAL,
+                price_change REAL,
+                oi INTEGER,
+                previous_oi INTEGER,
+                oi_change INTEGER,
+                oi_change_percent REAL,
+                implied_volatility REAL,
+                iv_change REAL,
+                volume INTEGER,
+                bid_price REAL,
+                ask_price REAL,
+                buildup TEXT,
+                UNIQUE(snapshot_id, strike, option_type)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_nifty_option_rows_lookup
+            ON nifty_option_chain_rows(snapshot_id, strike, option_type)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nifty_iv_observations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL DEFAULT 'NIFTY',
+                captured_at TEXT NOT NULL,
+                expiry TEXT,
+                days_to_expiry INTEGER,
+                atm_strike REAL,
+                atm_iv REAL,
+                weekly_atm_iv REAL,
+                monthly_atm_iv REAL,
+                source_snapshot_id INTEGER,
+                source_file TEXT,
+                UNIQUE(symbol, expiry, captured_at)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_nifty_iv_observations_lookup
+            ON nifty_iv_observations(symbol, captured_at)
+            """
+        )
 
 
 class MarketJobRepository:
@@ -262,6 +376,7 @@ class NiftyAlertRepository:
         expiry: str | None = None,
         reasons: list[str] | None = None,
         risks: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
         context_snapshot_id: int | None = None,
     ) -> dict[str, Any]:
         with _connection(self.db_path) as conn:
@@ -270,9 +385,9 @@ class NiftyAlertRepository:
                 INSERT INTO nifty_alerts(
                     created_at, alert_type, mode, horizon, severity, symbol, spot, strategy_id, direction,
                     score, confidence, title, message, trigger_level, invalidation_level, expiry,
-                    reasons_json, risks_json, context_snapshot_id
+                    reasons_json, risks_json, metadata_json, context_snapshot_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _now(),
@@ -293,6 +408,7 @@ class NiftyAlertRepository:
                     expiry,
                     _json(reasons or []),
                     _json(risks or []),
+                    _json(metadata or {}),
                     context_snapshot_id,
                 ),
             )
@@ -352,6 +468,309 @@ class NiftyAlertRepository:
             if not materially_better and not more_severe:
                 return True
         return False
+
+
+class NiftyCandleRepository:
+    def __init__(self, db_path: str | Path = DEFAULT_DB_PATH) -> None:
+        self.db_path = Path(db_path)
+        initialize_database(self.db_path)
+
+    def upsert_candles(self, symbol: str, timeframe: str, candles: list[Any], source: str = "zerodha") -> int:
+        now = _now()
+        rows = [
+            (
+                symbol.upper(),
+                timeframe,
+                _string_or_none(candle.timestamp),
+                _optional_float(candle.open),
+                _optional_float(candle.high),
+                _optional_float(candle.low),
+                _optional_float(candle.close),
+                _optional_int(candle.volume),
+                _optional_int(getattr(candle, "open_interest", None)),
+                source,
+                now,
+            )
+            for candle in candles
+        ]
+        with _connection(self.db_path) as conn:
+            conn.executemany(
+                """
+                INSERT INTO nifty_candles(symbol, timeframe, ts, open, high, low, close, volume, oi, source, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(symbol, timeframe, ts) DO UPDATE SET
+                    open = excluded.open,
+                    high = excluded.high,
+                    low = excluded.low,
+                    close = excluded.close,
+                    volume = excluded.volume,
+                    oi = excluded.oi,
+                    source = excluded.source,
+                    created_at = excluded.created_at
+                """,
+                rows,
+            )
+        return len(rows)
+
+    def load_candles(
+        self,
+        symbol: str = "NIFTY",
+        timeframe: str = "15minute",
+        from_date: str | None = None,
+        to_date: str | None = None,
+        limit: int | None = None,
+    ) -> list[Candle]:
+        clauses = ["symbol = ?", "timeframe = ?"]
+        params: list[Any] = [symbol.upper(), timeframe]
+        if from_date:
+            clauses.append("ts >= ?")
+            params.append(from_date)
+        if to_date:
+            clauses.append("ts <= ?")
+            params.append(to_date)
+        limit_clause = f" LIMIT {int(limit)}" if limit else ""
+        with _connection(self.db_path) as conn:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM nifty_candles
+                WHERE {' AND '.join(clauses)}
+                ORDER BY ts ASC
+                {limit_clause}
+                """,
+                params,
+            ).fetchall()
+        return [_candle_from_row(row) for row in rows]
+
+    def latest_timestamp(self, symbol: str, timeframe: str) -> str | None:
+        with _connection(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT ts FROM nifty_candles WHERE symbol = ? AND timeframe = ? ORDER BY ts DESC LIMIT 1",
+                (symbol.upper(), timeframe),
+            ).fetchone()
+        return row["ts"] if row else None
+
+    def counts(self, symbol: str = "NIFTY") -> dict[str, int]:
+        with _connection(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT timeframe, COUNT(*) AS count FROM nifty_candles WHERE symbol = ? GROUP BY timeframe",
+                (symbol.upper(),),
+            ).fetchall()
+        return {row["timeframe"]: row["count"] for row in rows}
+
+
+class NiftyOptionChainRepository:
+    def __init__(self, db_path: str | Path = DEFAULT_DB_PATH) -> None:
+        self.db_path = Path(db_path)
+        initialize_database(self.db_path)
+
+    def save_snapshot(self, analysis_result: Any, raw_file: str | None = None, captured_at: str | None = None) -> int:
+        rows = _analysis_rows(analysis_result)
+        ce_rows = [row for row in rows if str(_get(row, "option_type") or "").upper() == "CE"]
+        pe_rows = [row for row in rows if str(_get(row, "option_type") or "").upper() == "PE"]
+        captured = captured_at or _snapshot_time_from_rows(rows) or _now()
+        with _connection(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO nifty_option_chain_snapshots(
+                    symbol, expiry, spot, captured_at, source, pcr_oi, pcr_volume, max_pain,
+                    atm_strike, atm_iv, atm_iv_change, total_ce_oi, total_pe_oi,
+                    total_ce_oi_change, total_pe_oi_change, raw_file
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(_get(analysis_result, "symbol") or "NIFTY").upper(),
+                    _string_or_none(_get(analysis_result, "expiry")),
+                    _optional_float(_get(analysis_result, "spot_price") or _get(analysis_result, "spot")),
+                    captured,
+                    "zerodha",
+                    _optional_float(_get(analysis_result, "pcr_oi")),
+                    _optional_float(_get(analysis_result, "pcr_volume")),
+                    _optional_float(_get(analysis_result, "max_pain")),
+                    _optional_float(_get(analysis_result, "atm_strike") or _atm_strike(rows, _get(analysis_result, "spot_price") or _get(analysis_result, "spot"))),
+                    _optional_float(_get(analysis_result, "atm_iv")),
+                    _optional_float(_get(analysis_result, "atm_iv_change")),
+                    sum(_optional_int(_get(row, "oi")) or 0 for row in ce_rows),
+                    sum(_optional_int(_get(row, "oi")) or 0 for row in pe_rows),
+                    _sum_optional(_get(row, "oi_change") for row in ce_rows),
+                    _sum_optional(_get(row, "oi_change") for row in pe_rows),
+                    raw_file or _get(analysis_result, "latest_snapshot") or _get(analysis_result, "raw_file"),
+                ),
+            )
+            if cursor.lastrowid:
+                return int(cursor.lastrowid)
+            existing = conn.execute(
+                """
+                SELECT id FROM nifty_option_chain_snapshots
+                WHERE symbol = ? AND COALESCE(expiry, '') = COALESCE(?, '') AND captured_at = ?
+                """,
+                (
+                    str(_get(analysis_result, "symbol") or "NIFTY").upper(),
+                    _string_or_none(_get(analysis_result, "expiry")),
+                    captured,
+                ),
+            ).fetchone()
+        return int(existing["id"]) if existing else 0
+
+    def save_rows(self, snapshot_id: int, rows: list[Any]) -> int:
+        payload = [
+            (
+                snapshot_id,
+                _optional_float(_get(row, "strike")),
+                str(_get(row, "option_type") or "").upper(),
+                _get(row, "tradingsymbol"),
+                _optional_float(_get(row, "last_price")),
+                _optional_float(_get(row, "previous_close")),
+                _optional_float(_get(row, "price_change")),
+                _optional_int(_get(row, "oi")),
+                _optional_int(_get(row, "previous_oi")),
+                _optional_int(_get(row, "oi_change")),
+                _optional_float(_get(row, "oi_change_percent")),
+                _optional_float(_get(row, "implied_volatility")),
+                _optional_float(_get(row, "iv_change")),
+                _optional_int(_get(row, "volume")),
+                _optional_float(_get(row, "bid_price")),
+                _optional_float(_get(row, "ask_price")),
+                _get(row, "buildup"),
+            )
+            for row in rows
+        ]
+        with _connection(self.db_path) as conn:
+            conn.executemany(
+                """
+                INSERT INTO nifty_option_chain_rows(
+                    snapshot_id, strike, option_type, tradingsymbol, last_price, previous_close,
+                    price_change, oi, previous_oi, oi_change, oi_change_percent,
+                    implied_volatility, iv_change, volume, bid_price, ask_price, buildup
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(snapshot_id, strike, option_type) DO UPDATE SET
+                    tradingsymbol = excluded.tradingsymbol,
+                    last_price = excluded.last_price,
+                    previous_close = excluded.previous_close,
+                    price_change = excluded.price_change,
+                    oi = excluded.oi,
+                    previous_oi = excluded.previous_oi,
+                    oi_change = excluded.oi_change,
+                    oi_change_percent = excluded.oi_change_percent,
+                    implied_volatility = excluded.implied_volatility,
+                    iv_change = excluded.iv_change,
+                    volume = excluded.volume,
+                    bid_price = excluded.bid_price,
+                    ask_price = excluded.ask_price,
+                    buildup = excluded.buildup
+                """,
+                payload,
+            )
+        return len(payload)
+
+    def load_latest_snapshot(self, symbol: str = "NIFTY", expiry: str | None = None) -> dict[str, Any] | None:
+        where = "symbol = ?"
+        params: list[Any] = [symbol.upper()]
+        if expiry:
+            where += " AND expiry = ?"
+            params.append(expiry)
+        with _connection(self.db_path) as conn:
+            row = conn.execute(
+                f"SELECT * FROM nifty_option_chain_snapshots WHERE {where} ORDER BY captured_at DESC, id DESC LIMIT 1",
+                params,
+            ).fetchone()
+        return _option_snapshot_row(row) if row else None
+
+    def load_snapshot_rows(self, snapshot_id: int) -> list[dict[str, Any]]:
+        with _connection(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT * FROM nifty_option_chain_rows WHERE snapshot_id = ? ORDER BY strike ASC, option_type ASC",
+                (snapshot_id,),
+            ).fetchall()
+        return [_option_row(row) for row in rows]
+
+    def list_snapshots(self, symbol: str = "NIFTY", expiry: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        where = "symbol = ?"
+        params: list[Any] = [symbol.upper()]
+        if expiry:
+            where += " AND expiry = ?"
+            params.append(expiry)
+        params.append(max(1, int(limit)))
+        with _connection(self.db_path) as conn:
+            rows = conn.execute(
+                f"SELECT * FROM nifty_option_chain_snapshots WHERE {where} ORDER BY captured_at DESC, id DESC LIMIT ?",
+                params,
+            ).fetchall()
+        return [_option_snapshot_row(row) for row in rows]
+
+
+class NiftyIVObservationRepository:
+    def __init__(self, db_path: str | Path = DEFAULT_DB_PATH) -> None:
+        self.db_path = Path(db_path)
+        initialize_database(self.db_path)
+
+    def record_observation(
+        self,
+        symbol: str = "NIFTY",
+        expiry: str | None = None,
+        atm_strike: float | None = None,
+        atm_iv: float | None = None,
+        weekly_atm_iv: float | None = None,
+        monthly_atm_iv: float | None = None,
+        source_snapshot_id: int | None = None,
+        source_file: str | None = None,
+        captured_at: str | None = None,
+    ) -> int:
+        captured = captured_at or _now()
+        with _connection(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO nifty_iv_observations(
+                    symbol, captured_at, expiry, days_to_expiry, atm_strike, atm_iv,
+                    weekly_atm_iv, monthly_atm_iv, source_snapshot_id, source_file
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    symbol.upper(),
+                    captured,
+                    expiry,
+                    _days_to_expiry(expiry, captured),
+                    _optional_float(atm_strike),
+                    _optional_float(atm_iv),
+                    _optional_float(weekly_atm_iv),
+                    _optional_float(monthly_atm_iv),
+                    source_snapshot_id,
+                    source_file,
+                ),
+            )
+            if cursor.lastrowid:
+                return int(cursor.lastrowid)
+            existing = conn.execute(
+                """
+                SELECT id FROM nifty_iv_observations
+                WHERE symbol = ? AND COALESCE(expiry, '') = COALESCE(?, '') AND captured_at = ?
+                """,
+                (symbol.upper(), expiry, captured),
+            ).fetchone()
+        return int(existing["id"]) if existing else 0
+
+    def load_history(self, symbol: str = "NIFTY", lookback_days: int = 252) -> list[dict[str, Any]]:
+        cutoff = (datetime.now(IST) - timedelta(days=lookback_days)).isoformat(timespec="seconds")
+        with _connection(self.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM nifty_iv_observations
+                WHERE symbol = ? AND captured_at >= ? AND atm_iv IS NOT NULL
+                ORDER BY captured_at ASC
+                """,
+                (symbol.upper(), cutoff),
+            ).fetchall()
+        return [_iv_observation_row(row) for row in rows]
+
+    def latest(self, symbol: str = "NIFTY") -> dict[str, Any] | None:
+        with _connection(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT * FROM nifty_iv_observations WHERE symbol = ? ORDER BY captured_at DESC, id DESC LIMIT 1",
+                (symbol.upper(),),
+            ).fetchone()
+        return _iv_observation_row(row) if row else None
 
 
 class NiftyContextRepository:
@@ -566,6 +985,10 @@ def _optional_int(value: Any) -> int | None:
 def _string_or_none(value: Any) -> str | None:
     if value is None or value == "":
         return None
+    if isinstance(value, datetime):
+        return value.isoformat(timespec="seconds")
+    if isinstance(value, date):
+        return value.isoformat()
     return str(value)
 
 
@@ -580,6 +1003,49 @@ def _candidate_direction(candidate: dict[str, Any]) -> str | None:
     if "volatility" in text:
         return "volatile"
     return None
+
+
+def _get(value: Any, key: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(key)
+    return getattr(value, key, None)
+
+
+def _analysis_rows(analysis_result: Any) -> list[Any]:
+    rows = _get(analysis_result, "rows")
+    return list(rows or [])
+
+
+def _snapshot_time_from_rows(rows: list[Any]) -> str | None:
+    for row in rows:
+        value = _get(row, "snapshot_time")
+        if value:
+            return str(value)
+    return None
+
+
+def _atm_strike(rows: list[Any], spot: Any) -> float | None:
+    strikes = sorted({_optional_float(_get(row, "strike")) for row in rows if _optional_float(_get(row, "strike")) is not None})
+    spot_value = _optional_float(spot)
+    if not strikes or spot_value is None:
+        return None
+    return min(strikes, key=lambda strike: abs(strike - spot_value))
+
+
+def _sum_optional(values) -> int | None:
+    cleaned = [_optional_int(value) for value in values]
+    present = [value for value in cleaned if value is not None]
+    return sum(present) if present else None
+
+
+def _days_to_expiry(expiry: str | None, captured_at: str) -> int | None:
+    if not expiry:
+        return None
+    try:
+        captured_date = datetime.fromisoformat(captured_at).date()
+        return (date.fromisoformat(expiry) - captured_date).days
+    except ValueError:
+        return None
 
 
 def _job_row(row: sqlite3.Row) -> dict[str, Any]:
@@ -616,10 +1082,23 @@ def _alert_row(row: sqlite3.Row) -> dict[str, Any]:
         "expiry": row["expiry"],
         "reasons": _loads(row["reasons_json"], []),
         "risks": _loads(row["risks_json"], []),
+        "metadata": _loads(row["metadata_json"] if "metadata_json" in row.keys() else None, {}),
         "context_snapshot_id": row["context_snapshot_id"],
         "is_active": bool(row["is_active"]),
         "acknowledged_at": row["acknowledged_at"],
     }
+
+
+def _candle_from_row(row: sqlite3.Row) -> Candle:
+    return Candle(
+        timestamp=datetime.fromisoformat(row["ts"]),
+        open=float(row["open"]),
+        high=float(row["high"]),
+        low=float(row["low"]),
+        close=float(row["close"]),
+        volume=int(row["volume"] or 0),
+        open_interest=row["oi"],
+    )
 
 
 def _context_row(row: sqlite3.Row) -> dict[str, Any]:
@@ -681,4 +1160,66 @@ def _outcome_row(row: sqlite3.Row) -> dict[str, Any]:
         "success": bool(row["success"]) if row["success"] is not None else None,
         "status": row["status"],
         "notes": row["notes"],
+    }
+
+
+def _option_snapshot_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "symbol": row["symbol"],
+        "expiry": row["expiry"],
+        "spot": row["spot"],
+        "captured_at": row["captured_at"],
+        "source": row["source"],
+        "pcr_oi": row["pcr_oi"],
+        "pcr_volume": row["pcr_volume"],
+        "max_pain": row["max_pain"],
+        "atm_strike": row["atm_strike"],
+        "atm_iv": row["atm_iv"],
+        "atm_iv_change": row["atm_iv_change"],
+        "total_ce_oi": row["total_ce_oi"],
+        "total_pe_oi": row["total_pe_oi"],
+        "total_ce_oi_change": row["total_ce_oi_change"],
+        "total_pe_oi_change": row["total_pe_oi_change"],
+        "raw_file": row["raw_file"],
+    }
+
+
+def _option_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "snapshot_id": row["snapshot_id"],
+        "strike": row["strike"],
+        "option_type": row["option_type"],
+        "tradingsymbol": row["tradingsymbol"],
+        "last_price": row["last_price"],
+        "previous_close": row["previous_close"],
+        "price_change": row["price_change"],
+        "oi": row["oi"],
+        "previous_oi": row["previous_oi"],
+        "oi_change": row["oi_change"],
+        "oi_change_percent": row["oi_change_percent"],
+        "implied_volatility": row["implied_volatility"],
+        "iv_change": row["iv_change"],
+        "volume": row["volume"],
+        "bid_price": row["bid_price"],
+        "ask_price": row["ask_price"],
+        "buildup": row["buildup"],
+    }
+
+
+def _iv_observation_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "symbol": row["symbol"],
+        "captured_at": row["captured_at"],
+        "date_time": datetime.fromisoformat(row["captured_at"]),
+        "expiry": row["expiry"],
+        "days_to_expiry": row["days_to_expiry"],
+        "atm_strike": row["atm_strike"],
+        "atm_iv": row["atm_iv"],
+        "weekly_atm_iv": row["weekly_atm_iv"],
+        "monthly_atm_iv": row["monthly_atm_iv"],
+        "source_snapshot_id": row["source_snapshot_id"],
+        "source_file": row["source_file"],
     }

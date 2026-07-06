@@ -17,6 +17,7 @@ const state = {
     backtest: null,
     alertBacktest: null,
     snapshots: [],
+    latestData: null,
     autoStatus: null,
     alerts: [],
     autoPollTimer: null,
@@ -38,6 +39,7 @@ function activateTab(name) {
     loadNiftyAutoStatus();
     loadNiftyAlerts();
     loadNiftyContextSnapshots();
+    loadNiftyLatestData();
     startNiftyAutoPolling();
   } else {
     stopNiftyAutoPolling();
@@ -2028,6 +2030,19 @@ async function loadNiftyAlerts() {
   }
 }
 
+async function loadNiftyLatestData() {
+  try {
+    const data = await api("/api/nifty/data/latest");
+    state.nifty.latestData = data;
+    renderNiftyLatestData(data);
+  } catch (error) {
+    const target = $("niftyDataFreshnessCards");
+    if (target) {
+      target.innerHTML = `<div class="compact-metric"><span>Data Freshness</span><strong>Failed</strong></div>`;
+    }
+  }
+}
+
 async function startNiftyAutoScan() {
   $("niftyAutoMeta").textContent = "Starting";
   try {
@@ -2080,6 +2095,7 @@ function startNiftyAutoPolling() {
     loadNiftyAutoStatus();
     loadNiftyAlerts();
     loadNiftyContextSnapshots();
+    loadNiftyLatestData();
   }, 20000);
 }
 
@@ -2111,6 +2127,24 @@ function renderNiftyAutoStatus(data) {
         <td>${autoJobSummary(job)}</td>
       </tr>
     `)
+    .join("");
+}
+
+function renderNiftyLatestData(data) {
+  const candles = data.latest_candles || {};
+  const option = data.latest_option_snapshot || {};
+  const iv = data.latest_iv_observation || {};
+  const counts = data.counts || {};
+  const candleCounts = counts.candles || {};
+  $("niftyDataFreshnessCards").innerHTML = [
+    ["Latest 15m Candle", fmtDateTime(candles["15minute"])],
+    ["Latest Option Snapshot", option.captured_at ? `#${option.id} / ${fmtDateTime(option.captured_at)}` : "-"],
+    ["Latest ATM IV", iv.captured_at ? `${fmt(iv.atm_iv)} / ${fmtDateTime(iv.captured_at)}` : "-"],
+    ["Context Snapshots", fmtInt(counts.context_snapshots)],
+    ["Alerts", fmtInt(counts.alerts)],
+    ["DB Candle Rows", Object.entries(candleCounts).map(([frame, count]) => `${frame}: ${fmtInt(count)}`).join(", ") || "-"],
+  ]
+    .map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${value}</strong></div>`)
     .join("");
 }
 

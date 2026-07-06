@@ -16,7 +16,10 @@ from trading_analysis.storage import (
     MarketJobRepository,
     NiftyAlertOutcomeRepository,
     NiftyAlertRepository,
+    NiftyCandleRepository,
     NiftyContextRepository,
+    NiftyIVObservationRepository,
+    NiftyOptionChainRepository,
 )
 
 
@@ -31,12 +34,18 @@ class NiftyAutoScanService:
         self.alert_repository = NiftyAlertRepository(db_path)
         self.context_repository = NiftyContextRepository(db_path)
         self.outcome_repository = NiftyAlertOutcomeRepository(db_path)
+        self.candle_repository = NiftyCandleRepository(db_path)
+        self.option_repository = NiftyOptionChainRepository(db_path)
+        self.iv_repository = NiftyIVObservationRepository(db_path)
         self.nifty_service = nifty_service or NiftyDeskService()
         self.job_runner = NiftyMarketJobs(
             nifty_service=self.nifty_service,
             job_repository=self.job_repository,
             alert_repository=self.alert_repository,
             context_repository=self.context_repository,
+            candle_repository=self.candle_repository,
+            option_repository=self.option_repository,
+            iv_repository=self.iv_repository,
         )
         self.scheduler = scheduler or MarketScanScheduler(job_runner=self.job_runner)
 
@@ -76,6 +85,39 @@ class NiftyAutoScanService:
     def alert_outcomes(self, alert_id: int) -> dict[str, Any]:
         rows = self.outcome_repository.load_alert_outcomes(alert_id)
         return {"alert_id": alert_id, "outcomes": rows, "count": len(rows)}
+
+    def latest_data(self) -> dict[str, Any]:
+        latest_option = self.option_repository.load_latest_snapshot()
+        latest_iv = self.iv_repository.latest()
+        context_count = len(self.context_repository.list_context_snapshots(limit=100000))
+        alert_count = len(self.alert_repository.list_recent_alerts(limit=100000, active_only=False))
+        return {
+            "latest_candles": {
+                timeframe: self.candle_repository.latest_timestamp("NIFTY", timeframe)
+                for timeframe in ("day", "60minute", "15minute")
+            },
+            "latest_option_snapshot": latest_option,
+            "latest_iv_observation": latest_iv,
+            "counts": {
+                "candles": self.candle_repository.counts("NIFTY"),
+                "context_snapshots": context_count,
+                "alerts": alert_count,
+            },
+        }
+
+    def option_snapshots(self, limit: int = 20, expiry: str | None = None) -> dict[str, Any]:
+        rows = self.option_repository.list_snapshots(symbol="NIFTY", expiry=expiry, limit=limit)
+        return {"snapshots": rows, "count": len(rows)}
+
+    def option_snapshot(self, snapshot_id: int) -> dict[str, Any]:
+        rows = self.option_repository.load_snapshot_rows(snapshot_id)
+        snapshots = self.option_repository.list_snapshots(limit=100000)
+        snapshot = next((row for row in snapshots if row.get("id") == snapshot_id), None)
+        return {"snapshot": snapshot, "rows": rows, "row_count": len(rows)} if snapshot else {"error": "Option snapshot not found", "id": snapshot_id}
+
+    def iv_history(self, lookback_days: int = 252) -> dict[str, Any]:
+        rows = self.iv_repository.load_history(symbol="NIFTY", lookback_days=lookback_days)
+        return {"observations": rows, "count": len(rows), "lookback_days": lookback_days}
 
     def alert_backtest(
         self,

@@ -62,7 +62,19 @@ def load_nifty_iv_history(
     symbol: str = "NIFTY",
     lookback_days: int = 252,
     now: datetime | None = None,
+    iv_repository: Any | None = None,
 ) -> list[dict[str, Any]]:
+    if Path(path) == DEFAULT_IV_HISTORY_PATH:
+        try:
+            if iv_repository is None:
+                from trading_analysis.storage import NiftyIVObservationRepository
+
+                iv_repository = NiftyIVObservationRepository()
+            db_rows = iv_repository.load_history(symbol=symbol, lookback_days=lookback_days)
+            if db_rows:
+                return db_rows
+        except Exception:
+            pass
     csv_path = Path(path)
     if not csv_path.exists():
         return []
@@ -89,10 +101,11 @@ def build_nifty_iv_context(
     current_atm_iv: float | None = None,
     current_iv_change: float | None = None,
     history_path: str | Path = DEFAULT_IV_HISTORY_PATH,
+    iv_repository: Any | None = None,
 ) -> NiftyIVContext:
     warnings: list[str] = []
     notes: list[str] = []
-    history = load_nifty_iv_history(history_path, symbol=symbol, lookback_days=lookback_days)
+    history = load_nifty_iv_history(history_path, symbol=symbol, lookback_days=lookback_days, iv_repository=iv_repository)
     values = [float(row["atm_iv"]) for row in history]
     current = current_atm_iv if current_atm_iv is not None else (values[-1] if values else None)
     if current is None:

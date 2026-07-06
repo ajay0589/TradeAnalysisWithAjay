@@ -263,7 +263,7 @@ python -m trading_analysis.cli nifty-backtest --strategy nifty_short_strangle --
 
 ## NIFTY Auto Scan
 
-NIFTY Auto Scan is a local market-hour scheduler for the NIFTY Desk. It uses SQLite storage at `data\db\trading_analysis.db`, enables WAL mode, and stores job history plus generated analysis alerts. It is read-only: it refreshes local data caches where configured, analyzes context, records IV observations, creates alert candidates, and never places orders.
+NIFTY Auto Scan is a local market-hour scheduler for the NIFTY Desk. It uses SQLite storage at `data\db\trading_analysis.db`, enables WAL mode, and stores job history, raw market-data snapshots, derived context, generated alert candidates, and alert outcomes. It is read-only: it refreshes local data caches where configured, analyzes context, records IV observations, creates alert candidates, and never places orders.
 
 Default scan behavior:
 
@@ -277,6 +277,10 @@ Default scan behavior:
 SQLite tables:
 
 - `market_jobs`: every scheduler job run, status, duration, error, and result JSON.
+- `nifty_candles`: cached NIFTY OHLCV candles by timeframe, upserted from the same local candle CSVs used by analysis.
+- `nifty_option_chain_snapshots`: option-chain snapshot summary rows, including expiry, PCR, max pain, ATM IV, OI totals, and raw CSV file path.
+- `nifty_option_chain_rows`: strike-level CE/PE rows linked to each option snapshot, including OI, IV, volume, bid/ask, and build-up label.
+- `nifty_iv_observations`: ATM IV observations linked to the option snapshot/source file when available.
 - `nifty_alerts`: generated NIFTY context/setup alerts, reasons, risks, trigger/invalidation levels, and acknowledgement state.
 - `nifty_context_snapshots`: exact technical, option-chain, IV, summary, warning, and error context captured during Auto Scan.
 - `nifty_strategy_candidates`: strategy candidates linked to the context snapshot that produced them.
@@ -284,9 +288,15 @@ SQLite tables:
 
 Alert traceability:
 
+- Raw input layer: `nifty_candles`, `nifty_option_chain_snapshots`, `nifty_option_chain_rows`, and `nifty_iv_observations`.
+- Derived context layer: `nifty_context_snapshots` and linked `nifty_strategy_candidates`.
+- Alert layer: `nifty_alerts` stores `context_snapshot_id` and metadata links to the latest candle timestamp, option snapshot id, and IV observation id when available.
+- Outcome layer: `nifty_alert_outcomes` stores signal-quality backtest rows for stored alerts.
 - Every newly generated alert can link to a `context_snapshot_id`.
 - Use the NIFTY Desk `View Context` action to inspect the exact technical/options/IV context behind an alert.
 - Recent context snapshots are shown in the NIFTY Desk so you can audit what Auto Scan saw at that time.
+- Data Freshness cards in the NIFTY Desk show the latest 15-minute candle, latest option-chain snapshot, latest ATM IV observation, and local DB row counts.
+- CSV remains the fallback/source cache for candle and option-chain data. SQLite is the local audit database, not a shared server database.
 
 Web UI usage:
 
@@ -320,6 +330,8 @@ Auto-scan limitations:
 - Option-chain and IV context depend on cached snapshots/source availability.
 - Duplicate alerts are suppressed for 15 minutes unless severity increases or score improves materially.
 - Historical IV rank needs accumulated IV history.
+- Alert signal-quality backtest is not options P&L. Accurate options P&L still requires reliable historical option premiums.
+- SQLite is intended for local single-user storage.
 - The initial holiday calendar is weekday-only and should be extended manually later.
 
 Limitations:
