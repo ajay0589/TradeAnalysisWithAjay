@@ -157,7 +157,7 @@ class KrishnaPurpleStep1Candidate:
 
 
 PURPLE_TOUCH_PROFILES: dict[str, KrishnaPurpleProfile] = {
-    "month": KrishnaPurpleProfile("month", "Monthly purple touch", "120minute", "day", "120minute", 1460),
+    "month": KrishnaPurpleProfile("month", "Monthly purple touch", "120minute", "day", "120minute", 3000),
     "week": KrishnaPurpleProfile("week", "Weekly purple touch", "30minute", "120minute", "30minute", 730),
     "day": KrishnaPurpleProfile("day", "Daily purple touch", "10minute", "10minute", "10minute", 365),
 }

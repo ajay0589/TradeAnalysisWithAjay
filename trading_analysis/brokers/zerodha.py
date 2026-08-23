@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -13,6 +13,13 @@ from trading_analysis.models import Candle
 
 
 QUOTE_LIMIT = 500
+HISTORICAL_MAX_DAYS = {
+    "day": 1900,
+    "60minute": 390,
+    "30minute": 190,
+    "15minute": 190,
+    "10minute": 90,
+}
 
 
 class ZerodhaKiteClient:
@@ -51,31 +58,32 @@ class ZerodhaKiteClient:
         include_oi: bool = False,
         continuous: bool = False,
     ) -> list[Candle]:
-        params = {
-            "from": from_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "to": to_time.strftime("%Y-%m-%d %H:%M:%S"),
-        }
-        if include_oi:
-            params["oi"] = "1"
-        if continuous:
-            params["continuous"] = "1"
-        payload = self._get_json(
-            f"/instruments/historical/{instrument_token}/{interval}",
-            params=params,
-        )
-        rows = payload.get("data", {}).get("candles", [])
-        return [
-            Candle(
-                timestamp=parse_kite_timestamp(row[0]),
-                open=float(row[1]),
-                high=float(row[2]),
-                low=float(row[3]),
-                close=float(row[4]),
-                volume=int(row[5]),
-                open_interest=int(row[6]) if len(row) > 6 and row[6] is not None else None,
+        candles_by_timestamp: dict[datetime, Candle] = {}
+        for chunk_from, chunk_to in historical_windows(from_time, to_time, interval):
+            params = {
+                "from": chunk_from.strftime("%Y-%m-%d %H:%M:%S"),
+                "to": chunk_to.strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            if include_oi:
+                params["oi"] = "1"
+            if continuous:
+                params["continuous"] = "1"
+            payload = self._get_json(
+                f"/instruments/historical/{instrument_token}/{interval}",
+                params=params,
             )
-            for row in rows
-        ]
+            for row in payload.get("data", {}).get("candles", []):
+                candle = Candle(
+                    timestamp=parse_kite_timestamp(row[0]),
+                    open=float(row[1]),
+                    high=float(row[2]),
+                    low=float(row[3]),
+                    close=float(row[4]),
+                    volume=int(row[5]),
+                    open_interest=int(row[6]) if len(row) > 6 and row[6] is not None else None,
+                )
+                candles_by_timestamp[candle.timestamp] = candle
+        return [candles_by_timestamp[timestamp] for timestamp in sorted(candles_by_timestamp)]
 
     def _get_json(self, path: str, params: dict[str, str] | list[tuple[str, str]] | None = None) -> dict:
         return json.loads(self._get_text(path, params=params))
@@ -211,6 +219,43 @@ def write_candles_csv(path: str | Path, candles: list[Candle]) -> None:
                     "open_interest": "" if candle.open_interest is None else candle.open_interest,
                 }
             )
+
+
+def merge_candles_csv(path: str | Path, candles: list[Candle]) -> None:
+    output_path = Path(path)
+    candles_by_timestamp: dict[datetime, Candle] = {}
+    if output_path.exists():
+        with output_path.open("r", encoding="utf-8", newline="") as handle:
+            for row in csv.DictReader(handle):
+                timestamp = parse_kite_timestamp(row["date"])
+                candles_by_timestamp[timestamp] = Candle(
+                    timestamp=timestamp,
+                    open=float(row["open"]),
+                    high=float(row["high"]),
+                    low=float(row["low"]),
+                    close=float(row["close"]),
+                    volume=int(float(row.get("volume") or 0)),
+                    open_interest=int(float(row["open_interest"])) if row.get("open_interest") else None,
+                )
+    for candle in candles:
+        candles_by_timestamp[candle.timestamp] = candle
+    write_candles_csv(output_path, [candles_by_timestamp[timestamp] for timestamp in sorted(candles_by_timestamp)])
+
+
+def historical_windows(from_time: datetime, to_time: datetime, interval: str) -> list[tuple[datetime, datetime]]:
+    if from_time > to_time:
+        return []
+    max_days = HISTORICAL_MAX_DAYS.get(interval)
+    if not max_days or (to_time - from_time) <= timedelta(days=max_days):
+        return [(from_time, to_time)]
+
+    windows: list[tuple[datetime, datetime]] = []
+    cursor = from_time
+    while cursor <= to_time:
+        chunk_to = min(cursor + timedelta(days=max_days), to_time)
+        windows.append((cursor, chunk_to))
+        cursor = chunk_to + timedelta(seconds=1)
+    return windows
 
 
 def chunked(values: list[str], size: int) -> list[list[str]]:

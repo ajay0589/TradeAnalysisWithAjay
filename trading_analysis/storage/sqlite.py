@@ -680,6 +680,29 @@ class KrishnaPurpleAlertRepository:
             ).fetchall()
         return [_purple_alert_row(row) for row in rows]
 
+    def counts(self) -> dict[str, Any]:
+        with _connection(self.db_path) as conn:
+            alert_rows = conn.execute(
+                "SELECT alert_type, COUNT(*) AS count FROM krishna_purple_alerts GROUP BY alert_type"
+            ).fetchall()
+            trade_rows = conn.execute(
+                "SELECT status, COUNT(*) AS count FROM krishna_purple_trades GROUP BY status"
+            ).fetchall()
+        alert_counts = {str(row["alert_type"]): int(row["count"]) for row in alert_rows}
+        trade_counts = {str(row["status"]): int(row["count"]) for row in trade_rows}
+        entry_alerts = alert_counts.get("entry", 0)
+        exit_alerts = alert_counts.get("exit", 0)
+        open_trades = trade_counts.get("open", 0)
+        closed_trades = trade_counts.get("closed", 0)
+        return {
+            "entry_alerts": entry_alerts,
+            "exit_alerts": exit_alerts,
+            "open_trades": open_trades,
+            "closed_trades": closed_trades,
+            "entry_tally_matches": entry_alerts == open_trades + closed_trades,
+            "exit_tally_matches": exit_alerts == closed_trades,
+        }
+
     def _insert_alert(
         self,
         conn: sqlite3.Connection,

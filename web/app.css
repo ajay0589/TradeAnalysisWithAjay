@@ -827,6 +827,26 @@ tr:last-child td {
   text-transform: none;
 }
 
+.warning-hint {
+  margin-top: -4px;
+  padding-left: 10px;
+  border-left: 3px solid #d59a32;
+  color: #76520d;
+}
+
+.meaning-table td:first-child {
+  min-width: 165px;
+  font-weight: 650;
+}
+
+.meaning-table td:nth-child(2) {
+  min-width: 180px;
+}
+
+.meaning-table td:nth-child(3) {
+  min-width: 360px;
+}
+
 .empty-table-row td {
   padding: 18px 12px;
   color: var(--muted);

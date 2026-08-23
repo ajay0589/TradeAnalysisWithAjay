@@ -44,7 +44,9 @@ from trading_analysis.brokers.zerodha import (
     build_login_url,
     chunked,
     extract_request_token,
+    historical_windows,
     kite_checksum,
+    merge_candles_csv,
     parse_kite_timestamp,
     resolve_instrument_token,
     write_candles_csv,
@@ -130,6 +132,42 @@ class AnalysisTests(unittest.TestCase):
             kite_checksum("api", "request", "secret"),
             "257f5edc0415fc77bd14b16e08ca983df5e4d049db7c63e292f18f6d640402b5",
         )
+
+    def test_long_daily_history_is_split_into_kite_safe_windows(self) -> None:
+        start = datetime(2018, 6, 1)
+        end = datetime(2026, 8, 23)
+
+        windows = historical_windows(start, end, "day")
+
+        self.assertEqual(len(windows), 2)
+        self.assertEqual(windows[0][0], start)
+        self.assertEqual(windows[-1][1], end)
+        self.assertLessEqual(windows[0][1] - windows[0][0], timedelta(days=1900))
+        self.assertEqual(windows[1][0], windows[0][1] + timedelta(seconds=1))
+
+    def test_candle_refresh_merge_preserves_older_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "ABC.csv"
+            old = [
+                Candle(datetime(2020, 1, 1), 100, 102, 99, 101, 1000),
+                Candle(datetime(2020, 1, 2), 101, 103, 100, 102, 1100),
+            ]
+            latest = [
+                Candle(datetime(2020, 1, 2), 102, 105, 101, 104, 1500),
+                Candle(datetime(2020, 1, 3), 104, 106, 103, 105, 1200),
+            ]
+            write_candles_csv(output, old)
+
+            merge_candles_csv(output, latest)
+            merged = load_candles(output)
+
+            self.assertEqual(len(merged), 3)
+            self.assertEqual(merged[0].timestamp, datetime(2020, 1, 1))
+            self.assertEqual(merged[1].close, 104)
+
+    def test_monthly_purple_profile_requests_enough_history_for_ema89(self) -> None:
+        self.assertEqual(krishna_purple_profile("month").minimum_days, 3000)
+        self.assertEqual(_bulk_window_days(["month"], 3000), 3000)
 
     def test_fno_universe_uses_stock_futures_that_exist_on_nse(self) -> None:
         nfo = [
@@ -483,7 +521,7 @@ class AnalysisTests(unittest.TestCase):
             by_frame = {row["timeframe"]: row for row in mtf["rows"]}
 
             self.assertEqual([row["timeframe"] for row in mtf["rows"]], ["month", "week", "day", "60minute", "15minute"])
-            self.assertEqual(by_frame["month"]["lookback_days"], 1460)
+            self.assertEqual(by_frame["month"]["lookback_days"], 3000)
             self.assertEqual(by_frame["week"]["lookback_days"], 730)
             self.assertEqual(by_frame["day"]["lookback_days"], 365)
             self.assertEqual(by_frame["60minute"]["lookback_days"], 90)
@@ -497,19 +535,19 @@ class AnalysisTests(unittest.TestCase):
 
         self.assertEqual(requested, ["month", "week", "15minute"])
         self.assertEqual(_normalize_bulk_timeframes(requested), ["day", "15minute"])
-        self.assertEqual(_bulk_window_days(requested, 90), 1460)
+        self.assertEqual(_bulk_window_days(requested, 90), 3000)
         self.assertEqual(_bulk_window_days(["week"], 90), 730)
         self.assertEqual(_bulk_window_days(["day", "60minute"], 90), 90)
-        self.assertEqual(_bulk_window_days_for_timeframe(requested, "day", 1460), 1460)
-        self.assertEqual(_bulk_window_days_for_timeframe(requested, "60minute", 1460), 90)
-        self.assertEqual(_bulk_window_days_for_timeframe(requested, "15minute", 1460), 45)
+        self.assertEqual(_bulk_window_days_for_timeframe(requested, "day", 3000), 3000)
+        self.assertEqual(_bulk_window_days_for_timeframe(requested, "60minute", 3000), 90)
+        self.assertEqual(_bulk_window_days_for_timeframe(requested, "15minute", 3000), 45)
 
     def test_analyze_refresh_preserves_monthly_daily_source_window(self) -> None:
         window = candle_window(days=200, now=datetime(2026, 6, 17))
 
         refresh_window = _refresh_window_for_analysis(window, "day")
 
-        self.assertEqual(refresh_window.days, 1460)
+        self.assertEqual(refresh_window.days, 3000)
 
     def test_entry_trigger_allows_bullish_put_after_confirmations(self) -> None:
         option_chain = self._entry_option_chain(spot_price=105)
@@ -952,6 +990,16 @@ class AnalysisTests(unittest.TestCase):
 
             def list_open_trades(self, limit=200):
                 return []
+
+            def counts(self):
+                return {
+                    "entry_alerts": 0,
+                    "exit_alerts": 0,
+                    "open_trades": 0,
+                    "closed_trades": 0,
+                    "entry_tally_matches": True,
+                    "exit_tally_matches": True,
+                }
 
         service = AnalysisService()
         next_open = datetime(2026, 8, 24, 9, 15)

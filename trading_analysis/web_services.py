@@ -56,8 +56,8 @@ from trading_analysis.brokers.zerodha import (
     build_login_url,
     generate_session,
     load_instruments_csv,
+    merge_candles_csv,
     resolve_instrument_token,
-    write_candles_csv,
 )
 from trading_analysis.candles import (
     candle_path,
@@ -83,7 +83,7 @@ from trading_analysis.storage import KrishnaPurpleAlertRepository
 
 
 DEFAULT_REFRESH_DAYS = {
-    "month": 1460,
+    "month": 3000,
     "week": 730,
     "day": 365,
     "60minute": 90,
@@ -95,7 +95,7 @@ DEFAULT_REFRESH_DAYS = {
 MULTI_TIMEFRAMES = ("month", "week", "day", "60minute", "15minute")
 
 MULTI_TIMEFRAME_MIN_DAYS = {
-    "month": 1460,
+    "month": 3000,
     "week": 730,
     "day": 365,
     "60minute": 90,
@@ -677,7 +677,7 @@ class AnalysisService:
                 to_time=fetch_window.to_time,
             )
             output = candle_path(self.daily_data_dir, source, file_stem)
-            write_candles_csv(output, candles)
+            merge_candles_csv(output, candles)
             results.append(
                 {
                     "symbol": tradingsymbol,
@@ -708,7 +708,7 @@ class AnalysisService:
                             to_time=window.to_time,
                         )
                         output = candle_path(self.daily_data_dir, timeframe, file_stem)
-                        write_candles_csv(output, candles)
+                        merge_candles_csv(output, candles)
                         self._append_job_result(
                             job_id,
                             {
@@ -1373,6 +1373,7 @@ class AnalysisService:
 
         recent_alerts = repository.list_recent_alerts(limit=50)
         open_trades = repository.list_open_trades(limit=200)
+        alert_counts = repository.counts()
         return {
             "type": "krishna_purple_touch_live_alert_scan",
             "profile": scans[0].get("profile") if len(scans) == 1 else None,
@@ -1397,6 +1398,8 @@ class AnalysisService:
             "telegram": telegram_status,
             "recent_alerts": recent_alerts,
             "open_trades": open_trades,
+            "alert_counts": alert_counts,
+            "recent_alert_limit": 50,
             "errors": errors[:20],
             "summary": {
                 "points": [
@@ -1442,6 +1445,8 @@ class AnalysisService:
             },
             "recent_alerts": repository.list_recent_alerts(limit=limit),
             "open_trades": repository.list_open_trades(limit=200),
+            "alert_counts": repository.counts(),
+            "recent_alert_limit": limit,
         }
 
     def backtest_krishna_setup(

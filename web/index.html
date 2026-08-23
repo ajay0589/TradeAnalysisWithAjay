@@ -950,7 +950,7 @@
                   <option value="month">Monthly</option>
                   <option value="day">Daily</option>
                 </select>
-                <input id="purpleDays" type="hidden" value="1460" />
+                <input id="purpleDays" type="hidden" value="3000" />
                 <input id="purpleLimit" type="hidden" value="all" />
                 <label class="check-row">
                   <input id="purpleRefreshToggle" type="checkbox" checked />
@@ -970,6 +970,7 @@
                   <input id="purpleForceToggle" type="checkbox" />
                   Force cached-data run outside market hours
                 </label>
+                <div class="field-hint warning-hint">Normally leave this off. Manual scans still show candidates after market close. Enable it only to test creation of trade IDs, entry/exit alerts, and optional Telegram delivery from cached candles outside NSE hours.</div>
                 <button id="purpleLiveScanBtn" class="full-btn">Run scanner now</button>
                 <div class="button-row">
                   <button id="purpleAutoStartBtn" type="button">Start market monitor</button>
@@ -995,6 +996,46 @@
                 <div class="ops-body">
                   <div id="purpleRuleCards" class="compact-metrics"></div>
                   <div id="purpleRulePoints" class="mini-list"></div>
+                </div>
+              </section>
+
+              <section class="table-panel collapsed">
+                <div class="panel-head">
+                  <h2>How to Read Purple Touch Results</h2>
+                  <span>Expand for column values and meanings</span>
+                </div>
+                <div class="ops-body">
+                  <p class="helper-text">A row represents one stock and one scan profile. The same stock can therefore appear separately under Monthly, Weekly, and Daily.</p>
+                </div>
+                <div class="wide-table">
+                  <table class="krishna-table meaning-table">
+                    <thead>
+                      <tr>
+                        <th>UI item</th>
+                        <th>Applicable values</th>
+                        <th>Meaning</th>
+                        <th>Effect</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr><td>Force cached-data run</td><td>Off / On</td><td>Off still analyzes cached candles after hours. On also permits creating test alerts and trade IDs outside market hours.</td><td>Keep Off for normal use.</td></tr>
+                      <tr><td>Step 1 touch rows</td><td>Count of stock-profile rows; audit zone ±3%</td><td>Latest Monthly, Weekly, or Daily candle touched or came near the purple EMA9 zone.</td><td>First filter only; not an entry alert.</td></tr>
+                      <tr><td>Higher-TF filters passed</td><td>Count within Step 1</td><td>Touch rows with close above EMA26 and EMA89 and without a downtrend structure blocker.</td><td>Still requires early/final entry confirmation.</td></tr>
+                      <tr><td>Latest Scan Candidates</td><td>Strict touch zone ±1%</td><td>Uses the tighter purple-touch tolerance plus mandatory higher-timeframe filters.</td><td>Entry alerts are created only when early or final entry is also ready.</td></tr>
+                      <tr><td>Scan</td><td>Monthly / Weekly / Daily</td><td>The higher timeframe on which the purple EMA9 touch was detected.</td><td>Determines the early, final, and exit timeframes.</td></tr>
+                      <tr><td>Close / Range</td><td>Close; candle high and low</td><td>The latest higher-timeframe candle used for the touch check.</td><td>Its range is compared with purple EMA9.</td></tr>
+                      <tr><td>Purple EMA9</td><td>Price level and distance %</td><td>The 9-period exponential moving average. Distance 0% means EMA9 is inside the candle range.</td><td>Must be touched/nearby for Step 1.</td></tr>
+                      <tr><td>Black EMA89</td><td>Pass / Block / Unknown</td><td>Pass means close is above EMA89. Block means close is below it. Unknown means fewer than 89 candles are available.</td><td>Mandatory higher-timeframe trend filter.</td></tr>
+                      <tr><td>EMA26</td><td>Pass / Block / Unknown</td><td>Light-green EMA26 relationship for close and purple EMA9.</td><td>Close below EMA26 blocks strict qualification.</td></tr>
+                      <tr><td>Yellow / Brown</td><td>Chande Kroll / VWMA20 values</td><td>Shows the yellow Chande Kroll line and brown VWMA20.</td><td>Final entry requires yellow above brown.</td></tr>
+                      <tr><td>Early Entry</td><td>entry_candidate / wait / missing</td><td>Early-entry timeframe candle close relative to yellow.</td><td>Candidate when its candle closes above yellow.</td></tr>
+                      <tr><td>Final Entry</td><td>entry_candidate / wait / missing</td><td>Final-entry timeframe confirmation, including yellow above brown.</td><td>Candidate only after all final conditions pass.</td></tr>
+                      <tr><td>Status / Blockers</td><td>qualified / step1_only</td><td>Qualified passed higher-timeframe filters. Step1-only shows the exact blocker.</td><td>Alerts require a strict setup plus entry confirmation.</td></tr>
+                      <tr><td>Entry Alerts</td><td>Early / Final</td><td>Historical entry events. Every entry event creates one unique trade ID.</td><td>Trade remains open until its exit condition triggers.</td></tr>
+                      <tr><td>Exit Alerts</td><td>Closed trade events</td><td>Created when the configured exit-timeframe candle closes below yellow.</td><td>Closes the matching trade ID.</td></tr>
+                      <tr><td>Open Trade IDs</td><td>Currently open</td><td>Entry alerts that do not yet have an exit alert.</td><td>All-time entries should equal open plus closed trades.</td></tr>
+                    </tbody>
+                  </table>
                 </div>
               </section>
 
@@ -1118,7 +1159,9 @@
                   <span id="purpleAlertMeta">Idle</span>
                 </div>
                 <div class="ops-body">
+                  <div id="purpleAlertTallyCards" class="compact-metrics"></div>
                   <div id="purpleAlertSummary" class="mini-list"></div>
+                  <div id="purpleAlertTallyPoints" class="mini-list"></div>
                 </div>
               </section>
 

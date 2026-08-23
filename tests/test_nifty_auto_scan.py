@@ -152,6 +152,17 @@ class NiftyAutoScanTests(unittest.TestCase):
             self.assertEqual(closed["trade"]["status"], "closed")
             self.assertEqual(repo.list_open_trades(), [])
             self.assertEqual([alert["alert_type"] for alert in repo.list_recent_alerts(limit=5)], ["exit", "entry"])
+            self.assertEqual(
+                repo.counts(),
+                {
+                    "entry_alerts": 1,
+                    "exit_alerts": 1,
+                    "open_trades": 0,
+                    "closed_trades": 1,
+                    "entry_tally_matches": True,
+                    "exit_tally_matches": True,
+                },
+            )
 
     def test_context_snapshot_and_candidates_save_load(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

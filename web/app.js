@@ -66,12 +66,12 @@ const BULK_TIMEFRAME_LABELS = {
 };
 
 const BULK_DERIVED_MIN_DAYS = {
-  month: 1460,
+  month: 3000,
   week: 730,
 };
 
 const PURPLE_PROFILES = {
-  month: { label: "Monthly", early: "120minute", final: "day", exit: "120minute", days: 1460 },
+  month: { label: "Monthly", early: "120minute", final: "day", exit: "120minute", days: 3000 },
   week: { label: "Weekly", early: "30minute", final: "120minute", exit: "30minute", days: 730 },
   day: { label: "Daily", early: "10minute", final: "10minute", exit: "10minute", days: 365 },
 };
@@ -1021,7 +1021,7 @@ async function refreshCandlesForPurple() {
 }
 
 async function refreshCandlesForAllPurpleProfiles() {
-  await refreshPurpleTimeframes(["month", "week", "day", "120minute", "30minute", "10minute"], 1460);
+  await refreshPurpleTimeframes(["month", "week", "day", "120minute", "30minute", "10minute"], 3000);
 }
 
 async function refreshPurpleTimeframes(timeframes, days) {
@@ -1168,8 +1168,8 @@ function renderPurpleStep1Results(rows = null) {
   if (!body) return;
   const filteredRows = filterPurpleCandidateRows(state.lastPurpleStep1Rows, "purpleStep1ProfileFilter", "purpleStep1EntryFilter");
   if (meta) {
-    const full = filteredRows.filter((row) => row.full_setup_status === "qualified").length;
-    meta.textContent = `${filteredRows.length} shown / ${state.lastPurpleStep1Rows.length} touch row(s), ${full} strict`;
+    const higherTfPassed = filteredRows.filter((row) => row.full_setup_status === "qualified").length;
+    meta.textContent = `${filteredRows.length} shown / ${state.lastPurpleStep1Rows.length} touch row(s), ${higherTfPassed} higher-TF filters passed`;
   }
   body.innerHTML = filteredRows.length
     ? filteredRows
@@ -1192,6 +1192,7 @@ function renderPurpleStep1Results(rows = null) {
           </td>
           <td>
             ${passFailCell(row.above_black_line, "above black EMA89")}
+            <div class="cell-note">${fmtInt(row.touch_candle_count || 0)} / 89 ${escapeHtml(purpleProfileLabel(row.purple_timeframe))} candles</div>
             <div class="cell-note">mandatory</div>
           </td>
           <td>
@@ -1362,7 +1363,8 @@ function scanSummaryFromLiveScan(data, rows, step1Rows = []) {
     points: [
       "Scanner evaluated Monthly, Weekly, and Daily purple-touch profiles together.",
       `Step 1 found ${step1Matched || step1Rows.length} higher-timeframe EMA9 touch row(s) before strict entry filters.`,
-      `Strict entry candidate table shows ${rows.length} row(s) after mandatory EMA89/EMA26/entry checks.`,
+      "Step 1 uses a wider 3% audit zone so near-touches remain visible; Latest Scan Candidates use the tighter 1% touch zone.",
+      `Latest Scan Candidates shows ${rows.length} row(s) after the tighter touch and mandatory EMA89/EMA26/trend checks; early/final entry can still be waiting.`,
       data.market_hours === false && !data.forced
         ? "Market is closed, so new alert creation was skipped unless force is enabled."
         : "Market-hours scanner created entry/exit alerts only for fresh matching opportunities.",
@@ -1429,6 +1431,13 @@ function renderPurpleAlerts(data = null) {
   data = state.lastPurpleAlertResponse || {};
   const alerts = data.recent_alerts || [];
   const trades = data.open_trades || [];
+  const counts = data.alert_counts || {};
+  const recentEntryCount = alerts.filter((alert) => alert.alert_type === "entry").length;
+  const recentExitCount = alerts.filter((alert) => alert.alert_type === "exit").length;
+  const totalEntryCount = Number(counts.entry_alerts ?? recentEntryCount);
+  const totalExitCount = Number(counts.exit_alerts ?? recentExitCount);
+  const totalOpenCount = Number(counts.open_trades ?? trades.length);
+  const totalClosedCount = Number(counts.closed_trades ?? totalExitCount);
   const entryAlerts = filterPurpleAlertRows(
     alerts.filter((alert) => alert.alert_type === "entry"),
     "purpleEntryAlertProfileFilter",
@@ -1440,9 +1449,17 @@ function renderPurpleAlerts(data = null) {
     "purpleExitAlertKindFilter",
   );
   const openTrades = filterPurpleAlertRows(trades, "purpleTradeProfileFilter", "purpleTradeEntryFilter");
-  $("purpleEntryAlertMeta").textContent = `${entryAlerts.length} shown / ${alerts.filter((alert) => alert.alert_type === "entry").length} entry alert(s)`;
-  $("purpleExitAlertMeta").textContent = `${exitAlerts.length} shown / ${alerts.filter((alert) => alert.alert_type === "exit").length} exit alert(s)`;
-  $("purpleOpenTradeMeta").textContent = `${openTrades.length} shown / ${trades.length} open`;
+  $("purpleEntryAlertMeta").textContent = `${entryAlerts.length} shown / ${totalEntryCount} total entry alert(s)`;
+  $("purpleExitAlertMeta").textContent = `${exitAlerts.length} shown / ${totalExitCount} total exit alert(s)`;
+  $("purpleOpenTradeMeta").textContent = `${openTrades.length} shown / ${totalOpenCount} total open`;
+  $("purpleAlertTallyCards").innerHTML = [
+    ["All-time entries", totalEntryCount],
+    ["Open trade IDs", totalOpenCount],
+    ["Closed trade IDs", totalClosedCount],
+    ["All-time exits", totalExitCount],
+  ]
+    .map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${fmtInt(value)}</strong></div>`)
+    .join("");
   $("purpleAlertSummary").innerHTML = [
     `Profiles scanned: ${profileList(data)}`,
     `Market hours: ${data.market_hours === true ? "Open" : data.market_hours === false ? "Closed" : "-"}`,
@@ -1451,11 +1468,20 @@ function renderPurpleAlerts(data = null) {
       : "",
     `Entry alerts created this run: ${fmtMetric(data.entry_alerts_created || 0)}`,
     `Exit alerts created this run: ${fmtMetric(data.exit_alerts_created || 0)}`,
-    `Open trade IDs: ${fmtMetric(trades.length)}`,
-    `Web UI: ${alerts.length} recent alert event(s) stored and displayed`,
+    `Open trade IDs loaded: ${fmtMetric(trades.length)} of ${fmtMetric(totalOpenCount)}`,
+    `Web UI alert history loaded: latest ${alerts.length} event(s) of ${fmtMetric(totalEntryCount + totalExitCount)} total`,
     `Telegram: ${telegramText(data.telegram)}`,
   ]
     .filter(Boolean)
+    .map((point) => `<div>${escapeHtml(point)}</div>`)
+    .join("");
+  const entryTallyMatches = counts.entry_tally_matches ?? totalEntryCount === totalOpenCount + totalClosedCount;
+  const exitTallyMatches = counts.exit_tally_matches ?? totalExitCount === totalClosedCount;
+  $("purpleAlertTallyPoints").innerHTML = [
+    `Entry tally: ${totalEntryCount} total entries = ${totalOpenCount} open + ${totalClosedCount} closed ${entryTallyMatches ? "(matches)" : "(does not match)"}.`,
+    `Exit tally: ${totalExitCount} exit alerts = ${totalClosedCount} closed trade IDs ${exitTallyMatches ? "(matches)" : "(does not match)"}.`,
+    `The Entry and Exit tables load only the latest ${data.recent_alert_limit || 50} alert events, so their visible rows may be lower than all-time totals.`,
+  ]
     .map((point) => `<div>${escapeHtml(point)}</div>`)
     .join("");
   $("purpleEntryAlertsBody").innerHTML = renderPurpleAlertTableRows(entryAlerts, "No entry alerts match these filters.", "alert-entry-row");
@@ -2973,16 +2999,17 @@ function enhanceCollapsibleSections() {
       wrapper.appendChild(title);
     }
     const button = document.createElement("button");
+    const panel = head.closest(".table-panel");
+    const initiallyCollapsed = panel.classList.contains("collapsed");
     button.className = "collapse-btn";
     button.type = "button";
-    button.textContent = "-";
-    button.title = "Collapse section";
-    button.setAttribute("aria-expanded", "true");
+    button.textContent = initiallyCollapsed ? "+" : "-";
+    button.title = initiallyCollapsed ? "Expand section" : "Collapse section";
+    button.setAttribute("aria-expanded", initiallyCollapsed ? "false" : "true");
     button.setAttribute("aria-controls", `panel-body-${index}`);
     const wrapper = head.querySelector(".panel-head-title") || head;
     wrapper.insertBefore(button, wrapper.firstChild);
     button.addEventListener("click", () => {
-      const panel = head.closest(".table-panel");
       const collapsed = !panel.classList.contains("collapsed");
       panel.classList.toggle("collapsed", collapsed);
       button.textContent = collapsed ? "+" : "-";
