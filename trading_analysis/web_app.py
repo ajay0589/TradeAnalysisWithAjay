@@ -134,6 +134,24 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         limit=_optional_limit(params.get("limit", ["50"])[0]),
                     )
                 )
+            elif parsed.path == "/api/krishna-purple-touch-scan":
+                params = parse_qs(parsed.query)
+                self._send_json(
+                    self.service.scan_krishna_purple_touch(
+                        purple_timeframe=params.get("purple_timeframe", ["week"])[0],
+                        days=_optional_int(params.get("days", [None])[0]),
+                        from_date=params.get("from_date", [None])[0] or None,
+                        to_date=params.get("to_date", [None])[0] or None,
+                        limit=_optional_limit(params.get("limit", ["50"])[0]),
+                    )
+                )
+            elif parsed.path == "/api/krishna-purple-touch-alerts":
+                params = parse_qs(parsed.query)
+                self._send_json(
+                    self.service.krishna_purple_touch_alerts(
+                        limit=_optional_int(params.get("limit", ["50"])[0]) or 50,
+                    )
+                )
             elif parsed.path == "/api/krishna-setup-backtest":
                 params = parse_qs(parsed.query)
                 self._send_json(
@@ -293,6 +311,19 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         strategy_params=payload.get("strategy_params") or payload.get("params") or {},
                         backtest_params=payload.get("backtest_params") or {},
                         limit_symbols=_optional_limit(str(payload.get("limit_symbols") or "50")),
+                    )
+                )
+            elif parsed.path == "/api/krishna-purple-touch-live-scan":
+                payload = self._read_json()
+                self._send_json(
+                    self.service.scan_krishna_purple_touch_alerts(
+                        purple_timeframe=str(payload.get("purple_timeframe") or "all"),
+                        days=_optional_int(payload.get("days")),
+                        from_date=payload.get("from_date") or None,
+                        to_date=payload.get("to_date") or None,
+                        limit=_optional_limit(str(payload.get("limit") or "all")),
+                        force=bool(payload.get("force")),
+                        send_telegram=bool(payload.get("send_telegram", True)),
                     )
                 )
             elif parsed.path == "/api/option-chain-monitor/start":

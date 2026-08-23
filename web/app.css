@@ -567,6 +567,46 @@ label {
   margin: 10px 0;
 }
 
+.monitor-status {
+  border: 1px solid var(--line);
+  background: #f9fafb;
+  padding: 9px 10px;
+  border-radius: 6px;
+  margin: 8px 0 12px;
+}
+
+.monitor-status strong,
+.monitor-status span {
+  display: block;
+}
+
+.monitor-status strong {
+  font-size: 13px;
+}
+
+.monitor-status span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.monitor-status.running {
+  border-color: #9bd8c3;
+  background: #effaf5;
+}
+
+.monitor-status.stopped {
+  border-color: #f0b8b3;
+  background: #fff5f4;
+}
+
+button:disabled,
+select:disabled,
+input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .alert-important td {
   background: #fff7e6;
 }

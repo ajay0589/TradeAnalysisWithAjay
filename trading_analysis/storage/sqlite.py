@@ -283,6 +283,68 @@ def initialize_database(path: str | Path = DEFAULT_DB_PATH) -> None:
             ON nifty_iv_observations(symbol, captured_at)
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS krishna_purple_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                alert_type TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                purple_timeframe TEXT,
+                entry_kind TEXT,
+                status TEXT,
+                price REAL,
+                yellow_line REAL,
+                score REAL,
+                confidence TEXT,
+                title TEXT,
+                message TEXT,
+                reasons_json TEXT,
+                warnings_json TEXT,
+                metadata_json TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_krishna_purple_alerts_recent
+            ON krishna_purple_alerts(created_at DESC)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS krishna_purple_trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_id TEXT NOT NULL UNIQUE,
+                symbol TEXT NOT NULL,
+                purple_timeframe TEXT,
+                entry_kind TEXT,
+                status TEXT NOT NULL,
+                opened_at TEXT NOT NULL,
+                closed_at TEXT,
+                entry_timeframe TEXT,
+                exit_timeframe TEXT,
+                entry_price REAL,
+                exit_price REAL,
+                entry_yellow_line REAL,
+                exit_yellow_line REAL,
+                score REAL,
+                confidence TEXT,
+                last_alert_id INTEGER,
+                last_checked_at TEXT,
+                reasons_json TEXT,
+                warnings_json TEXT,
+                metadata_json TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_krishna_purple_trades_status
+            ON krishna_purple_trades(status, symbol, purple_timeframe, entry_kind)
+            """
+        )
 
 
 class MarketJobRepository:
@@ -468,6 +530,206 @@ class NiftyAlertRepository:
             if not materially_better and not more_severe:
                 return True
         return False
+
+
+class KrishnaPurpleAlertRepository:
+    def __init__(self, db_path: str | Path = DEFAULT_DB_PATH) -> None:
+        self.db_path = Path(db_path)
+        initialize_database(self.db_path)
+
+    def open_entry_alert(self, match: dict[str, Any], entry: dict[str, Any], entry_kind: str) -> dict[str, Any]:
+        symbol = str(match.get("symbol") or "").upper()
+        purple_timeframe = str(match.get("purple_timeframe") or "")
+        existing = self.open_trade(symbol, purple_timeframe, entry_kind)
+        if existing:
+            return {"created": False, "trade": existing, "alert": None}
+
+        trade_id = _purple_trade_id(symbol, purple_timeframe, entry_kind)
+        now = _now()
+        reasons = list(match.get("reasons") or []) + list(entry.get("reasons") or [])
+        warnings = list(match.get("warnings") or []) + list(entry.get("warnings") or [])
+        metadata = {
+            "entry": entry,
+            "profile": match.get("profile") or {},
+            "exit_rule": match.get("exit_rule"),
+        }
+        with _connection(self.db_path) as conn:
+            trade_cursor = conn.execute(
+                """
+                INSERT INTO krishna_purple_trades(
+                    trade_id, symbol, purple_timeframe, entry_kind, status, opened_at,
+                    entry_timeframe, exit_timeframe, entry_price, entry_yellow_line,
+                    score, confidence, last_checked_at, reasons_json, warnings_json, metadata_json
+                )
+                VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    trade_id,
+                    symbol,
+                    purple_timeframe,
+                    entry_kind,
+                    now,
+                    entry.get("timeframe"),
+                    (match.get("profile") or {}).get("exit_timeframe"),
+                    _optional_float(entry.get("close")),
+                    _optional_float(entry.get("yellow_line")),
+                    _optional_float(match.get("score")),
+                    match.get("confidence"),
+                    now,
+                    _json(reasons),
+                    _json(warnings),
+                    _json(metadata),
+                ),
+            )
+            alert = self._insert_alert(
+                conn,
+                trade_id=trade_id,
+                alert_type="entry",
+                symbol=symbol,
+                purple_timeframe=purple_timeframe,
+                entry_kind=entry_kind,
+                status="open",
+                price=entry.get("close"),
+                yellow_line=entry.get("yellow_line"),
+                score=match.get("score"),
+                confidence=match.get("confidence"),
+                title=f"{symbol} {entry_kind} purple-touch entry candidate",
+                message=f"{symbol} {entry_kind} entry candidate on {entry.get('timeframe')} close above yellow.",
+                reasons=reasons,
+                warnings=warnings,
+                metadata=metadata,
+            )
+            conn.execute(
+                "UPDATE krishna_purple_trades SET last_alert_id = ? WHERE id = ?",
+                (alert["id"], trade_cursor.lastrowid),
+            )
+            trade = conn.execute("SELECT * FROM krishna_purple_trades WHERE trade_id = ?", (trade_id,)).fetchone()
+        return {"created": True, "trade": _purple_trade_row(trade), "alert": alert}
+
+    def close_trade_alert(self, trade: dict[str, Any], exit_snapshot: dict[str, Any]) -> dict[str, Any]:
+        now = _now()
+        reasons = list(exit_snapshot.get("reasons") or [])
+        warnings = list(exit_snapshot.get("warnings") or [])
+        with _connection(self.db_path) as conn:
+            alert = self._insert_alert(
+                conn,
+                trade_id=trade["trade_id"],
+                alert_type="exit",
+                symbol=trade["symbol"],
+                purple_timeframe=trade.get("purple_timeframe"),
+                entry_kind=trade.get("entry_kind"),
+                status="closed",
+                price=exit_snapshot.get("close"),
+                yellow_line=exit_snapshot.get("yellow_line"),
+                score=trade.get("score"),
+                confidence=trade.get("confidence"),
+                title=f"{trade['symbol']} purple-touch exit triggered",
+                message=f"{trade['symbol']} {trade.get('exit_timeframe')} candle closed below yellow; review/exit condition triggered.",
+                reasons=reasons or ["Exit timeframe candle closed below yellow Chande Kroll line."],
+                warnings=warnings,
+                metadata={"exit": exit_snapshot},
+            )
+            conn.execute(
+                """
+                UPDATE krishna_purple_trades
+                SET status = 'closed', closed_at = ?, exit_price = ?, exit_yellow_line = ?,
+                    last_alert_id = ?, last_checked_at = ?
+                WHERE trade_id = ?
+                """,
+                (
+                    now,
+                    _optional_float(exit_snapshot.get("close")),
+                    _optional_float(exit_snapshot.get("yellow_line")),
+                    alert["id"],
+                    now,
+                    trade["trade_id"],
+                ),
+            )
+            updated = conn.execute("SELECT * FROM krishna_purple_trades WHERE trade_id = ?", (trade["trade_id"],)).fetchone()
+        return {"created": True, "trade": _purple_trade_row(updated), "alert": alert}
+
+    def update_checked(self, trade_id: str) -> None:
+        with _connection(self.db_path) as conn:
+            conn.execute("UPDATE krishna_purple_trades SET last_checked_at = ? WHERE trade_id = ?", (_now(), trade_id))
+
+    def open_trade(self, symbol: str, purple_timeframe: str, entry_kind: str) -> dict[str, Any] | None:
+        with _connection(self.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM krishna_purple_trades
+                WHERE symbol = ? AND purple_timeframe = ? AND entry_kind = ? AND status = 'open'
+                ORDER BY opened_at DESC LIMIT 1
+                """,
+                (symbol.upper(), purple_timeframe, entry_kind),
+            ).fetchone()
+        return _purple_trade_row(row) if row else None
+
+    def list_open_trades(self, limit: int = 200) -> list[dict[str, Any]]:
+        with _connection(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT * FROM krishna_purple_trades WHERE status = 'open' ORDER BY opened_at DESC LIMIT ?",
+                (max(1, int(limit)),),
+            ).fetchall()
+        return [_purple_trade_row(row) for row in rows]
+
+    def list_recent_alerts(self, limit: int = 50) -> list[dict[str, Any]]:
+        with _connection(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT * FROM krishna_purple_alerts ORDER BY created_at DESC, id DESC LIMIT ?",
+                (max(1, int(limit)),),
+            ).fetchall()
+        return [_purple_alert_row(row) for row in rows]
+
+    def _insert_alert(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        trade_id: str,
+        alert_type: str,
+        symbol: str,
+        purple_timeframe: str | None,
+        entry_kind: str | None,
+        status: str,
+        price: Any,
+        yellow_line: Any,
+        score: Any,
+        confidence: str | None,
+        title: str,
+        message: str,
+        reasons: list[str],
+        warnings: list[str],
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        cursor = conn.execute(
+            """
+            INSERT INTO krishna_purple_alerts(
+                trade_id, created_at, alert_type, symbol, purple_timeframe, entry_kind,
+                status, price, yellow_line, score, confidence, title, message,
+                reasons_json, warnings_json, metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                trade_id,
+                _now(),
+                alert_type,
+                symbol.upper(),
+                purple_timeframe,
+                entry_kind,
+                status,
+                _optional_float(price),
+                _optional_float(yellow_line),
+                _optional_float(score),
+                confidence,
+                title,
+                message,
+                _json(reasons),
+                _json(warnings),
+                _json(metadata),
+            ),
+        )
+        row = conn.execute("SELECT * FROM krishna_purple_alerts WHERE id = ?", (cursor.lastrowid,)).fetchone()
+        return _purple_alert_row(row)
 
 
 class NiftyCandleRepository:
@@ -1005,6 +1267,11 @@ def _candidate_direction(candidate: dict[str, Any]) -> str | None:
     return None
 
 
+def _purple_trade_id(symbol: str, purple_timeframe: str, entry_kind: str) -> str:
+    stamp = datetime.now(IST).strftime("%Y%m%d%H%M%S")
+    return f"KPT-{stamp}-{symbol.upper()}-{purple_timeframe}-{entry_kind}".replace(" ", "_")
+
+
 def _get(value: Any, key: str) -> Any:
     if isinstance(value, dict):
         return value.get(key)
@@ -1086,6 +1353,54 @@ def _alert_row(row: sqlite3.Row) -> dict[str, Any]:
         "context_snapshot_id": row["context_snapshot_id"],
         "is_active": bool(row["is_active"]),
         "acknowledged_at": row["acknowledged_at"],
+    }
+
+
+def _purple_alert_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "trade_id": row["trade_id"],
+        "created_at": row["created_at"],
+        "alert_type": row["alert_type"],
+        "symbol": row["symbol"],
+        "purple_timeframe": row["purple_timeframe"],
+        "entry_kind": row["entry_kind"],
+        "status": row["status"],
+        "price": row["price"],
+        "yellow_line": row["yellow_line"],
+        "score": row["score"],
+        "confidence": row["confidence"],
+        "title": row["title"],
+        "message": row["message"],
+        "reasons": _loads(row["reasons_json"], []),
+        "warnings": _loads(row["warnings_json"], []),
+        "metadata": _loads(row["metadata_json"], {}),
+    }
+
+
+def _purple_trade_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "trade_id": row["trade_id"],
+        "symbol": row["symbol"],
+        "purple_timeframe": row["purple_timeframe"],
+        "entry_kind": row["entry_kind"],
+        "status": row["status"],
+        "opened_at": row["opened_at"],
+        "closed_at": row["closed_at"],
+        "entry_timeframe": row["entry_timeframe"],
+        "exit_timeframe": row["exit_timeframe"],
+        "entry_price": row["entry_price"],
+        "exit_price": row["exit_price"],
+        "entry_yellow_line": row["entry_yellow_line"],
+        "exit_yellow_line": row["exit_yellow_line"],
+        "score": row["score"],
+        "confidence": row["confidence"],
+        "last_alert_id": row["last_alert_id"],
+        "last_checked_at": row["last_checked_at"],
+        "reasons": _loads(row["reasons_json"], []),
+        "warnings": _loads(row["warnings_json"], []),
+        "metadata": _loads(row["metadata_json"], {}),
     }
 
 

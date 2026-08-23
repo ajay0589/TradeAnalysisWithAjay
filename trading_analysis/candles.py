@@ -30,6 +30,12 @@ TIMEFRAME_ALIASES = {
     "2h": "120minute",
     "120min": "120minute",
     "120minute": "120minute",
+    "30min": "30minute",
+    "30m": "30minute",
+    "30minute": "30minute",
+    "10min": "10minute",
+    "10m": "10minute",
+    "10minute": "10minute",
     "15min": "15minute",
     "15m": "15minute",
     "15minute": "15minute",
@@ -41,12 +47,16 @@ TIMEFRAME_LABELS = {
     "day": "Daily",
     "60minute": "1 hour",
     "120minute": "2 hour",
+    "30minute": "30 min",
+    "10minute": "10 min",
     "15minute": "15 min",
 }
 
 FETCH_INTERVALS = {
     "day": "day",
     "60minute": "60minute",
+    "30minute": "30minute",
+    "10minute": "10minute",
     "15minute": "15minute",
 }
 

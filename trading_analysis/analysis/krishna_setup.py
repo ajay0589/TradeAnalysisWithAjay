@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from trading_analysis.analysis.market_structure import MarketStructure
-from trading_analysis.analysis.technical import atr, ema
+from trading_analysis.analysis.technical import atr, ema, rsi
 from trading_analysis.models import Candle
 
 
@@ -61,6 +61,64 @@ class KrishnaEntryTrigger:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class KrishnaPurpleTouchConfig:
+    min_candles: int = 52
+    purple_touch_tolerance_percent: float = 1.0
+
+
+@dataclass(frozen=True)
+class KrishnaPurpleProfile:
+    purple_timeframe: str
+    label: str
+    early_timeframe: str
+    final_timeframe: str
+    exit_timeframe: str
+    minimum_days: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class KrishnaPurpleTouchMatch:
+    symbol: str
+    purple_timeframe: str
+    purple_timeframe_label: str
+    score: int
+    confidence: str
+    close: float
+    purple_ema9: float | None
+    light_green_level: float | None
+    brown_vwma20: float | None
+    yellow_line: float | None
+    blue_line: float | None
+    ema26: float | None
+    ema89: float | None
+    rsi14: float | None
+    purple_touch: bool
+    yellow_below_ema26: bool | None
+    brown_vs_light_green: str
+    above_black_line: bool | None
+    early_entry: dict[str, Any]
+    final_entry: dict[str, Any]
+    exit_rule: str
+    understood_rules: list[str]
+    open_questions: list[str]
+    reasons: list[str]
+    warnings: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+PURPLE_TOUCH_PROFILES: dict[str, KrishnaPurpleProfile] = {
+    "month": KrishnaPurpleProfile("month", "Monthly purple touch", "120minute", "day", "120minute", 1460),
+    "week": KrishnaPurpleProfile("week", "Weekly purple touch", "30minute", "120minute", "30minute", 730),
+    "day": KrishnaPurpleProfile("day", "Daily purple touch", "10minute", "10minute", "10minute", 365),
+}
 
 
 def scan_krishna_bullish_setup(
@@ -270,15 +328,209 @@ def scan_krishna_entry_trigger(
     )
 
 
+def krishna_purple_profile(purple_timeframe: str) -> KrishnaPurpleProfile:
+    key = _normalize_purple_timeframe(purple_timeframe)
+    return PURPLE_TOUCH_PROFILES[key]
+
+
+def scan_krishna_purple_touch_setup(
+    symbol: str,
+    touch_candles: list[Candle],
+    early_candles: list[Candle] | None = None,
+    final_candles: list[Candle] | None = None,
+    purple_timeframe: str = "week",
+    structure: MarketStructure | None = None,
+    config: KrishnaPurpleTouchConfig | None = None,
+) -> KrishnaPurpleTouchMatch | None:
+    config = config or KrishnaPurpleTouchConfig()
+    profile = krishna_purple_profile(purple_timeframe)
+    touch_candles = sorted(touch_candles, key=lambda candle: candle.timestamp)
+    if len(touch_candles) < config.min_candles:
+        return None
+
+    levels = _levels(touch_candles)
+    latest = touch_candles[-1]
+    ema9 = levels["ema9"]
+    ema26 = levels["ema26"]
+    if ema9 is None or ema26 is None:
+        return None
+
+    reasons: list[str] = []
+    warnings: list[str] = []
+    open_questions: list[str] = []
+    score = 35
+
+    tolerance = config.purple_touch_tolerance_percent / 100
+    purple_touch = latest.low <= ema9 * (1 + tolerance) and latest.high >= ema9 * (1 - tolerance)
+    if not purple_touch:
+        return None
+    score += 20
+    reasons.append("Latest higher-timeframe candle touched the purple EMA9 zone.")
+
+    if levels["ema9"] > levels["ema26"]:
+        score += 8
+        reasons.append("EMA9 is above EMA26; short-term higher-timeframe trend remains constructive.")
+    else:
+        warnings.append("EMA9 is not above EMA26 on the purple-touch timeframe.")
+
+    if latest.close >= ema26:
+        score += 8
+        reasons.append("Close is above EMA26/light-green moving-average area.")
+    else:
+        return None
+
+    if structure and structure.trend == "downtrend":
+        return None
+    if structure and structure.trend == "uptrend":
+        score += 8
+        reasons.append("Market structure is an uptrend.")
+    elif structure:
+        score += 3
+        reasons.append("Market structure is not downtrend.")
+
+    above_black = latest.close > levels["ema89"] if levels["ema89"] is not None else None
+    if above_black is True:
+        score += 7
+        reasons.append("Close is above the black EMA89 trend line; Krishna marked this mandatory.")
+    elif above_black is False:
+        return None
+    else:
+        return None
+
+    yellow = levels["ck_yellow_line"]
+    light_green = ema26
+    brown = levels["vwma20"]
+    yellow_below_ema26 = yellow < light_green if yellow is not None and light_green is not None else None
+    if yellow_below_ema26 is True:
+        score += 6
+        reasons.append("Yellow Chande Kroll line is below light-green EMA26.")
+    elif yellow_below_ema26 is False:
+        warnings.append("Yellow Chande Kroll line is not below light-green EMA26.")
+    else:
+        warnings.append("Yellow/EMA26 relationship is unavailable.")
+
+    brown_relation = _relation(brown, light_green)
+    if brown_relation != "unknown":
+        reasons.append(f"Brown VWMA20 is {brown_relation} light-green EMA26.")
+
+    early_entry = _purple_entry_snapshot(symbol, early_candles, profile.early_timeframe, "early")
+    final_entry = _purple_entry_snapshot(symbol, final_candles, profile.final_timeframe, "final")
+    if early_entry["status"] == "entry_candidate":
+        score += 7
+    if final_entry["status"] == "entry_candidate":
+        score += 9
+    if final_entry.get("yellow_above_brown"):
+        score += 5
+
+    understood_rules = [
+        f"{profile.label}: first shortlist stocks where the higher timeframe candle touches the purple EMA9 zone.",
+        f"Early entry timeframe: {profile.early_timeframe}; candle close above yellow Chande Kroll line.",
+        f"Final entry timeframe: {profile.final_timeframe}; candle close above yellow Chande Kroll line.",
+        f"Exit for both entry styles: {profile.exit_timeframe} candle close below yellow Chande Kroll line.",
+        "Black EMA89 filter is mandatory.",
+        "Light green is EMA26; Ichimoku, VWAP, and Donchian Channel 20 are ignored for this setup.",
+        "Final entry requires yellow Chande Kroll above brown VWMA20.",
+        "RSI bullish divergence is optional and only improves quality when present.",
+        "Close above blue Chande Kroll is a rare stronger confirmation.",
+    ]
+    score = max(0, min(100, score))
+    return KrishnaPurpleTouchMatch(
+        symbol=symbol.upper(),
+        purple_timeframe=profile.purple_timeframe,
+        purple_timeframe_label=profile.label,
+        score=score,
+        confidence=_confidence(score, warnings),
+        close=latest.close,
+        purple_ema9=ema9,
+        light_green_level=light_green,
+        brown_vwma20=brown,
+        yellow_line=yellow,
+        blue_line=levels["ck_blue_line"],
+        ema26=ema26,
+        ema89=levels["ema89"],
+        rsi14=levels["rsi14"],
+        purple_touch=purple_touch,
+        yellow_below_ema26=yellow_below_ema26,
+        brown_vs_light_green=brown_relation,
+        above_black_line=above_black,
+        early_entry=early_entry,
+        final_entry=final_entry,
+        exit_rule=f"Exit/review if {profile.exit_timeframe} candle closes below yellow Chande Kroll line.",
+        understood_rules=understood_rules,
+        open_questions=open_questions,
+        reasons=reasons,
+        warnings=warnings + list(early_entry.get("warnings") or []) + list(final_entry.get("warnings") or []),
+    )
+
+
+def scan_krishna_purple_exit_status(symbol: str, candles: list[Candle] | None, timeframe: str) -> dict[str, Any]:
+    if not candles:
+        return {
+            "symbol": symbol.upper(),
+            "timeframe": timeframe,
+            "status": "missing",
+            "reasons": [],
+            "warnings": [f"Cached {timeframe} candles are needed to check the exit condition."],
+        }
+    candles = sorted(candles, key=lambda candle: candle.timestamp)
+    if len(candles) < 30:
+        return {
+            "symbol": symbol.upper(),
+            "timeframe": timeframe,
+            "status": "insufficient",
+            "trigger_date": candles[-1].timestamp.isoformat(),
+            "reasons": [],
+            "warnings": [f"Needs at least 30 {timeframe} candles to check the exit condition."],
+        }
+    levels = _levels(candles)
+    latest = candles[-1]
+    yellow = levels["ck_yellow_line"]
+    if yellow is None:
+        return {
+            "symbol": symbol.upper(),
+            "timeframe": timeframe,
+            "status": "unknown",
+            "trigger_date": latest.timestamp.isoformat(),
+            "close": latest.close,
+            "yellow_line": None,
+            "reasons": [],
+            "warnings": ["Yellow Chande Kroll line is unavailable for exit tracking."],
+        }
+    if latest.close < yellow:
+        return {
+            "symbol": symbol.upper(),
+            "timeframe": timeframe,
+            "status": "exit_triggered",
+            "trigger_date": latest.timestamp.isoformat(),
+            "close": latest.close,
+            "yellow_line": yellow,
+            "reasons": [f"{timeframe_label_text(timeframe)} candle closed below yellow Chande Kroll line."],
+            "warnings": [],
+        }
+    return {
+        "symbol": symbol.upper(),
+        "timeframe": timeframe,
+        "status": "open",
+        "trigger_date": latest.timestamp.isoformat(),
+        "close": latest.close,
+        "yellow_line": yellow,
+        "reasons": [f"{timeframe_label_text(timeframe)} candle remains above yellow Chande Kroll line."],
+        "warnings": [],
+    }
+
+
 def _levels(candles: list[Candle]) -> dict[str, float | None]:
     closes = [candle.close for candle in candles]
     volumes = [candle.volume for candle in candles]
     ck_long, ck_short = _chande_kroll_stops(candles)
+    yellow_candidates = [value for value in (ck_long, ck_short) if value is not None]
     upper, mid, lower = _donchian(candles, 20)
     avg_volume20 = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else None
+    ichimoku = _ichimoku_levels(candles)
     return {
         "ema9": ema(closes, 9),
         "ema26": ema(closes, 26),
+        "ema89": ema(closes, 89),
         "vwap": _session_vwap(candles),
         "vwma20": _vwma(candles, 20),
         "donchian_upper20": upper,
@@ -287,6 +539,10 @@ def _levels(candles: list[Candle]) -> dict[str, float | None]:
         "volume_ratio20": candles[-1].volume / avg_volume20 if avg_volume20 else None,
         "atr14": atr(candles, 14),
         "yellow_line": max(value for value in (ck_long, ck_short) if value is not None) if ck_long is not None or ck_short is not None else None,
+        "ck_yellow_line": min(yellow_candidates) if yellow_candidates else None,
+        "ck_blue_line": max(yellow_candidates) if yellow_candidates else None,
+        "rsi14": rsi(closes, 14),
+        **ichimoku,
     }
 
 
@@ -322,6 +578,31 @@ def _donchian(candles: list[Candle], period: int) -> tuple[float | None, float |
     return upper, (upper + lower) / 2, lower
 
 
+def _ichimoku_levels(candles: list[Candle]) -> dict[str, float | None]:
+    if len(candles) < 52:
+        return {
+            "ichimoku_green": None,
+            "ichimoku_pink": None,
+            "ichimoku_cloud_top": None,
+            "ichimoku_cloud_bottom": None,
+        }
+    tenkan = _midpoint(candles, 9)
+    kijun = _midpoint(candles, 26)
+    span_a = (tenkan + kijun) / 2
+    span_b = _midpoint(candles, 52)
+    return {
+        "ichimoku_green": span_a,
+        "ichimoku_pink": span_b,
+        "ichimoku_cloud_top": max(span_a, span_b),
+        "ichimoku_cloud_bottom": min(span_a, span_b),
+    }
+
+
+def _midpoint(candles: list[Candle], period: int) -> float:
+    window = candles[-period:]
+    return (max(candle.high for candle in window) + min(candle.low for candle in window)) / 2
+
+
 def _session_vwap(candles: list[Candle]) -> float | None:
     latest = candles[-1]
     session = [candle for candle in candles if candle.timestamp.date() == latest.timestamp.date()]
@@ -341,6 +622,130 @@ def _vwma(candles: list[Candle], period: int) -> float | None:
     return sum(candle.close * candle.volume for candle in window) / total_volume
 
 
+def _purple_entry_snapshot(
+    symbol: str,
+    candles: list[Candle] | None,
+    timeframe: str,
+    entry_kind: str,
+) -> dict[str, Any]:
+    if not candles:
+        return {
+            "symbol": symbol.upper(),
+            "timeframe": timeframe,
+            "entry_kind": entry_kind,
+            "status": "missing",
+            "warnings": [f"Cached {timeframe} candles are needed for {entry_kind} entry status."],
+            "reasons": [],
+        }
+    candles = sorted(candles, key=lambda candle: candle.timestamp)
+    if len(candles) < 30:
+        return {
+            "symbol": symbol.upper(),
+            "timeframe": timeframe,
+            "entry_kind": entry_kind,
+            "status": "insufficient",
+            "trigger_date": candles[-1].timestamp.isoformat(),
+            "warnings": [f"Needs at least 30 {timeframe} candles for {entry_kind} entry status."],
+            "reasons": [],
+        }
+    levels = _levels(candles)
+    latest = candles[-1]
+    yellow = levels["ck_yellow_line"]
+    blue = levels["ck_blue_line"]
+    brown = levels["vwma20"]
+    rsi14 = levels["rsi14"]
+    reasons: list[str] = []
+    warnings: list[str] = []
+    if yellow is None:
+        warnings.append("Yellow Chande Kroll line is unavailable.")
+    close_above_yellow = latest.close > yellow if yellow is not None else False
+    if close_above_yellow:
+        reasons.append(f"{entry_kind.title()} timeframe candle closed above yellow Chande Kroll line.")
+    else:
+        warnings.append(f"{entry_kind.title()} timeframe candle has not closed above yellow Chande Kroll line.")
+    yellow_above_brown = yellow > brown if yellow is not None and brown is not None else None
+    if entry_kind == "final":
+        if yellow_above_brown is True:
+            reasons.append("Yellow Chande Kroll line is above brown VWMA20; Krishna marked this mandatory.")
+        elif yellow_above_brown is False:
+            warnings.append("Yellow Chande Kroll line is not above brown VWMA20; final entry is not active.")
+    divergence = _bullish_rsi_divergence(candles)
+    if divergence:
+        reasons.append("Possible bullish RSI divergence is present.")
+    close_above_blue = latest.close > blue if blue is not None else None
+    if close_above_blue:
+        reasons.append("Close is above the blue Chande Kroll line; Krishna marked this as rare/stronger.")
+    status = "entry_candidate" if close_above_yellow and (entry_kind != "final" or yellow_above_brown is True) else "wait"
+    return {
+        "symbol": symbol.upper(),
+        "timeframe": timeframe,
+        "entry_kind": entry_kind,
+        "status": status,
+        "trigger_date": latest.timestamp.isoformat(),
+        "close": latest.close,
+        "yellow_line": yellow,
+        "brown_vwma20": brown,
+        "blue_line": blue,
+        "rsi14": rsi14,
+        "close_above_yellow": close_above_yellow,
+        "yellow_above_brown": yellow_above_brown,
+        "close_above_blue": close_above_blue,
+        "rsi_divergence": divergence,
+        "entry_price_reference": latest.close if close_above_yellow else None,
+        "exit_rule": f"Exit/review if {timeframe} candle closes below yellow Chande Kroll line.",
+        "reasons": reasons,
+        "warnings": warnings,
+    }
+
+
+def _bullish_rsi_divergence(candles: list[Candle], lookback: int = 24) -> bool:
+    if len(candles) < max(lookback, 16):
+        return False
+    closes = [candle.close for candle in candles]
+    first_half = candles[-lookback : -lookback // 2]
+    second_half = candles[-lookback // 2 :]
+    first_index = min(range(len(first_half)), key=lambda index: first_half[index].low)
+    second_index = min(range(len(second_half)), key=lambda index: second_half[index].low)
+    first_candle_index = len(candles) - lookback + first_index
+    second_candle_index = len(candles) - (lookback // 2) + second_index
+    first_rsi = rsi(closes[: first_candle_index + 1], 14)
+    second_rsi = rsi(closes[: second_candle_index + 1], 14)
+    return (
+        first_rsi is not None
+        and second_rsi is not None
+        and second_half[second_index].low <= first_half[first_index].low
+        and second_rsi > first_rsi
+    )
+
+
+def _relation(left: float | None, right: float | None) -> str:
+    if left is None or right is None:
+        return "unknown"
+    if left > right:
+        return "above"
+    if left < right:
+        return "below"
+    return "at"
+
+
+def _normalize_purple_timeframe(value: str) -> str:
+    key = str(value or "week").strip().lower().replace("_", "").replace("-", "")
+    aliases = {
+        "monthly": "month",
+        "month": "month",
+        "1m": "month",
+        "weekly": "week",
+        "week": "week",
+        "1w": "week",
+        "daily": "day",
+        "day": "day",
+        "1d": "day",
+    }
+    if key not in aliases:
+        raise ValueError("Use purple timeframe monthly, weekly, or daily.")
+    return aliases[key]
+
+
 def _confidence(score: int, warnings: list[str]) -> str:
     if warnings:
         return "medium" if score >= 75 else "low"
@@ -349,3 +754,17 @@ def _confidence(score: int, warnings: list[str]) -> str:
     if score >= 60:
         return "medium"
     return "low"
+
+
+def timeframe_label_text(timeframe: str) -> str:
+    labels = {
+        "month": "Monthly",
+        "week": "Weekly",
+        "day": "Daily",
+        "120minute": "2-hour",
+        "60minute": "1-hour",
+        "30minute": "30-minute",
+        "15minute": "15-minute",
+        "10minute": "10-minute",
+    }
+    return labels.get(timeframe, timeframe)

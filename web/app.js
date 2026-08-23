@@ -5,6 +5,12 @@ const state = {
   bulkPollTimer: null,
   krishnaRefreshJobId: null,
   lastKrishnaRows: [],
+  purpleRefreshJobId: null,
+  lastPurpleRows: [],
+  lastPurpleAlerts: [],
+  purpleAutoTimer: null,
+  purpleMonitorRunning: false,
+  purpleScanInFlight: false,
   lastBacktest: null,
   strategies: [],
   lastGenericBacktest: null,
@@ -51,12 +57,20 @@ const BULK_TIMEFRAME_LABELS = {
   week: "Weekly",
   day: "Day",
   "60minute": "1 hour",
+  "30minute": "30 min",
   "15minute": "15 min",
+  "10minute": "10 min",
 };
 
 const BULK_DERIVED_MIN_DAYS = {
   month: 1460,
   week: 730,
+};
+
+const PURPLE_PROFILES = {
+  month: { label: "Monthly", early: "120minute", final: "day", exit: "120minute", days: 1460 },
+  week: { label: "Weekly", early: "30minute", final: "120minute", exit: "30minute", days: 730 },
+  day: { label: "Daily", early: "10minute", final: "10minute", exit: "10minute", days: 365 },
 };
 
 const OPPORTUNITY_LABELS = {
@@ -942,6 +956,443 @@ function downloadKrishnaCsv() {
     { label: "Reasons", value: (row) => row.reasons || row.reasons_text },
     { label: "Warnings", value: (row) => row.warnings },
   ]);
+}
+
+function purpleProfile() {
+  return PURPLE_PROFILES[$("purpleTimeframe").value] || PURPLE_PROFILES.week;
+}
+
+function updatePurpleDefaults() {
+  renderPurpleRules({
+    profiles: Object.entries(PURPLE_PROFILES).map(([key, profile]) => ({
+      purple_timeframe: key,
+      label: profile.label,
+      early_timeframe: profile.early,
+      final_timeframe: profile.final,
+      exit_timeframe: profile.exit,
+    })),
+  });
+}
+
+async function runPurpleScan() {
+  const selected = $("purpleTimeframe").value;
+  const profile = purpleProfile();
+  setNotes("Running Krishna purple-touch entry scan...");
+  setPurpleProgress("running", `Preparing ${profile.label} purple-touch filter...`);
+  try {
+    if ($("purpleRefreshToggle").checked) {
+      await refreshCandlesForPurple();
+    }
+    const params = new URLSearchParams({ purple_timeframe: selected });
+    const days = $("purpleDays").value.trim();
+    const limit = $("purpleLimit").value.trim();
+    if (days) params.set("days", days);
+    params.set("limit", limit || "50");
+    setPurpleProgress("running", "Filtering cached candles for purple-touch setup...");
+    const data = await api(`/api/krishna-purple-touch-scan?${params.toString()}`);
+    if (data.summary && $("purpleRefreshToggle").checked) {
+      data.summary.latest_candles_pulled = true;
+      data.summary.points = [
+        `Pulled required candle sources before running ${profile.label} purple-touch scan.`,
+        ...(data.summary.points || []),
+      ];
+    }
+    $("purpleMeta").textContent = `${data.results.length} shown / ${data.matched_symbols} matched / ${data.analyzed_symbols} analyzed / ${data.purple_timeframe_label}`;
+    $("purpleResultMeta").textContent = `${data.results.length} shown`;
+    renderPurpleRules(data);
+    renderPurpleSummary(data.summary);
+    renderPurpleResults(data.results);
+    setPurpleProgress("completed", `${data.results.length} shown from ${data.matched_symbols} matching stock(s).`);
+    setNotes("Purple-touch shortlist is ready for manual chart review with Krishna.");
+  } catch (error) {
+    setPurpleProgress("failed", error.message);
+    setNotes([error.message], true);
+  }
+}
+
+async function refreshCandlesForPurple() {
+  const selected = $("purpleTimeframe").value;
+  const profile = purpleProfile();
+  const timeframes = Array.from(new Set([selected, profile.early, profile.final, profile.exit]));
+  await refreshPurpleTimeframes(timeframes, Number($("purpleDays").value || profile.days));
+}
+
+async function refreshCandlesForAllPurpleProfiles() {
+  await refreshPurpleTimeframes(["month", "week", "day", "120minute", "30minute", "10minute"], 1460);
+}
+
+async function refreshPurpleTimeframes(timeframes, days) {
+  const job = await postApi("/api/bulk-candles", {
+    timeframes,
+    days,
+    limit: null,
+  });
+  state.purpleRefreshJobId = job.job_id;
+  renderPurpleRefreshJob(job);
+  await waitForPurpleRefreshJob(job.job_id);
+}
+
+async function waitForPurpleRefreshJob(jobId) {
+  while (true) {
+    const job = await api(`/api/job?job_id=${encodeURIComponent(jobId)}`);
+    renderPurpleRefreshJob(job);
+    if (!["queued", "running"].includes(job.status)) {
+      if (job.status !== "completed") {
+        throw new Error(`Purple-touch candle refresh ${job.status}. ${job.errors?.[0] || ""}`.trim());
+      }
+      return job;
+    }
+    await delay(1500);
+  }
+}
+
+function renderPurpleRefreshJob(job) {
+  const total = job.total || 0;
+  const completed = job.completed || 0;
+  const percent = total ? Math.round((completed / total) * 100) : 0;
+  $("purpleProgressMeta").textContent = `refresh ${job.status} / ${completed}/${total}`;
+  $("purpleProgressStatus").textContent = `Refreshing purple-touch candles: ${job.current || "starting"} | success ${job.successes || 0} | failures ${job.failures || 0}`;
+  $("purpleProgressBar").style.width = `${percent}%`;
+}
+
+function setPurpleProgress(status, detail) {
+  const percent = status === "completed" ? "100%" : status === "failed" ? "100%" : "55%";
+  $("purpleProgressMeta").textContent = status;
+  $("purpleProgressStatus").textContent = detail;
+  $("purpleProgressBar").style.width = percent;
+  $("purpleProgressBar").classList.toggle("active", status === "running");
+}
+
+function renderPurpleRules(data) {
+  const profiles = data.profiles || [
+    { label: "Monthly", early_timeframe: "120minute", final_timeframe: "day", exit_timeframe: "120minute" },
+    { label: "Weekly", early_timeframe: "30minute", final_timeframe: "120minute", exit_timeframe: "30minute" },
+    { label: "Daily", early_timeframe: "10minute", final_timeframe: "10minute", exit_timeframe: "10minute" },
+  ];
+  $("purpleRuleCards").innerHTML = profiles
+    .map((profile) => [
+      profile.label || profile.purple_timeframe || "-",
+      `Early ${BULK_TIMEFRAME_LABELS[profile.early_timeframe] || profile.early_timeframe}, Final ${BULK_TIMEFRAME_LABELS[profile.final_timeframe] || profile.final_timeframe}, Exit ${BULK_TIMEFRAME_LABELS[profile.exit_timeframe] || profile.exit_timeframe}`,
+    ])
+    .map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${value}</strong></div>`)
+    .join("");
+  const sample = ((data.results || [])[0] || (combinePurpleScanResults(data)[0] || {}));
+  const understood = sample.understood_rules || [
+    "Monthly: early entry 2H, final entry 1D.",
+    "Weekly: early entry 30m, final entry 2H.",
+    "Daily: use only 10m for early/final/exit tracking.",
+    "Purple-touch filter requires close above black EMA89.",
+    "Entry condition: selected entry timeframe candle closes above yellow Chande Kroll.",
+    "Final entry additionally requires yellow Chande Kroll above brown VWMA20.",
+    "Exit/review condition: exit timeframe candle closes below yellow Chande Kroll.",
+    "Light green is EMA26. Ichimoku, VWAP, and Donchian Channel 20 are ignored for this setup.",
+    "RSI bullish divergence is optional context only.",
+  ];
+  const questions = sample.open_questions || [];
+  $("purpleRulePoints").innerHTML = [
+    ...understood.map((point) => `<div>${escapeHtml(point)}</div>`),
+    ...questions.map((point) => `<div class="cell-note">Open: ${escapeHtml(point)}</div>`),
+  ].join("");
+}
+
+function renderPurpleSummary(summary) {
+  if (!summary) {
+    $("purpleSummaryCards").innerHTML = "";
+    $("purpleSummaryPoints").innerHTML = "";
+    return;
+  }
+  $("purpleSummaryCards").innerHTML = [
+    ["Analyzed", summary.analyzed_symbols],
+    ["Matched", summary.matched_symbols],
+    ["Shown", summary.shown_symbols],
+    ["Errors", summary.error_count],
+    ["Latest candles", summary.latest_candles_pulled ? "Pulled" : "No"],
+  ]
+    .map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${fmtMetric(value)}</strong></div>`)
+    .join("");
+  $("purpleSummaryPoints").innerHTML = (summary.points || []).map((point) => `<div>${escapeHtml(point)}</div>`).join("");
+}
+
+function renderPurpleResults(rows) {
+  state.lastPurpleRows = rows || [];
+  $("purpleBody").innerHTML = state.lastPurpleRows
+    .map((row) => {
+      const early = row.early_entry || {};
+      const final = row.final_entry || {};
+      const reasons = row.reasons || [];
+      const warnings = row.warnings || [];
+      return `
+        <tr>
+          <td><button class="linkBtn symbol-chip" data-symbol="${escapeHtml(row.symbol)}">${escapeHtml(row.symbol)}</button></td>
+          <td>${fmtInt(row.score)}<div class="cell-note">${escapeHtml(row.confidence || "-")}</div></td>
+          <td>${escapeHtml(row.purple_timeframe_label || row.purple_timeframe || "-")}</td>
+          <td>${fmt(row.close)} / ${fmt(row.purple_ema9)}<div class="cell-note">${row.purple_touch ? "purple touched" : "not touched"}</div></td>
+          <td>${fmt(row.yellow_line)} / ${fmt(row.brown_vwma20)}<div class="cell-note">final needs yellow above brown</div></td>
+          <td>${fmt(row.light_green_level)}<div class="cell-note">EMA26; yellow ${row.yellow_below_ema26 === true ? "below" : row.yellow_below_ema26 === false ? "not below" : "unknown"}</div></td>
+          <td>
+            Black EMA89 ${row.above_black_line === true ? "passed" : row.above_black_line === false ? "failed" : "-"}
+            <div class="cell-note">mandatory filter</div>
+          </td>
+          <td>${entryCell(early)}</td>
+          <td>${entryCell(final)}</td>
+          <td>${escapeHtml(row.exit_rule || "-")}</td>
+          <td>
+            <ul class="reason-list">${reasons.slice(0, 4).map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>
+            ${warnings.length ? `<div class="cell-note">${escapeHtml(warnings.slice(0, 3).join(" | "))}</div>` : ""}
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  document.querySelectorAll("#purpleBody .linkBtn").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("symbolInput").value = button.dataset.symbol;
+      activateTab("analyze");
+      analyze();
+    });
+  });
+}
+
+function entryCell(entry) {
+  const status = entry.status || "missing";
+  const cls = status === "entry_candidate" ? "points-positive" : status === "wait" ? "points-warn" : "";
+  return `
+    <span class="${cls}">${escapeHtml(status)}</span>
+    <div class="cell-note">C ${fmt(entry.close)} / Y ${fmt(entry.yellow_line)}</div>
+    <div class="cell-note">Brown ${fmt(entry.brown_vwma20)} / RSI ${fmt(entry.rsi14)}</div>
+    <div class="cell-note">${entry.rsi_divergence ? "RSI divergence" : "no RSI divergence"}</div>
+  `;
+}
+
+function copyPurpleSymbols() {
+  const symbols = state.lastPurpleRows.map((row) => row.symbol).filter(Boolean);
+  copyText(symbols.join(", "), `Copied ${symbols.length} purple-touch symbol(s).`);
+}
+
+function downloadPurpleCsv() {
+  downloadCsv("krishna_purple_touch_filtered_stocks.csv", state.lastPurpleRows, [
+    { label: "Symbol", value: (row) => row.symbol },
+    { label: "Score", value: (row) => row.score },
+    { label: "Confidence", value: (row) => row.confidence },
+    { label: "Purple Timeframe", value: (row) => row.purple_timeframe_label },
+    { label: "Close", value: (row) => row.close },
+    { label: "Purple EMA9", value: (row) => row.purple_ema9 },
+    { label: "Yellow CK", value: (row) => row.yellow_line },
+    { label: "Brown VWMA20", value: (row) => row.brown_vwma20 },
+    { label: "EMA26 Light Green", value: (row) => row.light_green_level },
+    { label: "Yellow Below EMA26", value: (row) => row.yellow_below_ema26 },
+    { label: "Above Black", value: (row) => row.above_black_line },
+    { label: "Early Status", value: (row) => row.early_entry && row.early_entry.status },
+    { label: "Early Close", value: (row) => row.early_entry && row.early_entry.close },
+    { label: "Early Yellow", value: (row) => row.early_entry && row.early_entry.yellow_line },
+    { label: "Final Status", value: (row) => row.final_entry && row.final_entry.status },
+    { label: "Final Close", value: (row) => row.final_entry && row.final_entry.close },
+    { label: "Final Yellow", value: (row) => row.final_entry && row.final_entry.yellow_line },
+    { label: "Exit Rule", value: (row) => row.exit_rule },
+    { label: "Reasons", value: (row) => row.reasons },
+    { label: "Warnings", value: (row) => row.warnings },
+  ]);
+}
+
+async function runPurpleLiveScan({ quiet = false } = {}) {
+  state.purpleScanInFlight = true;
+  updatePurpleMonitorUi(state.purpleMonitorRunning ? "Scanning now..." : "Running one scan...");
+  if (!quiet) {
+    setNotes("Running Krishna purple-touch live alert scan across Monthly, Weekly, and Daily...");
+    $("purpleAlertMeta").textContent = "running";
+  }
+  try {
+    if ($("purpleRefreshToggle").checked) {
+      await refreshCandlesForAllPurpleProfiles();
+    }
+    const data = await postApi("/api/krishna-purple-touch-live-scan", {
+      purple_timeframe: "all",
+      limit: "all",
+      force: $("purpleForceToggle").checked,
+      send_telegram: true,
+    });
+    const rows = combinePurpleScanResults(data);
+    state.lastPurpleRows = rows;
+    $("purpleMeta").textContent = `${rows.length} candidate row(s) / ${profileList(data)}`;
+    $("purpleResultMeta").textContent = `${rows.length} latest candidate row(s)`;
+    renderPurpleRules(data);
+    renderPurpleSummary(scanSummaryFromLiveScan(data, rows));
+    renderPurpleResults(rows);
+    renderPurpleAlerts(data);
+    $("purpleAlertMeta").textContent = data.skipped
+      ? "market closed"
+      : `${data.entry_alerts_created || 0} entry / ${data.exit_alerts_created || 0} exit alert(s)`;
+    if (!quiet) setNotes("Purple-touch alert tracker updated.");
+  } catch (error) {
+    $("purpleAlertMeta").textContent = "failed";
+    setNotes([error.message], true);
+  } finally {
+    state.purpleScanInFlight = false;
+    updatePurpleMonitorUi();
+  }
+}
+
+function combinePurpleScanResults(data) {
+  const scans = data.scans || (data.scan ? [data.scan] : []);
+  return scans.flatMap((scan) => scan.results || []);
+}
+
+function scanSummaryFromLiveScan(data, rows) {
+  const scans = data.scans || (data.scan ? [data.scan] : []);
+  const analyzed = scans.reduce((total, scan) => total + Number(scan.analyzed_symbols || 0), 0);
+  const matched = scans.reduce((total, scan) => total + Number(scan.matched_symbols || 0), 0);
+  const errors = scans.reduce((total, scan) => total + Number((scan.errors || []).length), 0) + Number((data.errors || []).length);
+  return {
+    analyzed_symbols: analyzed,
+    matched_symbols: matched,
+    shown_symbols: rows.length,
+    error_count: errors,
+    latest_candles_pulled: $("purpleRefreshToggle").checked,
+    points: [
+      "Scanner evaluated Monthly, Weekly, and Daily purple-touch profiles together.",
+      data.market_hours === false && !data.forced
+        ? "Market is closed, so new alert creation was skipped unless force is enabled."
+        : "Market-hours scanner created entry/exit alerts only for fresh matching opportunities.",
+      `Telegram: ${telegramText(data.telegram)}.`,
+    ],
+  };
+}
+
+async function loadPurpleAlerts() {
+  try {
+    renderPurpleAlerts(await api("/api/krishna-purple-touch-alerts?limit=50"));
+  } catch (error) {
+    $("purpleAlertMeta").textContent = "alerts unavailable";
+  }
+}
+
+function startPurpleAutoMonitor() {
+  stopPurpleAutoMonitor();
+  const seconds = Number($("purpleAutoSeconds").value || 180);
+  state.purpleMonitorRunning = true;
+  updatePurpleMonitorUi("Scanner running now...");
+  $("purpleAlertMeta").textContent = `monitoring every ${seconds}s`;
+  runPurpleLiveScan({ quiet: true });
+  state.purpleAutoTimer = window.setInterval(() => {
+    runPurpleLiveScan({ quiet: true });
+  }, seconds * 1000);
+}
+
+function stopPurpleAutoMonitor() {
+  if (state.purpleAutoTimer) {
+    window.clearInterval(state.purpleAutoTimer);
+    state.purpleAutoTimer = null;
+  }
+  state.purpleMonitorRunning = false;
+  $("purpleAlertMeta").textContent = "stopped";
+  updatePurpleMonitorUi();
+}
+
+function updatePurpleMonitorUi(detail) {
+  const status = $("purpleMonitorStatus");
+  if (!status) return;
+  const running = state.purpleMonitorRunning;
+  status.classList.toggle("running", running);
+  status.classList.toggle("stopped", !running);
+  const title = state.purpleScanInFlight ? "Scan running" : running ? "Market monitor running" : "Scanner stopped";
+  const text = detail || (running ? "Recurring scans are active during NSE market hours." : "No recurring scan is running.");
+  status.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(text)}</span>`;
+  $("purpleAutoStartBtn").disabled = running;
+  $("purpleAutoStopBtn").disabled = !running;
+  $("purpleAutoSeconds").disabled = running;
+}
+
+function nextPurpleScanText(seconds) {
+  const next = new Date(Date.now() + seconds * 1000);
+  return `Recurring scans are active. Next scan around ${fmtDateTime(next.toISOString())}.`;
+}
+
+function renderPurpleAlerts(data) {
+  const alerts = data.recent_alerts || [];
+  const trades = data.open_trades || [];
+  state.lastPurpleAlerts = alerts;
+  $("purpleAlertSummary").innerHTML = [
+    `Profiles scanned: ${profileList(data)}`,
+    `Market hours: ${data.market_hours === true ? "Open" : data.market_hours === false ? "Closed" : "-"}`,
+    data.skipped && data.next_market_open ? `Skipped until next market open: ${fmtDateTime(data.next_market_open)}` : "",
+    `Entry alerts created this run: ${fmtMetric(data.entry_alerts_created || 0)}`,
+    `Exit alerts created this run: ${fmtMetric(data.exit_alerts_created || 0)}`,
+    `Open trade IDs: ${fmtMetric(trades.length)}`,
+    `Telegram: ${telegramText(data.telegram)}`,
+  ]
+    .filter(Boolean)
+    .map((point) => `<div>${escapeHtml(point)}</div>`)
+    .join("");
+  $("purpleAlertsBody").innerHTML = alerts
+    .map(
+      (alert) => `
+        <tr>
+          <td><code>${escapeHtml(alert.trade_id || "-")}</code></td>
+          <td>${fmtDateTime(alert.created_at)}</td>
+          <td>${escapeHtml(alert.alert_type || "-")}</td>
+          <td><button class="linkBtn symbol-chip" data-symbol="${escapeHtml(alert.symbol || "")}">${escapeHtml(alert.symbol || "-")}</button></td>
+          <td>${escapeHtml(purpleProfileLabel(alert.purple_timeframe))}</td>
+          <td>${escapeHtml(alert.entry_kind || "-")}</td>
+          <td>${escapeHtml(alert.status || "-")}</td>
+          <td>${fmt(alert.price)} / ${fmt(alert.yellow_line)}</td>
+          <td>${escapeHtml(alert.message || "-")}</td>
+        </tr>
+      `,
+    )
+    .join("");
+  $("purpleTradesBody").innerHTML = trades
+    .map(
+      (trade) => `
+        <tr>
+          <td><code>${escapeHtml(trade.trade_id || "-")}</code></td>
+          <td>${escapeHtml(trade.symbol || "-")}</td>
+          <td>${escapeHtml(purpleProfileLabel(trade.purple_timeframe))}</td>
+          <td>${escapeHtml(trade.entry_kind || "-")}<div class="cell-note">${escapeHtml(trade.entry_timeframe || "-")}</div></td>
+          <td>${fmtDateTime(trade.opened_at)}</td>
+          <td>${escapeHtml(openDuration(trade.opened_at))}</td>
+          <td>${fmt(trade.entry_price)}</td>
+          <td>${escapeHtml(trade.exit_timeframe || "-")}</td>
+        </tr>
+      `,
+    )
+    .join("");
+  document.querySelectorAll("#purpleAlertsBody .linkBtn").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("symbolInput").value = button.dataset.symbol;
+      activateTab("analyze");
+      analyze();
+    });
+  });
+}
+
+function profileList(data) {
+  const profiles = data.profiles || [];
+  if (!profiles.length) return data.purple_timeframe || "-";
+  return profiles.map((profile) => profile.label || profile.purple_timeframe).join(", ");
+}
+
+function purpleProfileLabel(value) {
+  return { month: "Monthly", week: "Weekly", day: "Daily", all: "All" }[value] || value || "-";
+}
+
+function telegramText(status) {
+  if (!status) return "not checked";
+  if (!status.enabled) return "not configured";
+  const errors = status.errors || [];
+  if (errors.length) return `${status.sent || 0} sent, ${errors.length} error(s)`;
+  return `${status.sent || 0} sent`;
+}
+
+function openDuration(openedAt) {
+  if (!openedAt) return "-";
+  const opened = new Date(openedAt);
+  if (Number.isNaN(opened.getTime())) return "-";
+  const minutes = Math.max(0, Math.floor((Date.now() - opened.getTime()) / 60000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `${hours}h ${rest}m`;
 }
 
 async function loadStrategies() {
@@ -2401,6 +2852,11 @@ $("saveReportBtn").addEventListener("click", saveReport);
 $("krishnaScanBtn").addEventListener("click", runKrishnaScan);
 $("krishnaCopyBtn").addEventListener("click", copyKrishnaSymbols);
 $("krishnaDownloadBtn").addEventListener("click", downloadKrishnaCsv);
+$("purpleLiveScanBtn").addEventListener("click", () => runPurpleLiveScan());
+$("purpleAutoStartBtn").addEventListener("click", startPurpleAutoMonitor);
+$("purpleAutoStopBtn").addEventListener("click", stopPurpleAutoMonitor);
+$("purpleCopyBtn").addEventListener("click", copyPurpleSymbols);
+$("purpleDownloadBtn").addEventListener("click", downloadPurpleCsv);
 $("genericStrategySelect").addEventListener("change", populateStrategyParams);
 $("genericBacktestRunBtn").addEventListener("click", runGenericBacktest);
 $("backtestRunBtn").addEventListener("click", runKrishnaBacktest);
@@ -2441,6 +2897,9 @@ document.querySelectorAll("[data-tab-target]").forEach((button) => {
   button.addEventListener("click", () => activateTab(button.dataset.tabTarget));
 });
 enhanceCollapsibleSections();
+updatePurpleDefaults();
+updatePurpleMonitorUi();
+loadPurpleAlerts();
 
 Promise.all([loadZerodhaLoginUrl(), checkZerodhaStatus(), loadSymbols(), loadStrategies(), loadNiftyExpiries(), loadSectorStatus(), loadFiiDii(false)])
   .then(() => {

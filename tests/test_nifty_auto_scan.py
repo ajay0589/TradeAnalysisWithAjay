@@ -18,6 +18,7 @@ from trading_analysis.scheduler.jobs import NiftyMarketJobs
 from trading_analysis.scheduler.market_hours import is_market_hours
 from trading_analysis.scheduler.runner import MarketScanScheduler
 from trading_analysis.storage import (
+    KrishnaPurpleAlertRepository,
     MarketJobRepository,
     NiftyAlertOutcomeRepository,
     NiftyAlertRepository,
@@ -115,6 +116,42 @@ class NiftyAutoScanTests(unittest.TestCase):
             self.assertEqual(failed["status"], "failed")
             self.assertEqual(len(repo.latest_jobs()), 2)
             self.assertIn("+05:30", finished["started_at"])
+
+    def test_krishna_purple_alert_trade_lifecycle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = KrishnaPurpleAlertRepository(Path(tmp) / "purple.db")
+            match = {
+                "symbol": "ABC",
+                "purple_timeframe": "week",
+                "score": 82,
+                "confidence": "high",
+                "profile": {"exit_timeframe": "30minute"},
+                "exit_rule": "Exit if 30-minute candle closes below yellow.",
+                "reasons": ["Close is above black EMA89."],
+                "warnings": [],
+            }
+            entry = {
+                "timeframe": "30minute",
+                "status": "entry_candidate",
+                "close": 110,
+                "yellow_line": 105,
+                "reasons": ["30-minute candle closed above yellow."],
+                "warnings": [],
+            }
+
+            opened = repo.open_entry_alert(match, entry, "early")
+            duplicate = repo.open_entry_alert(match, entry, "early")
+            closed = repo.close_trade_alert(
+                opened["trade"],
+                {"timeframe": "30minute", "status": "exit_triggered", "close": 102, "yellow_line": 104},
+            )
+
+            self.assertTrue(opened["created"])
+            self.assertFalse(duplicate["created"])
+            self.assertEqual(opened["trade"]["trade_id"], duplicate["trade"]["trade_id"])
+            self.assertEqual(closed["trade"]["status"], "closed")
+            self.assertEqual(repo.list_open_trades(), [])
+            self.assertEqual([alert["alert_type"] for alert in repo.list_recent_alerts(limit=5)], ["exit", "entry"])
 
     def test_context_snapshot_and_candidates_save_load(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -236,13 +273,14 @@ class NiftyAutoScanTests(unittest.TestCase):
     def test_auto_scan_service_alert_backtest_uses_cached_candles(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "candles"
-            _write_candle_csv(root / "15minute" / "NIFTY_50.csv", _candles([100, 101, 102, 103, 104, 105]))
             service = NiftyAutoScanService(
                 nifty_service=FakeNiftyDeskService(root),
                 db_path=Path(tmp) / "service.db",
                 scheduler=FakeScheduler(),
             )
-            service.alert_repository.create_alert(**_alert(score=80, severity="watch"))
+            alert = service.alert_repository.create_alert(**_alert(score=80, severity="watch"))
+            start = datetime.fromisoformat(alert["created_at"]).replace(tzinfo=None) + timedelta(minutes=15)
+            _write_candle_csv(root / "15minute" / "NIFTY_50.csv", _candles([100, 101, 102, 103, 104, 105], start=start))
 
             payload = service.alert_backtest(timeframe="15minute", horizons=[3])
 
@@ -319,7 +357,7 @@ class NiftyAutoScanTests(unittest.TestCase):
                 expiry="2026-07-09",
                 atm_strike=24500,
                 atm_iv=15.2,
-                captured_at="2026-07-06T10:00:00+05:30",
+                captured_at=datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(timespec="seconds"),
             )
 
             latest = repo.latest("NIFTY")
@@ -542,9 +580,9 @@ def _http_json(url: str, payload: dict | None = None) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
-def _candles(closes: list[float]) -> list[Candle]:
+def _candles(closes: list[float], start: datetime | None = None) -> list[Candle]:
     rows: list[Candle] = []
-    start = datetime(2026, 7, 6, 9, 15)
+    start = start or datetime(2026, 7, 6, 9, 15)
     for index, close in enumerate(closes):
         previous = closes[index - 1] if index else close
         rows.append(

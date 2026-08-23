@@ -19,7 +19,12 @@ from trading_analysis.analysis.backtest import (
 from trading_analysis.analysis.entry_context import build_entry_context
 from trading_analysis.analysis.fundamental import analyze_fundamentals
 from trading_analysis.analysis.indicator_suite import analyze_indicator_suite
-from trading_analysis.analysis.krishna_setup import scan_krishna_bullish_setup, scan_krishna_entry_trigger
+from trading_analysis.analysis.krishna_setup import (
+    krishna_purple_profile,
+    scan_krishna_bullish_setup,
+    scan_krishna_entry_trigger,
+    scan_krishna_purple_touch_setup,
+)
 from trading_analysis.analysis.market_structure import analyze_market_structure
 from trading_analysis.analysis.options import (
     OptionContract,
@@ -53,6 +58,7 @@ from trading_analysis.data_sources.nse_equity import (
 from trading_analysis.data_sources.csv_loader import load_candles
 from trading_analysis.config import upsert_env_value
 from trading_analysis.models import Candle, FundamentalSnapshot
+from trading_analysis.notifications.telegram import purple_alert_message
 from trading_analysis.web_services import (
     AnalysisService,
     _analysis_header,
@@ -880,6 +886,86 @@ class AnalysisTests(unittest.TestCase):
         self.assertGreater(trigger.close, trigger.yellow_line)
         self.assertLess(trigger.yellow_line, trigger.vwma20)
         self.assertTrue(trigger.reasons)
+
+    def test_krishna_purple_profiles_match_screenshot_matrix(self) -> None:
+        monthly = krishna_purple_profile("monthly")
+        weekly = krishna_purple_profile("weekly")
+        daily = krishna_purple_profile("daily")
+
+        self.assertEqual((monthly.early_timeframe, monthly.final_timeframe, monthly.exit_timeframe), ("120minute", "day", "120minute"))
+        self.assertEqual((weekly.early_timeframe, weekly.final_timeframe, weekly.exit_timeframe), ("30minute", "120minute", "30minute"))
+        self.assertEqual((daily.early_timeframe, daily.final_timeframe, daily.exit_timeframe), ("10minute", "10minute", "10minute"))
+
+    def test_krishna_purple_touch_detects_reviewable_candidate(self) -> None:
+        closes = [100 + (index * 0.8) for index in range(95)] + [176, 172, 170, 169, 168]
+        touch = self._scanner_candles(closes)
+        early = self._intraday_candles([120 + (index * 0.3) for index in range(90)])
+        final = prepare_candles(self._intraday_candles([118 + (index * 0.4) for index in range(120)]), "2hour", candle_window())
+
+        match = scan_krishna_purple_touch_setup(
+            "ABC",
+            touch,
+            early_candles=prepare_candles(early, "30minute", candle_window()),
+            final_candles=final,
+            purple_timeframe="week",
+            structure=analyze_market_structure(touch),
+        )
+
+        self.assertIsNotNone(match)
+        self.assertTrue(match.purple_touch)
+        self.assertEqual(match.early_entry["timeframe"], "30minute")
+        self.assertEqual(match.final_entry["timeframe"], "120minute")
+        self.assertTrue(match.understood_rules)
+        self.assertEqual(match.open_questions, [])
+        self.assertTrue(match.above_black_line)
+
+    def test_timeframe_aliases_include_krishna_entry_frames(self) -> None:
+        self.assertEqual(normalize_timeframe("30m"), "30minute")
+        self.assertEqual(normalize_timeframe("10m"), "10minute")
+
+    def test_krishna_purple_live_alert_scan_skips_outside_market_hours(self) -> None:
+        class FakePurpleRepo:
+            def list_recent_alerts(self, limit=50):
+                return []
+
+            def list_open_trades(self, limit=200):
+                return []
+
+        service = AnalysisService()
+        next_open = datetime(2026, 8, 24, 9, 15)
+        with (
+            patch("trading_analysis.web_services.is_market_hours", return_value=False),
+            patch("trading_analysis.web_services.next_market_open", return_value=next_open),
+            patch("trading_analysis.web_services.KrishnaPurpleAlertRepository", return_value=FakePurpleRepo()),
+        ):
+            result = service.scan_krishna_purple_touch_alerts(purple_timeframe="all")
+
+        self.assertTrue(result["skipped"])
+        self.assertFalse(result["market_hours"])
+        self.assertEqual([profile["purple_timeframe"] for profile in result["profiles"]], ["month", "week", "day"])
+
+    def test_telegram_purple_alert_message_contains_profile_and_trade_id(self) -> None:
+        message = purple_alert_message(
+            {
+                "alert_type": "entry",
+                "symbol": "ABC",
+                "purple_timeframe": "week",
+                "entry_kind": "early",
+                "trade_id": "KPT-1",
+                "price": 101.25,
+                "yellow_line": 99.5,
+                "score": 85,
+                "confidence": "high",
+                "status": "open",
+                "message": "ABC early entry candidate.",
+                "reasons": ["30-minute candle closed above yellow."],
+            },
+            {"exit_timeframe": "30minute"},
+        )
+
+        self.assertIn("Weekly", message)
+        self.assertIn("KPT-1", message)
+        self.assertIn("Exit timeframe: 30minute", message)
 
     def test_krishna_backtest_can_use_two_hour_entry_trigger(self) -> None:
         daily_closes = (
