@@ -66,6 +66,8 @@ class KrishnaEntryTrigger:
 @dataclass(frozen=True)
 class KrishnaPurpleTouchConfig:
     min_candles: int = 52
+    step1_min_candles: int = 9
+    step1_touch_tolerance_percent: float = 3.0
     purple_touch_tolerance_percent: float = 1.0
 
 
@@ -107,6 +109,46 @@ class KrishnaPurpleTouchMatch:
     exit_rule: str
     understood_rules: list[str]
     open_questions: list[str]
+    reasons: list[str]
+    warnings: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class KrishnaPurpleStep1Candidate:
+    symbol: str
+    purple_timeframe: str
+    purple_timeframe_label: str
+    scan_stage: str
+    score: int
+    confidence: str
+    close: float
+    candle_high: float
+    candle_low: float
+    purple_ema9: float | None
+    purple_touch: bool
+    purple_touch_distance_percent: float | None
+    light_green_level: float | None
+    brown_vwma20: float | None
+    yellow_line: float | None
+    blue_line: float | None
+    ema26: float | None
+    ema89: float | None
+    rsi14: float | None
+    volume_ratio20: float | None
+    structure_trend: str | None
+    above_black_line: bool | None
+    above_ema26: bool | None
+    ema9_above_ema26: bool | None
+    yellow_below_ema26: bool | None
+    brown_vs_light_green: str
+    early_entry: dict[str, Any]
+    final_entry: dict[str, Any]
+    exit_rule: str
+    full_setup_status: str
+    blockers: list[str]
     reasons: list[str]
     warnings: list[str]
 
@@ -463,6 +505,143 @@ def scan_krishna_purple_touch_setup(
     )
 
 
+def scan_krishna_purple_step1_candidate(
+    symbol: str,
+    touch_candles: list[Candle],
+    early_candles: list[Candle] | None = None,
+    final_candles: list[Candle] | None = None,
+    purple_timeframe: str = "week",
+    structure: MarketStructure | None = None,
+    config: KrishnaPurpleTouchConfig | None = None,
+) -> KrishnaPurpleStep1Candidate | None:
+    """Return the first-stage purple EMA9 touch shortlist before strict entry filters."""
+    config = config or KrishnaPurpleTouchConfig()
+    profile = krishna_purple_profile(purple_timeframe)
+    touch_candles = sorted(touch_candles, key=lambda candle: candle.timestamp)
+    if len(touch_candles) < config.step1_min_candles:
+        return None
+
+    levels = _levels(touch_candles)
+    latest = touch_candles[-1]
+    ema9 = levels["ema9"]
+    if ema9 is None:
+        return None
+
+    tolerance = config.step1_touch_tolerance_percent / 100
+    purple_touch = latest.low <= ema9 * (1 + tolerance) and latest.high >= ema9 * (1 - tolerance)
+    if not purple_touch:
+        return None
+
+    close = latest.close
+    ema26 = levels["ema26"]
+    ema89 = levels["ema89"]
+    yellow = levels["ck_yellow_line"]
+    brown = levels["vwma20"]
+    light_green = ema26
+    above_black = close > ema89 if ema89 is not None else None
+    above_ema26 = close >= ema26 if ema26 is not None else None
+    ema9_above_ema26 = ema9 > ema26 if ema26 is not None else None
+    yellow_below_ema26 = yellow < ema26 if yellow is not None and ema26 is not None else None
+    brown_relation = _relation(brown, light_green)
+    distance = _purple_touch_distance_percent(latest, ema9)
+
+    early_entry = _purple_entry_snapshot(symbol, early_candles, profile.early_timeframe, "early")
+    final_entry = _purple_entry_snapshot(symbol, final_candles, profile.final_timeframe, "final")
+
+    reasons = [
+        f"Step 1 passed: higher-timeframe candle touched or came within {config.step1_touch_tolerance_percent:.1f}% of the purple EMA9 zone."
+    ]
+    warnings: list[str] = []
+    blockers: list[str] = []
+    score = 35
+
+    if ema9_above_ema26 is True:
+        score += 8
+        reasons.append("Purple EMA9 is above light-green EMA26.")
+    elif ema9_above_ema26 is False:
+        warnings.append("Purple EMA9 is not above light-green EMA26 yet.")
+    else:
+        warnings.append("EMA26/light-green level is unavailable.")
+
+    if above_ema26 is True:
+        score += 8
+        reasons.append("Close is above light-green EMA26.")
+    elif above_ema26 is False:
+        blockers.append("Close is below light-green EMA26.")
+
+    if above_black is True:
+        score += 14
+        reasons.append("Close is above black EMA89; mandatory trend filter passes.")
+    elif above_black is False:
+        blockers.append("Close is not above black EMA89 mandatory filter.")
+    else:
+        blockers.append("Black EMA89 is unavailable; strict setup cannot qualify yet.")
+
+    if structure and structure.trend == "downtrend":
+        blockers.append("Market structure is downtrend.")
+    elif structure and structure.trend == "uptrend":
+        score += 7
+        reasons.append("Market structure is uptrend.")
+    elif structure:
+        score += 3
+        reasons.append("Market structure is not downtrend.")
+
+    if yellow_below_ema26 is True:
+        score += 5
+        reasons.append("Yellow Chande Kroll line is below light-green EMA26.")
+    elif yellow_below_ema26 is False:
+        warnings.append("Yellow Chande Kroll line is not below light-green EMA26.")
+    else:
+        warnings.append("Yellow/EMA26 relationship is unavailable.")
+
+    if early_entry.get("status") == "entry_candidate":
+        score += 8
+        reasons.append("Early entry timeframe is already above yellow.")
+    if final_entry.get("status") == "entry_candidate":
+        score += 10
+        reasons.append("Final entry timeframe is already above yellow and final rules pass.")
+    elif final_entry.get("status") == "wait":
+        warnings.append("Final entry condition is still waiting.")
+
+    full_setup_status = "qualified" if not blockers else "step1_only"
+    score = max(0, min(100, score))
+    return KrishnaPurpleStep1Candidate(
+        symbol=symbol.upper(),
+        purple_timeframe=profile.purple_timeframe,
+        purple_timeframe_label=profile.label,
+        scan_stage="step1_purple_ema9_touch",
+        score=score,
+        confidence=_confidence(score, warnings + blockers),
+        close=close,
+        candle_high=latest.high,
+        candle_low=latest.low,
+        purple_ema9=ema9,
+        purple_touch=purple_touch,
+        purple_touch_distance_percent=distance,
+        light_green_level=light_green,
+        brown_vwma20=brown,
+        yellow_line=yellow,
+        blue_line=levels["ck_blue_line"],
+        ema26=ema26,
+        ema89=ema89,
+        rsi14=levels["rsi14"],
+        volume_ratio20=levels["volume_ratio20"],
+        structure_trend=structure.trend if structure else None,
+        above_black_line=above_black,
+        above_ema26=above_ema26,
+        ema9_above_ema26=ema9_above_ema26,
+        yellow_below_ema26=yellow_below_ema26,
+        brown_vs_light_green=brown_relation,
+        early_entry=early_entry,
+        final_entry=final_entry,
+        exit_rule=f"Exit/review if {profile.exit_timeframe} candle closes below yellow Chande Kroll line.",
+        full_setup_status=full_setup_status,
+        blockers=blockers,
+        reasons=reasons,
+        warnings=warnings + list(early_entry.get("warnings") or []) + list(final_entry.get("warnings") or []),
+    )
+
+
 def scan_krishna_purple_exit_status(symbol: str, candles: list[Candle] | None, timeframe: str) -> dict[str, Any]:
     if not candles:
         return {
@@ -726,6 +905,15 @@ def _relation(left: float | None, right: float | None) -> str:
     if left < right:
         return "below"
     return "at"
+
+
+def _purple_touch_distance_percent(candle: Candle, ema9: float) -> float | None:
+    if ema9 == 0:
+        return None
+    if candle.low <= ema9 <= candle.high:
+        return 0.0
+    nearest = candle.low if ema9 < candle.low else candle.high
+    return abs((nearest - ema9) / ema9) * 100
 
 
 def _normalize_purple_timeframe(value: str) -> str:

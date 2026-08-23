@@ -956,6 +956,10 @@
                   <input id="purpleRefreshToggle" type="checkbox" checked />
                   Pull latest required candles before scan
                 </label>
+                <label class="check-row">
+                  <input id="purpleTelegramToggle" type="checkbox" checked />
+                  Send new entry/exit alerts to Telegram
+                </label>
                 <label for="purpleAutoSeconds">Monitor interval</label>
                 <select id="purpleAutoSeconds">
                   <option value="60">Every 1 min</option>
@@ -1011,10 +1015,78 @@
 
               <section class="table-panel">
                 <div class="panel-head">
+                  <h2>Step 1: Purple EMA9 Touch</h2>
+                  <span id="purpleStep1Meta"></span>
+                </div>
+                <div class="ops-body">
+                  <p class="helper-text">First filter only: higher timeframe candle touches the purple EMA9 zone. Entry and exit checks are shown beside it so you can see why a stock did or did not become an alert candidate.</p>
+                </div>
+                <div class="table-actions">
+                  <label class="table-filter" for="purpleStep1ProfileFilter">
+                    <span>Scan</span>
+                    <select id="purpleStep1ProfileFilter">
+                      <option value="all">All scans</option>
+                      <option value="month">Monthly</option>
+                      <option value="week">Weekly</option>
+                      <option value="day">Daily</option>
+                    </select>
+                  </label>
+                  <label class="table-filter" for="purpleStep1EntryFilter">
+                    <span>Entry status</span>
+                    <select id="purpleStep1EntryFilter">
+                      <option value="all">All entry states</option>
+                      <option value="early">Early entry ready</option>
+                      <option value="final">Final entry ready</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="wide-table">
+                  <table class="krishna-table">
+                    <thead>
+                      <tr>
+                        <th>Symbol</th>
+                        <th>Scan</th>
+                        <th>Close / Range</th>
+                        <th>Purple EMA9</th>
+                        <th>Black EMA89</th>
+                        <th>EMA26</th>
+                        <th>Yellow / Brown</th>
+                        <th>Early Entry</th>
+                        <th>Final Entry</th>
+                        <th>Status / Blockers</th>
+                      </tr>
+                    </thead>
+                    <tbody id="purpleStep1Body"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
                   <h2>Latest Scan Candidates</h2>
                   <span id="purpleResultMeta"></span>
                 </div>
+                <div class="ops-body">
+                  <p class="helper-text">These rows passed the full Purple Touch setup and are eligible for entry/exit alert tracking.</p>
+                </div>
                 <div class="table-actions">
+                  <label class="table-filter" for="purpleCandidateProfileFilter">
+                    <span>Scan</span>
+                    <select id="purpleCandidateProfileFilter">
+                      <option value="all">All scans</option>
+                      <option value="month">Monthly</option>
+                      <option value="week">Weekly</option>
+                      <option value="day">Daily</option>
+                    </select>
+                  </label>
+                  <label class="table-filter" for="purpleCandidateEntryFilter">
+                    <span>Entry status</span>
+                    <select id="purpleCandidateEntryFilter">
+                      <option value="all">All entry states</option>
+                      <option value="early">Early entry ready</option>
+                      <option value="final">Final entry ready</option>
+                    </select>
+                  </label>
                   <button id="purpleCopyBtn" type="button">Copy symbols</button>
                   <button id="purpleDownloadBtn" type="button">Download CSV</button>
                 </div>
@@ -1040,13 +1112,42 @@
                 </div>
               </section>
 
-              <section class="table-panel">
+              <section class="table-panel alert-delivery-panel">
                 <div class="panel-head">
-                  <h2>Live Alerts & Open Trade IDs</h2>
+                  <h2>Alert Delivery Status</h2>
                   <span id="purpleAlertMeta">Idle</span>
                 </div>
                 <div class="ops-body">
                   <div id="purpleAlertSummary" class="mini-list"></div>
+                </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Entry Alerts</h2>
+                  <span id="purpleEntryAlertMeta">0 alert(s)</span>
+                </div>
+                <div class="ops-body">
+                  <p class="helper-text">A new trade ID is created when a strict Monthly, Weekly, or Daily setup meets its early or final entry confirmation during market hours.</p>
+                </div>
+                <div class="table-actions">
+                  <label class="table-filter" for="purpleEntryAlertProfileFilter">
+                    <span>Scan</span>
+                    <select id="purpleEntryAlertProfileFilter">
+                      <option value="all">All scans</option>
+                      <option value="month">Monthly</option>
+                      <option value="week">Weekly</option>
+                      <option value="day">Daily</option>
+                    </select>
+                  </label>
+                  <label class="table-filter" for="purpleEntryAlertKindFilter">
+                    <span>Entry</span>
+                    <select id="purpleEntryAlertKindFilter">
+                      <option value="all">Early and final</option>
+                      <option value="early">Early entry</option>
+                      <option value="final">Final entry</option>
+                    </select>
+                  </label>
                 </div>
                 <div class="wide-table">
                   <table class="krishna-table">
@@ -1054,7 +1155,6 @@
                       <tr>
                         <th>Trade ID</th>
                         <th>Time</th>
-                        <th>Type</th>
                         <th>Symbol</th>
                         <th>Scan</th>
                         <th>Entry</th>
@@ -1063,8 +1163,83 @@
                         <th>Message</th>
                       </tr>
                     </thead>
-                    <tbody id="purpleAlertsBody"></tbody>
+                    <tbody id="purpleEntryAlertsBody"></tbody>
                   </table>
+                </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Exit Alerts</h2>
+                  <span id="purpleExitAlertMeta">0 alert(s)</span>
+                </div>
+                <div class="ops-body">
+                  <p class="helper-text">An exit alert closes the matching trade ID when its configured exit-timeframe candle closes below the yellow Chande Kroll line.</p>
+                </div>
+                <div class="table-actions">
+                  <label class="table-filter" for="purpleExitAlertProfileFilter">
+                    <span>Scan</span>
+                    <select id="purpleExitAlertProfileFilter">
+                      <option value="all">All scans</option>
+                      <option value="month">Monthly</option>
+                      <option value="week">Weekly</option>
+                      <option value="day">Daily</option>
+                    </select>
+                  </label>
+                  <label class="table-filter" for="purpleExitAlertKindFilter">
+                    <span>Original entry</span>
+                    <select id="purpleExitAlertKindFilter">
+                      <option value="all">Early and final</option>
+                      <option value="early">Early entry</option>
+                      <option value="final">Final entry</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="wide-table">
+                  <table class="krishna-table">
+                    <thead>
+                      <tr>
+                        <th>Trade ID</th>
+                        <th>Time</th>
+                        <th>Symbol</th>
+                        <th>Scan</th>
+                        <th>Original Entry</th>
+                        <th>Status</th>
+                        <th>Price / Yellow</th>
+                        <th>Message</th>
+                      </tr>
+                    </thead>
+                    <tbody id="purpleExitAlertsBody"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Open Trade IDs</h2>
+                  <span id="purpleOpenTradeMeta">0 open</span>
+                </div>
+                <div class="ops-body">
+                  <p class="helper-text">These are active entry alerts awaiting their matching exit condition. The same trade ID links the future exit alert back to its entry.</p>
+                </div>
+                <div class="table-actions">
+                  <label class="table-filter" for="purpleTradeProfileFilter">
+                    <span>Scan</span>
+                    <select id="purpleTradeProfileFilter">
+                      <option value="all">All scans</option>
+                      <option value="month">Monthly</option>
+                      <option value="week">Weekly</option>
+                      <option value="day">Daily</option>
+                    </select>
+                  </label>
+                  <label class="table-filter" for="purpleTradeEntryFilter">
+                    <span>Entry</span>
+                    <select id="purpleTradeEntryFilter">
+                      <option value="all">Early and final</option>
+                      <option value="early">Early entry</option>
+                      <option value="final">Final entry</option>
+                    </select>
+                  </label>
                 </div>
                 <div class="wide-table">
                   <table class="krishna-table">

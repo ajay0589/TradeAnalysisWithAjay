@@ -6,8 +6,11 @@ const state = {
   krishnaRefreshJobId: null,
   lastKrishnaRows: [],
   purpleRefreshJobId: null,
+  lastPurpleStep1Rows: [],
   lastPurpleRows: [],
   lastPurpleAlerts: [],
+  lastPurpleTrades: [],
+  lastPurpleAlertResponse: null,
   purpleAutoTimer: null,
   purpleMonitorRunning: false,
   purpleScanInFlight: false,
@@ -1113,9 +1116,12 @@ function renderPurpleSummary(summary) {
   $("purpleSummaryPoints").innerHTML = (summary.points || []).map((point) => `<div>${escapeHtml(point)}</div>`).join("");
 }
 
-function renderPurpleResults(rows) {
-  state.lastPurpleRows = rows || [];
-  $("purpleBody").innerHTML = state.lastPurpleRows
+function renderPurpleResults(rows = null) {
+  if (Array.isArray(rows)) state.lastPurpleRows = rows;
+  const filteredRows = filterPurpleCandidateRows(state.lastPurpleRows, "purpleCandidateProfileFilter", "purpleCandidateEntryFilter");
+  $("purpleResultMeta").textContent = `${filteredRows.length} shown / ${state.lastPurpleRows.length} candidate row(s)`;
+  $("purpleBody").innerHTML = filteredRows.length
+    ? filteredRows
     .map((row) => {
       const early = row.early_entry || {};
       const final = row.final_entry || {};
@@ -1143,7 +1149,8 @@ function renderPurpleResults(rows) {
         </tr>
       `;
     })
-    .join("");
+    .join("")
+    : emptyTableRow(11, "No strict candidates match these filters.");
 
   document.querySelectorAll("#purpleBody .linkBtn").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1152,6 +1159,89 @@ function renderPurpleResults(rows) {
       analyze();
     });
   });
+}
+
+function renderPurpleStep1Results(rows = null) {
+  if (Array.isArray(rows)) state.lastPurpleStep1Rows = rows;
+  const meta = $("purpleStep1Meta");
+  const body = $("purpleStep1Body");
+  if (!body) return;
+  const filteredRows = filterPurpleCandidateRows(state.lastPurpleStep1Rows, "purpleStep1ProfileFilter", "purpleStep1EntryFilter");
+  if (meta) {
+    const full = filteredRows.filter((row) => row.full_setup_status === "qualified").length;
+    meta.textContent = `${filteredRows.length} shown / ${state.lastPurpleStep1Rows.length} touch row(s), ${full} strict`;
+  }
+  body.innerHTML = filteredRows.length
+    ? filteredRows
+    .map((row) => {
+      const early = row.early_entry || {};
+      const final = row.final_entry || {};
+      const blockers = row.blockers || [];
+      const warnings = row.warnings || [];
+      return `
+        <tr>
+          <td><button class="linkBtn symbol-chip" data-symbol="${escapeHtml(row.symbol)}">${escapeHtml(row.symbol)}</button></td>
+          <td>${escapeHtml(row.purple_timeframe_label || row.purple_timeframe || "-")}</td>
+          <td>
+            ${fmt(row.close)}
+            <div class="cell-note">H ${fmt(row.candle_high)} / L ${fmt(row.candle_low)}</div>
+          </td>
+          <td>
+            ${fmt(row.purple_ema9)}
+            <div class="cell-note">distance ${fmt(row.purple_touch_distance_percent)}%</div>
+          </td>
+          <td>
+            ${passFailCell(row.above_black_line, "above black EMA89")}
+            <div class="cell-note">mandatory</div>
+          </td>
+          <td>
+            ${passFailCell(row.above_ema26, "above EMA26")}
+            <div class="cell-note">EMA9 ${row.ema9_above_ema26 === true ? "above" : row.ema9_above_ema26 === false ? "not above" : "unknown"} EMA26</div>
+          </td>
+          <td>
+            Y ${fmt(row.yellow_line)} / B ${fmt(row.brown_vwma20)}
+            <div class="cell-note">final needs yellow above brown</div>
+          </td>
+          <td>${entryCell(early)}</td>
+          <td>${entryCell(final)}</td>
+          <td>
+            <span class="${row.full_setup_status === "qualified" ? "points-positive" : "points-warn"}">${escapeHtml(row.full_setup_status || "-")}</span>
+            ${blockers.length ? `<ul class="reason-list">${blockers.slice(0, 3).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
+            ${warnings.length ? `<div class="cell-note">${escapeHtml(warnings.slice(0, 2).join(" | "))}</div>` : ""}
+          </td>
+        </tr>
+      `;
+    })
+    .join("")
+    : emptyTableRow(10, "No Step 1 purple EMA9 touches match these filters.");
+
+  document.querySelectorAll("#purpleStep1Body .linkBtn").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("symbolInput").value = button.dataset.symbol;
+      activateTab("analyze");
+      analyze();
+    });
+  });
+}
+
+function passFailCell(value, label) {
+  if (value === true) return `<span class="points-positive">pass</span><div class="cell-note">${escapeHtml(label)}</div>`;
+  if (value === false) return `<span class="points-negative">block</span><div class="cell-note">${escapeHtml(label)}</div>`;
+  return `<span class="points-warn">unknown</span><div class="cell-note">${escapeHtml(label)}</div>`;
+}
+
+function filterPurpleCandidateRows(rows, profileFilterId, entryFilterId) {
+  const profile = $(profileFilterId)?.value || "all";
+  const entryKind = $(entryFilterId)?.value || "all";
+  return (rows || []).filter((row) => {
+    if (profile !== "all" && row.purple_timeframe !== profile) return false;
+    if (entryKind === "all") return true;
+    return (row[`${entryKind}_entry`] || {}).status === "entry_candidate";
+  });
+}
+
+function emptyTableRow(columns, message) {
+  return `<tr class="empty-table-row"><td colspan="${columns}">${escapeHtml(message)}</td></tr>`;
 }
 
 function entryCell(entry) {
@@ -1166,12 +1256,15 @@ function entryCell(entry) {
 }
 
 function copyPurpleSymbols() {
-  const symbols = state.lastPurpleRows.map((row) => row.symbol).filter(Boolean);
+  const symbols = filterPurpleCandidateRows(state.lastPurpleRows, "purpleCandidateProfileFilter", "purpleCandidateEntryFilter")
+    .map((row) => row.symbol)
+    .filter(Boolean);
   copyText(symbols.join(", "), `Copied ${symbols.length} purple-touch symbol(s).`);
 }
 
 function downloadPurpleCsv() {
-  downloadCsv("krishna_purple_touch_filtered_stocks.csv", state.lastPurpleRows, [
+  const rows = filterPurpleCandidateRows(state.lastPurpleRows, "purpleCandidateProfileFilter", "purpleCandidateEntryFilter");
+  downloadCsv("krishna_purple_touch_filtered_stocks.csv", rows, [
     { label: "Symbol", value: (row) => row.symbol },
     { label: "Score", value: (row) => row.score },
     { label: "Confidence", value: (row) => row.confidence },
@@ -1210,20 +1303,26 @@ async function runPurpleLiveScan({ quiet = false } = {}) {
       purple_timeframe: "all",
       limit: "all",
       force: $("purpleForceToggle").checked,
-      send_telegram: true,
+      send_telegram: $("purpleTelegramToggle").checked,
     });
+    const step1Rows = combinePurpleStep1Results(data);
     const rows = combinePurpleScanResults(data);
+    state.lastPurpleStep1Rows = step1Rows;
     state.lastPurpleRows = rows;
-    $("purpleMeta").textContent = `${rows.length} candidate row(s) / ${profileList(data)}`;
+    $("purpleMeta").textContent = `${step1Rows.length} step-1 row(s), ${rows.length} entry candidate row(s) / ${profileList(data)}`;
     $("purpleResultMeta").textContent = `${rows.length} latest candidate row(s)`;
     renderPurpleRules(data);
-    renderPurpleSummary(scanSummaryFromLiveScan(data, rows));
+    renderPurpleSummary(scanSummaryFromLiveScan(data, rows, step1Rows));
+    renderPurpleStep1Results(step1Rows);
     renderPurpleResults(rows);
     renderPurpleAlerts(data);
-    $("purpleAlertMeta").textContent = data.skipped
-      ? "market closed"
-      : `${data.entry_alerts_created || 0} entry / ${data.exit_alerts_created || 0} exit alert(s)`;
-    if (!quiet) setNotes("Purple-touch alert tracker updated.");
+    $("purpleAlertMeta").textContent = data.alert_creation_skipped
+      ? "analysis complete / live alerts paused"
+      : `${data.entry_alerts_created || 0} entry / ${data.exit_alerts_created || 0} new alert(s)`;
+    if (!quiet) {
+      const newAlerts = Number(data.entry_alerts_created || 0) + Number(data.exit_alerts_created || 0);
+      setNotes(newAlerts ? `${newAlerts} new Purple Touch alert(s) are shown on the Web UI.` : "Purple Touch scan completed; no new live alerts.");
+    }
   } catch (error) {
     $("purpleAlertMeta").textContent = "failed";
     setNotes([error.message], true);
@@ -1238,11 +1337,22 @@ function combinePurpleScanResults(data) {
   return scans.flatMap((scan) => scan.results || []);
 }
 
-function scanSummaryFromLiveScan(data, rows) {
+function combinePurpleStep1Results(data) {
+  if (Array.isArray(data.step1_results)) return data.step1_results;
+  const scans = data.step1_scans || (data.step1_scan ? [data.step1_scan] : []);
+  return scans.flatMap((scan) => scan.results || []);
+}
+
+function scanSummaryFromLiveScan(data, rows, step1Rows = []) {
   const scans = data.scans || (data.scan ? [data.scan] : []);
+  const step1Scans = data.step1_scans || (data.step1_scan ? [data.step1_scan] : []);
   const analyzed = scans.reduce((total, scan) => total + Number(scan.analyzed_symbols || 0), 0);
   const matched = scans.reduce((total, scan) => total + Number(scan.matched_symbols || 0), 0);
-  const errors = scans.reduce((total, scan) => total + Number((scan.errors || []).length), 0) + Number((data.errors || []).length);
+  const step1Matched = step1Scans.reduce((total, scan) => total + Number(scan.matched_symbols || 0), 0);
+  const errors =
+    scans.reduce((total, scan) => total + Number((scan.errors || []).length), 0) +
+    step1Scans.reduce((total, scan) => total + Number((scan.errors || []).length), 0) +
+    Number((data.errors || []).length);
   return {
     analyzed_symbols: analyzed,
     matched_symbols: matched,
@@ -1251,6 +1361,8 @@ function scanSummaryFromLiveScan(data, rows) {
     latest_candles_pulled: $("purpleRefreshToggle").checked,
     points: [
       "Scanner evaluated Monthly, Weekly, and Daily purple-touch profiles together.",
+      `Step 1 found ${step1Matched || step1Rows.length} higher-timeframe EMA9 touch row(s) before strict entry filters.`,
+      `Strict entry candidate table shows ${rows.length} row(s) after mandatory EMA89/EMA26/entry checks.`,
       data.market_hours === false && !data.forced
         ? "Market is closed, so new alert creation was skipped unless force is enabled."
         : "Market-hours scanner created entry/exit alerts only for fresh matching opportunities.",
@@ -1308,40 +1420,48 @@ function nextPurpleScanText(seconds) {
   return `Recurring scans are active. Next scan around ${fmtDateTime(next.toISOString())}.`;
 }
 
-function renderPurpleAlerts(data) {
+function renderPurpleAlerts(data = null) {
+  if (data) {
+    state.lastPurpleAlertResponse = data;
+    state.lastPurpleAlerts = data.recent_alerts || [];
+    state.lastPurpleTrades = data.open_trades || [];
+  }
+  data = state.lastPurpleAlertResponse || {};
   const alerts = data.recent_alerts || [];
   const trades = data.open_trades || [];
-  state.lastPurpleAlerts = alerts;
+  const entryAlerts = filterPurpleAlertRows(
+    alerts.filter((alert) => alert.alert_type === "entry"),
+    "purpleEntryAlertProfileFilter",
+    "purpleEntryAlertKindFilter",
+  );
+  const exitAlerts = filterPurpleAlertRows(
+    alerts.filter((alert) => alert.alert_type === "exit"),
+    "purpleExitAlertProfileFilter",
+    "purpleExitAlertKindFilter",
+  );
+  const openTrades = filterPurpleAlertRows(trades, "purpleTradeProfileFilter", "purpleTradeEntryFilter");
+  $("purpleEntryAlertMeta").textContent = `${entryAlerts.length} shown / ${alerts.filter((alert) => alert.alert_type === "entry").length} entry alert(s)`;
+  $("purpleExitAlertMeta").textContent = `${exitAlerts.length} shown / ${alerts.filter((alert) => alert.alert_type === "exit").length} exit alert(s)`;
+  $("purpleOpenTradeMeta").textContent = `${openTrades.length} shown / ${trades.length} open`;
   $("purpleAlertSummary").innerHTML = [
     `Profiles scanned: ${profileList(data)}`,
     `Market hours: ${data.market_hours === true ? "Open" : data.market_hours === false ? "Closed" : "-"}`,
-    data.skipped && data.next_market_open ? `Skipped until next market open: ${fmtDateTime(data.next_market_open)}` : "",
+    data.alert_creation_skipped && data.next_market_open
+      ? `Analysis completed; live entry/exit alert creation resumes at ${fmtDateTime(data.next_market_open)}`
+      : "",
     `Entry alerts created this run: ${fmtMetric(data.entry_alerts_created || 0)}`,
     `Exit alerts created this run: ${fmtMetric(data.exit_alerts_created || 0)}`,
     `Open trade IDs: ${fmtMetric(trades.length)}`,
+    `Web UI: ${alerts.length} recent alert event(s) stored and displayed`,
     `Telegram: ${telegramText(data.telegram)}`,
   ]
     .filter(Boolean)
     .map((point) => `<div>${escapeHtml(point)}</div>`)
     .join("");
-  $("purpleAlertsBody").innerHTML = alerts
-    .map(
-      (alert) => `
-        <tr>
-          <td><code>${escapeHtml(alert.trade_id || "-")}</code></td>
-          <td>${fmtDateTime(alert.created_at)}</td>
-          <td>${escapeHtml(alert.alert_type || "-")}</td>
-          <td><button class="linkBtn symbol-chip" data-symbol="${escapeHtml(alert.symbol || "")}">${escapeHtml(alert.symbol || "-")}</button></td>
-          <td>${escapeHtml(purpleProfileLabel(alert.purple_timeframe))}</td>
-          <td>${escapeHtml(alert.entry_kind || "-")}</td>
-          <td>${escapeHtml(alert.status || "-")}</td>
-          <td>${fmt(alert.price)} / ${fmt(alert.yellow_line)}</td>
-          <td>${escapeHtml(alert.message || "-")}</td>
-        </tr>
-      `,
-    )
-    .join("");
-  $("purpleTradesBody").innerHTML = trades
+  $("purpleEntryAlertsBody").innerHTML = renderPurpleAlertTableRows(entryAlerts, "No entry alerts match these filters.", "alert-entry-row");
+  $("purpleExitAlertsBody").innerHTML = renderPurpleAlertTableRows(exitAlerts, "No exit alerts match these filters.", "alert-exit-row");
+  $("purpleTradesBody").innerHTML = openTrades.length
+    ? openTrades
     .map(
       (trade) => `
         <tr>
@@ -1356,14 +1476,45 @@ function renderPurpleAlerts(data) {
         </tr>
       `,
     )
-    .join("");
-  document.querySelectorAll("#purpleAlertsBody .linkBtn").forEach((button) => {
+    .join("")
+    : emptyTableRow(8, "No open trade IDs match these filters.");
+  document.querySelectorAll("#purpleEntryAlertsBody .linkBtn, #purpleExitAlertsBody .linkBtn").forEach((button) => {
     button.addEventListener("click", () => {
       $("symbolInput").value = button.dataset.symbol;
       activateTab("analyze");
       analyze();
     });
   });
+}
+
+function filterPurpleAlertRows(rows, profileFilterId, entryFilterId) {
+  const profile = $(profileFilterId)?.value || "all";
+  const entryKind = $(entryFilterId)?.value || "all";
+  return (rows || []).filter((row) => {
+    if (profile !== "all" && row.purple_timeframe !== profile) return false;
+    if (entryKind !== "all" && row.entry_kind !== entryKind) return false;
+    return true;
+  });
+}
+
+function renderPurpleAlertTableRows(rows, emptyMessage, rowClass) {
+  if (!rows.length) return emptyTableRow(8, emptyMessage);
+  return rows
+    .map(
+      (alert) => `
+        <tr class="${rowClass}">
+          <td><code>${escapeHtml(alert.trade_id || "-")}</code></td>
+          <td>${fmtDateTime(alert.created_at)}</td>
+          <td><button class="linkBtn symbol-chip" data-symbol="${escapeHtml(alert.symbol || "")}">${escapeHtml(alert.symbol || "-")}</button></td>
+          <td>${escapeHtml(purpleProfileLabel(alert.purple_timeframe))}</td>
+          <td>${escapeHtml(alert.entry_kind || "-")}</td>
+          <td>${escapeHtml(alert.status || "-")}</td>
+          <td>${fmt(alert.price)} / ${fmt(alert.yellow_line)}</td>
+          <td>${escapeHtml(alert.message || "-")}</td>
+        </tr>
+      `,
+    )
+    .join("");
 }
 
 function profileList(data) {
@@ -1378,7 +1529,8 @@ function purpleProfileLabel(value) {
 
 function telegramText(status) {
   if (!status) return "not checked";
-  if (!status.enabled) return "not configured";
+  if (status.configured === false || (!status.configured && !status.enabled)) return "not configured";
+  if (!status.enabled) return "configured; disabled for this scan";
   const errors = status.errors || [];
   if (errors.length) return `${status.sent || 0} sent, ${errors.length} error(s)`;
   return `${status.sent || 0} sent`;
@@ -2857,6 +3009,18 @@ $("purpleAutoStartBtn").addEventListener("click", startPurpleAutoMonitor);
 $("purpleAutoStopBtn").addEventListener("click", stopPurpleAutoMonitor);
 $("purpleCopyBtn").addEventListener("click", copyPurpleSymbols);
 $("purpleDownloadBtn").addEventListener("click", downloadPurpleCsv);
+$("purpleStep1ProfileFilter").addEventListener("change", () => renderPurpleStep1Results());
+$("purpleStep1EntryFilter").addEventListener("change", () => renderPurpleStep1Results());
+$("purpleCandidateProfileFilter").addEventListener("change", () => renderPurpleResults());
+$("purpleCandidateEntryFilter").addEventListener("change", () => renderPurpleResults());
+[
+  "purpleEntryAlertProfileFilter",
+  "purpleEntryAlertKindFilter",
+  "purpleExitAlertProfileFilter",
+  "purpleExitAlertKindFilter",
+  "purpleTradeProfileFilter",
+  "purpleTradeEntryFilter",
+].forEach((id) => $(id).addEventListener("change", () => renderPurpleAlerts()));
 $("genericStrategySelect").addEventListener("change", populateStrategyParams);
 $("genericBacktestRunBtn").addEventListener("click", runGenericBacktest);
 $("backtestRunBtn").addEventListener("click", runKrishnaBacktest);

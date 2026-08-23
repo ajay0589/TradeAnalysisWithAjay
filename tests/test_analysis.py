@@ -23,6 +23,7 @@ from trading_analysis.analysis.krishna_setup import (
     krishna_purple_profile,
     scan_krishna_bullish_setup,
     scan_krishna_entry_trigger,
+    scan_krishna_purple_step1_candidate,
     scan_krishna_purple_touch_setup,
 )
 from trading_analysis.analysis.market_structure import analyze_market_structure
@@ -919,11 +920,32 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(match.open_questions, [])
         self.assertTrue(match.above_black_line)
 
+    def test_krishna_purple_step1_shows_touch_before_strict_filters(self) -> None:
+        closes = [100 + (index * 0.5) for index in range(29)] + [110]
+        touch = self._scanner_candles(closes)
+        early = prepare_candles(self._intraday_candles([100 + (index * 0.2) for index in range(50)]), "30minute", candle_window())
+
+        candidate = scan_krishna_purple_step1_candidate(
+            "ABC",
+            touch,
+            early_candles=early,
+            purple_timeframe="week",
+            structure=analyze_market_structure(touch),
+        )
+        strict = scan_krishna_purple_touch_setup("ABC", touch, purple_timeframe="week", structure=analyze_market_structure(touch))
+
+        self.assertIsNotNone(candidate)
+        self.assertTrue(candidate.purple_touch)
+        self.assertEqual(candidate.scan_stage, "step1_purple_ema9_touch")
+        self.assertEqual(candidate.full_setup_status, "step1_only")
+        self.assertTrue(candidate.blockers)
+        self.assertIsNone(strict)
+
     def test_timeframe_aliases_include_krishna_entry_frames(self) -> None:
         self.assertEqual(normalize_timeframe("30m"), "30minute")
         self.assertEqual(normalize_timeframe("10m"), "10minute")
 
-    def test_krishna_purple_live_alert_scan_skips_outside_market_hours(self) -> None:
+    def test_krishna_purple_live_alert_scan_analyzes_but_pauses_alerts_outside_market_hours(self) -> None:
         class FakePurpleRepo:
             def list_recent_alerts(self, limit=50):
                 return []
@@ -933,15 +955,36 @@ class AnalysisTests(unittest.TestCase):
 
         service = AnalysisService()
         next_open = datetime(2026, 8, 24, 9, 15)
+        scan_result = {
+            "profile": {},
+            "results": [],
+            "analyzed_symbols": 1,
+            "matched_symbols": 0,
+            "errors": [],
+        }
+        step1_result = {
+            "results": [{"symbol": "ABC", "purple_timeframe": "week"}],
+            "analyzed_symbols": 1,
+            "matched_symbols": 1,
+            "errors": [],
+        }
         with (
             patch("trading_analysis.web_services.is_market_hours", return_value=False),
             patch("trading_analysis.web_services.next_market_open", return_value=next_open),
             patch("trading_analysis.web_services.KrishnaPurpleAlertRepository", return_value=FakePurpleRepo()),
+            patch.object(service, "scan_krishna_purple_touch_step1", return_value=step1_result) as step1_scan,
+            patch.object(service, "scan_krishna_purple_touch", return_value=scan_result) as strict_scan,
         ):
             result = service.scan_krishna_purple_touch_alerts(purple_timeframe="all")
 
-        self.assertTrue(result["skipped"])
+        self.assertFalse(result["skipped"])
+        self.assertTrue(result["alert_creation_skipped"])
         self.assertFalse(result["market_hours"])
+        self.assertEqual(len(result["step1_results"]), 3)
+        self.assertEqual(step1_scan.call_count, 3)
+        self.assertEqual(strict_scan.call_count, 3)
+        self.assertEqual(result["entry_alerts_created"], 0)
+        self.assertEqual(result["exit_alerts_created"], 0)
         self.assertEqual([profile["purple_timeframe"] for profile in result["profiles"]], ["month", "week", "day"])
 
     def test_telegram_purple_alert_message_contains_profile_and_trade_id(self) -> None:
@@ -960,12 +1003,34 @@ class AnalysisTests(unittest.TestCase):
                 "message": "ABC early entry candidate.",
                 "reasons": ["30-minute candle closed above yellow."],
             },
-            {"exit_timeframe": "30minute"},
+            {"entry_timeframe": "30minute", "exit_timeframe": "30minute"},
         )
 
         self.assertIn("Weekly", message)
         self.assertIn("KPT-1", message)
-        self.assertIn("Exit timeframe: 30minute", message)
+        self.assertIn("Entry: Early (30minute)", message)
+        self.assertIn("Exit confirmation timeframe: 30minute", message)
+
+    def test_telegram_purple_exit_message_identifies_original_entry(self) -> None:
+        message = purple_alert_message(
+            {
+                "alert_type": "exit",
+                "symbol": "ABC",
+                "purple_timeframe": "month",
+                "entry_kind": "final",
+                "trade_id": "KPT-2",
+                "price": 98.5,
+                "yellow_line": 99.0,
+                "status": "closed",
+                "message": "120minute candle closed below yellow.",
+            },
+            {"entry_timeframe": "day", "exit_timeframe": "120minute"},
+        )
+
+        self.assertIn("PURPLE TOUCH EXIT ALERT", message)
+        self.assertIn("Profile: Monthly", message)
+        self.assertIn("Original entry: Final (day)", message)
+        self.assertIn("Exit confirmation timeframe: 120minute", message)
 
     def test_krishna_backtest_can_use_two_hour_entry_trigger(self) -> None:
         daily_closes = (

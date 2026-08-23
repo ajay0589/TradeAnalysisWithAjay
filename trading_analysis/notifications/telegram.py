@@ -52,20 +52,25 @@ class TelegramNotifier:
 
 
 def purple_alert_message(alert: dict[str, Any], trade: dict[str, Any] | None = None) -> str:
+    alert_type = str(alert.get("alert_type") or "alert").lower()
     profile = _profile_label(alert.get("purple_timeframe"))
+    entry_kind = str(alert.get("entry_kind") or "-").title()
+    entry_timeframe = (trade or {}).get("entry_timeframe")
+    exit_timeframe = (trade or {}).get("exit_timeframe")
     parts = [
-        f"Purple Touch {str(alert.get('alert_type') or '').title()} Alert",
+        f"PURPLE TOUCH {alert_type.upper()} ALERT",
         f"Symbol: {alert.get('symbol') or '-'}",
         f"Profile: {profile}",
-        f"Entry: {alert.get('entry_kind') or '-'}",
         f"Trade ID: {alert.get('trade_id') or '-'}",
+        f"{'Original entry' if alert_type == 'exit' else 'Entry'}: {entry_kind}"
+        + (f" ({entry_timeframe})" if entry_timeframe else ""),
         f"Price / Yellow: {_fmt(alert.get('price'))} / {_fmt(alert.get('yellow_line'))}",
         f"Score: {_fmt(alert.get('score'))} ({alert.get('confidence') or '-'})",
         f"Status: {alert.get('status') or '-'}",
         str(alert.get("message") or ""),
     ]
-    if trade and trade.get("exit_timeframe"):
-        parts.append(f"Exit timeframe: {trade.get('exit_timeframe')}")
+    if exit_timeframe:
+        parts.append(f"Exit confirmation timeframe: {exit_timeframe}")
     reasons = alert.get("reasons") or []
     if reasons:
         parts.append("Why: " + "; ".join(str(reason) for reason in reasons[:3]))

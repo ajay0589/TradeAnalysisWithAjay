@@ -29,6 +29,7 @@ from trading_analysis.analysis.krishna_setup import (
     scan_krishna_bullish_setup,
     scan_krishna_entry_trigger,
     scan_krishna_purple_exit_status,
+    scan_krishna_purple_step1_candidate,
     scan_krishna_purple_touch_setup,
 )
 from trading_analysis.analysis.market_structure import analyze_market_structure
@@ -1200,6 +1201,88 @@ class AnalysisService:
             },
         }
 
+    def scan_krishna_purple_touch_step1(
+        self,
+        purple_timeframe: str = "week",
+        limit: int | None = None,
+        days: int | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
+    ) -> dict[str, Any]:
+        profile = krishna_purple_profile(purple_timeframe)
+        window = candle_window(from_date=from_date, to_date=to_date, days=days or profile.minimum_days)
+        rows: list[dict[str, Any]] = []
+        errors: list[dict[str, str]] = []
+        analyzed_symbols = 0
+
+        for symbol in self._watchlist_symbols():
+            if not self._has_candles(symbol, profile.purple_timeframe):
+                continue
+            try:
+                touch_candles, touch_source = self._load_timeframe_with_summary(symbol, profile.purple_timeframe, window)
+                analyzed_symbols += 1
+                early_candles, early_source = self._load_optional_timeframe_with_summary(symbol, profile.early_timeframe, window)
+                final_candles, final_source = self._load_optional_timeframe_with_summary(symbol, profile.final_timeframe, window)
+                structure = analyze_market_structure(touch_candles) if len(touch_candles) >= 10 else None
+                candidate = scan_krishna_purple_step1_candidate(
+                    symbol,
+                    touch_candles,
+                    early_candles=early_candles,
+                    final_candles=final_candles,
+                    purple_timeframe=profile.purple_timeframe,
+                    structure=structure,
+                )
+                if not candidate:
+                    continue
+                row = candidate.to_dict()
+                row["profile"] = profile.to_dict()
+                row["touch_candle_count"] = touch_source.get("analyzed_count")
+                row["touch_from"] = touch_source.get("from")
+                row["touch_to"] = touch_source.get("to")
+                row["touch_source_path"] = touch_source.get("path")
+                row["early_source_path"] = early_source.get("path")
+                row["final_source_path"] = final_source.get("path")
+                row["reasons_text"] = "; ".join(row.get("reasons") or [])
+                rows.append(row)
+            except Exception as exc:
+                errors.append({"symbol": symbol, "error": str(exc)})
+
+        def rank(row: dict[str, Any]) -> tuple[int, int, int, int]:
+            full = 1 if row.get("full_setup_status") == "qualified" else 0
+            early_ready = 1 if (row.get("early_entry") or {}).get("status") == "entry_candidate" else 0
+            final_ready = 1 if (row.get("final_entry") or {}).get("status") == "entry_candidate" else 0
+            return (full, final_ready, early_ready, int(row.get("score") or 0))
+
+        rows = sorted(rows, key=rank, reverse=True)
+        limited_rows = rows if limit is None else rows[:limit]
+        return {
+            "type": "krishna_purple_touch_step1",
+            "profile": profile.to_dict(),
+            "purple_timeframe": profile.purple_timeframe,
+            "purple_timeframe_label": profile.label,
+            "analyzed_symbols": analyzed_symbols,
+            "available_symbols": self._available_count(profile.purple_timeframe),
+            "total_fno_symbols": len(self._watchlist_symbols()),
+            "matched_symbols": len(rows),
+            "limit": limit,
+            "results": limited_rows,
+            "errors": errors[:20],
+            "summary": {
+                "candle_source": "local cached candle CSV files",
+                "latest_candles_pulled": False,
+                "analyzed_symbols": analyzed_symbols,
+                "matched_symbols": len(rows),
+                "shown_symbols": len(limited_rows),
+                "error_count": len(errors),
+                "points": [
+                    f"Step 1 shortlist uses {profile.label}: latest candle must touch purple EMA9 within tolerance.",
+                    "This stage intentionally does not require black EMA89, EMA26, or entry-trigger confirmation.",
+                    "Rows show which mandatory setup checks pass and which blockers prevent a strict entry candidate.",
+                    "Entry alerts are still created only after the strict entry conditions qualify.",
+                ],
+            },
+        }
+
     def scan_krishna_purple_touch_alerts(
         self,
         purple_timeframe: str = "all",
@@ -1211,35 +1294,18 @@ class AnalysisService:
         send_telegram: bool = True,
     ) -> dict[str, Any]:
         market_open = is_market_hours()
-        if not force and not market_open:
-            repository = KrishnaPurpleAlertRepository()
-            next_open = next_market_open()
-            return {
-                "type": "krishna_purple_touch_live_alert_scan",
-                "purple_timeframe": "all" if _is_all_purple_profiles(purple_timeframe) else purple_timeframe,
-                "profiles": _purple_profile_dicts(purple_timeframe),
-                "market_hours": False,
-                "skipped": True,
-                "next_market_open": next_open.isoformat(timespec="seconds") if next_open else None,
-                "entry_alerts_created": 0,
-                "entry_alerts_existing": 0,
-                "exit_alerts_created": 0,
-                "telegram": {"enabled": False, "sent": 0, "errors": []},
-                "recent_alerts": repository.list_recent_alerts(limit=50),
-                "open_trades": repository.list_open_trades(limit=200),
-                "errors": [],
-                "summary": {
-                    "points": [
-                        "Live Purple Touch alert scan is gated to NSE market hours: 09:15 to 15:30 IST, Monday-Friday.",
-                        "Use force only for testing cached data outside market hours.",
-                    ],
-                },
-            }
-
         repository = KrishnaPurpleAlertRepository()
         notifier = TelegramNotifier.from_env()
-        telegram_status = {"enabled": send_telegram and notifier.configured(), "sent": 0, "errors": []}
+        alerts_allowed = market_open or force
+        next_open = next_market_open() if not market_open else None
+        telegram_status = {
+            "configured": notifier.configured(),
+            "enabled": send_telegram and notifier.configured(),
+            "sent": 0,
+            "errors": [],
+        }
         scans: list[dict[str, Any]] = []
+        step1_scans: list[dict[str, Any]] = []
         created_entries: list[dict[str, Any]] = []
         existing_entries: list[dict[str, Any]] = []
         closed_trades: list[dict[str, Any]] = []
@@ -1247,6 +1313,14 @@ class AnalysisService:
         profiles = _purple_profiles(purple_timeframe)
 
         for profile in profiles:
+            step1_scan = self.scan_krishna_purple_touch_step1(
+                purple_timeframe=profile.purple_timeframe,
+                days=days,
+                from_date=from_date,
+                to_date=to_date,
+                limit=limit,
+            )
+            step1_scans.append(step1_scan)
             scan = self.scan_krishna_purple_touch(
                 purple_timeframe=profile.purple_timeframe,
                 days=days,
@@ -1255,6 +1329,8 @@ class AnalysisService:
                 limit=limit,
             )
             scans.append(scan)
+            if not alerts_allowed:
+                continue
             for row in scan.get("results") or []:
                 for entry_kind in ("early", "final"):
                     entry = row.get(f"{entry_kind}_entry") or {}
@@ -1270,24 +1346,30 @@ class AnalysisService:
                     except Exception as exc:
                         errors.append({"symbol": row.get("symbol") or "", "error": str(exc)})
 
-        max_days = max((days or profile.minimum_days) for profile in profiles)
-        window = candle_window(from_date=from_date, to_date=to_date, days=max_days)
-        for trade in repository.list_open_trades(limit=500):
-            matching_profile = next((profile for profile in profiles if profile.purple_timeframe == trade.get("purple_timeframe")), None)
-            if not matching_profile:
-                continue
-            try:
-                exit_timeframe = trade.get("exit_timeframe") or matching_profile.exit_timeframe
-                exit_candles, _summary = self._load_optional_timeframe_with_summary(trade["symbol"], exit_timeframe, window)
-                exit_snapshot = scan_krishna_purple_exit_status(trade["symbol"], exit_candles, exit_timeframe)
-                if exit_snapshot.get("status") == "exit_triggered":
-                    outcome = repository.close_trade_alert(trade, exit_snapshot)
-                    closed_trades.append(outcome)
-                    self._notify_purple_alert(outcome, notifier, telegram_status, send_telegram)
-                else:
-                    repository.update_checked(trade["trade_id"])
-            except Exception as exc:
-                errors.append({"symbol": trade.get("symbol") or "", "error": str(exc)})
+        if alerts_allowed:
+            max_days = max((days or profile.minimum_days) for profile in profiles)
+            window = candle_window(from_date=from_date, to_date=to_date, days=max_days)
+            for trade in repository.list_open_trades(limit=500):
+                matching_profile = next(
+                    (profile for profile in profiles if profile.purple_timeframe == trade.get("purple_timeframe")),
+                    None,
+                )
+                if not matching_profile:
+                    continue
+                try:
+                    exit_timeframe = trade.get("exit_timeframe") or matching_profile.exit_timeframe
+                    exit_candles, _summary = self._load_optional_timeframe_with_summary(
+                        trade["symbol"], exit_timeframe, window
+                    )
+                    exit_snapshot = scan_krishna_purple_exit_status(trade["symbol"], exit_candles, exit_timeframe)
+                    if exit_snapshot.get("status") == "exit_triggered":
+                        outcome = repository.close_trade_alert(trade, exit_snapshot)
+                        closed_trades.append(outcome)
+                        self._notify_purple_alert(outcome, notifier, telegram_status, send_telegram)
+                    else:
+                        repository.update_checked(trade["trade_id"])
+                except Exception as exc:
+                    errors.append({"symbol": trade.get("symbol") or "", "error": str(exc)})
 
         recent_alerts = repository.list_recent_alerts(limit=50)
         open_trades = repository.list_open_trades(limit=200)
@@ -1299,8 +1381,13 @@ class AnalysisService:
             "market_hours": market_open,
             "forced": force,
             "skipped": False,
+            "alert_creation_skipped": not alerts_allowed,
+            "next_market_open": next_open.isoformat(timespec="seconds") if next_open else None,
             "scan": scans[0] if len(scans) == 1 else None,
             "scans": scans,
+            "step1_scan": step1_scans[0] if len(step1_scans) == 1 else None,
+            "step1_scans": step1_scans,
+            "step1_results": [row for scan in step1_scans for row in (scan.get("results") or [])],
             "entry_alerts_created": len(created_entries),
             "entry_alerts_existing": len(existing_entries),
             "exit_alerts_created": len(closed_trades),
@@ -1316,7 +1403,8 @@ class AnalysisService:
                     "Live alert scan checks Monthly, Weekly, and Daily purple-touch profiles together.",
                     "Entry alerts get a trade ID and remain open until the configured exit timeframe closes below yellow.",
                     "Duplicate entry alerts are suppressed while the same symbol/timeframe/entry kind trade is already open.",
-                    "Fresh alerts are gated to NSE market hours unless force is enabled for cached-data testing.",
+                    "Cached candles are analyzed even outside market hours so Step 1 and strict candidates remain visible.",
+                    "Fresh entry/exit alerts and Telegram delivery are gated to NSE market hours unless force is enabled for testing.",
                     "This is read-only alert tracking for manual review, not order placement.",
                 ],
             },
@@ -1341,8 +1429,17 @@ class AnalysisService:
 
     def krishna_purple_touch_alerts(self, limit: int = 50) -> dict[str, Any]:
         repository = KrishnaPurpleAlertRepository()
+        notifier = TelegramNotifier.from_env()
         return {
             "type": "krishna_purple_touch_alerts",
+            "profiles": _purple_profile_dicts("all"),
+            "market_hours": is_market_hours(),
+            "telegram": {
+                "configured": notifier.configured(),
+                "enabled": notifier.configured(),
+                "sent": 0,
+                "errors": [],
+            },
             "recent_alerts": repository.list_recent_alerts(limit=limit),
             "open_trades": repository.list_open_trades(limit=200),
         }
