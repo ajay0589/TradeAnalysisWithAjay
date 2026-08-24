@@ -971,7 +971,10 @@
                   Force cached-data run outside market hours
                 </label>
                 <div class="field-hint warning-hint">Normally leave this off. Manual scans still show candidates after market close. Enable it only to test creation of trade IDs, entry/exit alerts, and optional Telegram delivery from cached candles outside NSE hours.</div>
-                <button id="purpleLiveScanBtn" class="full-btn">Run scanner now</button>
+                <div class="button-row">
+                  <button id="purpleLiveScanBtn" type="button">Run scanner now</button>
+                  <button id="purpleCancelScanBtn" type="button" title="Stops the active candle refresh after the current Zerodha request finishes." disabled>Cancel current scan</button>
+                </div>
                 <div class="button-row">
                   <button id="purpleAutoStartBtn" type="button">Start market monitor</button>
                   <button id="purpleAutoStopBtn" type="button">Stop</button>

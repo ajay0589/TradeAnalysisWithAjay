@@ -14,6 +14,7 @@ const state = {
   purpleAutoTimer: null,
   purpleMonitorRunning: false,
   purpleScanInFlight: false,
+  purpleCancelRequested: false,
   lastBacktest: null,
   strategies: [],
   lastGenericBacktest: null,
@@ -1031,6 +1032,7 @@ async function refreshPurpleTimeframes(timeframes, days) {
     limit: null,
   });
   state.purpleRefreshJobId = job.job_id;
+  state.purpleCancelRequested = false;
   renderPurpleRefreshJob(job);
   await waitForPurpleRefreshJob(job.job_id);
 }
@@ -1039,7 +1041,12 @@ async function waitForPurpleRefreshJob(jobId) {
   while (true) {
     const job = await api(`/api/job?job_id=${encodeURIComponent(jobId)}`);
     renderPurpleRefreshJob(job);
-    if (!["queued", "running"].includes(job.status)) {
+    if (!["queued", "running", "stopping"].includes(job.status)) {
+      if (job.status === "cancelled") {
+        const error = new Error("Candle refresh cancelled. Purple Touch analysis was not started.");
+        error.cancelled = true;
+        throw error;
+      }
       if (job.status !== "completed") {
         throw new Error(`Purple-touch candle refresh ${job.status}. ${job.errors?.[0] || ""}`.trim());
       }
@@ -1056,6 +1063,24 @@ function renderPurpleRefreshJob(job) {
   $("purpleProgressMeta").textContent = `refresh ${job.status} / ${completed}/${total}`;
   $("purpleProgressStatus").textContent = `Refreshing purple-touch candles: ${job.current || "starting"} | success ${job.successes || 0} | failures ${job.failures || 0}`;
   $("purpleProgressBar").style.width = `${percent}%`;
+  const cancellable = ["queued", "running", "stopping"].includes(job.status);
+  $("purpleCancelScanBtn").disabled = !cancellable || state.purpleCancelRequested;
+}
+
+async function cancelPurpleCurrentScan() {
+  if (!state.purpleRefreshJobId || !state.purpleScanInFlight || state.purpleCancelRequested) return;
+  state.purpleCancelRequested = true;
+  $("purpleCancelScanBtn").disabled = true;
+  $("purpleProgressMeta").textContent = "cancelling";
+  $("purpleProgressStatus").textContent = "Cancellation requested. Waiting for the current Zerodha request to finish...";
+  try {
+    const job = await postApi("/api/job/stop", { job_id: state.purpleRefreshJobId });
+    renderPurpleRefreshJob(job);
+  } catch (error) {
+    state.purpleCancelRequested = false;
+    $("purpleCancelScanBtn").disabled = false;
+    setNotes([error.message], true);
+  }
 }
 
 function setPurpleProgress(status, detail) {
@@ -1290,7 +1315,12 @@ function downloadPurpleCsv() {
 }
 
 async function runPurpleLiveScan({ quiet = false } = {}) {
+  if (state.purpleScanInFlight) return;
   state.purpleScanInFlight = true;
+  state.purpleRefreshJobId = null;
+  state.purpleCancelRequested = false;
+  $("purpleLiveScanBtn").disabled = true;
+  $("purpleCancelScanBtn").disabled = !$("purpleRefreshToggle").checked;
   updatePurpleMonitorUi(state.purpleMonitorRunning ? "Scanning now..." : "Running one scan...");
   if (!quiet) {
     setNotes("Running Krishna purple-touch live alert scan across Monthly, Weekly, and Daily...");
@@ -1325,10 +1355,15 @@ async function runPurpleLiveScan({ quiet = false } = {}) {
       setNotes(newAlerts ? `${newAlerts} new Purple Touch alert(s) are shown on the Web UI.` : "Purple Touch scan completed; no new live alerts.");
     }
   } catch (error) {
-    $("purpleAlertMeta").textContent = "failed";
-    setNotes([error.message], true);
+    $("purpleAlertMeta").textContent = error.cancelled ? "cancelled" : "failed";
+    setPurpleProgress(error.cancelled ? "cancelled" : "failed", error.message);
+    setNotes([error.message], !error.cancelled);
   } finally {
     state.purpleScanInFlight = false;
+    state.purpleRefreshJobId = null;
+    state.purpleCancelRequested = false;
+    $("purpleLiveScanBtn").disabled = false;
+    $("purpleCancelScanBtn").disabled = true;
     updatePurpleMonitorUi();
   }
 }
@@ -3032,6 +3067,7 @@ $("krishnaScanBtn").addEventListener("click", runKrishnaScan);
 $("krishnaCopyBtn").addEventListener("click", copyKrishnaSymbols);
 $("krishnaDownloadBtn").addEventListener("click", downloadKrishnaCsv);
 $("purpleLiveScanBtn").addEventListener("click", () => runPurpleLiveScan());
+$("purpleCancelScanBtn").addEventListener("click", cancelPurpleCurrentScan);
 $("purpleAutoStartBtn").addEventListener("click", startPurpleAutoMonitor);
 $("purpleAutoStopBtn").addEventListener("click", stopPurpleAutoMonitor);
 $("purpleCopyBtn").addEventListener("click", copyPurpleSymbols);

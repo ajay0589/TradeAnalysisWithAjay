@@ -279,6 +279,9 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         sleep_seconds=float(payload.get("sleep_seconds") or 0.35),
                     )
                 )
+            elif parsed.path == "/api/job/stop":
+                payload = self._read_json()
+                self._send_json(self.service.stop_job(str(payload.get("job_id") or "")))
             elif parsed.path == "/api/sector-map/from-csv":
                 payload = self._read_json()
                 self._send_json(

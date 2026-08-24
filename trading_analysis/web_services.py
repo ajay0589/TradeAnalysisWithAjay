@@ -273,6 +273,7 @@ class AnalysisService:
             "current": "",
             "results": [],
             "errors": [],
+            "stop_requested": False,
             "requested_timeframes": requested_timeframes,
             "source_timeframes": normalized_timeframes,
             "timeframes": normalized_timeframes,
@@ -692,9 +693,15 @@ class AnalysisService:
     def _run_bulk_candle_download(self, job_id: str, targets, timeframes, timeframe_windows, sleep_seconds: float) -> None:
         self._update_job(job_id, status="running", started_at=datetime.now().isoformat(timespec="seconds"))
         try:
+            if self._job_stop_requested(job_id):
+                self._cancel_bulk_job(job_id)
+                return
             client = _zerodha_client()
             for exchange, tradingsymbol, file_stem in targets:
                 for timeframe in timeframes:
+                    if self._job_stop_requested(job_id):
+                        self._cancel_bulk_job(job_id)
+                        return
                     window = timeframe_windows[timeframe]
                     current = f"{exchange}:{tradingsymbol} {timeframe}"
                     self._update_job(job_id, current=current)
@@ -707,6 +714,9 @@ class AnalysisService:
                             from_time=window.from_time,
                             to_time=window.to_time,
                         )
+                        if self._job_stop_requested(job_id):
+                            self._cancel_bulk_job(job_id)
+                            return
                         output = candle_path(self.daily_data_dir, timeframe, file_stem)
                         merge_candles_csv(output, candles)
                         self._append_job_result(
@@ -723,12 +733,27 @@ class AnalysisService:
                         self._append_job_error(job_id, f"{current}: {exc}")
                     finally:
                         self._increment_job(job_id)
-                        if sleep_seconds:
+                        if sleep_seconds and not self._job_stop_requested(job_id):
                             time.sleep(sleep_seconds)
+            if self._job_stop_requested(job_id):
+                self._cancel_bulk_job(job_id)
+                return
             self._update_job(job_id, status="completed", finished_at=datetime.now().isoformat(timespec="seconds"), current="")
         except Exception as exc:
             self._append_job_error(job_id, str(exc))
             self._update_job(job_id, status="failed", finished_at=datetime.now().isoformat(timespec="seconds"), current="")
+
+    def _job_stop_requested(self, job_id: str) -> bool:
+        with self._jobs_lock:
+            return bool(self._jobs.get(job_id, {}).get("stop_requested"))
+
+    def _cancel_bulk_job(self, job_id: str) -> None:
+        self._update_job(
+            job_id,
+            status="cancelled",
+            finished_at=datetime.now().isoformat(timespec="seconds"),
+            current="",
+        )
 
     def _run_option_chain_monitor(self, job_id: str) -> None:
         self._update_job(job_id, status="running", started_at=datetime.now().isoformat(timespec="seconds"))

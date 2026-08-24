@@ -983,6 +983,36 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(normalize_timeframe("30m"), "30minute")
         self.assertEqual(normalize_timeframe("10m"), "10minute")
 
+    def test_bulk_candle_job_can_be_cancelled_before_next_broker_call(self) -> None:
+        service = AnalysisService()
+        job_id = "bulk-cancel-test"
+        service._jobs[job_id] = {
+            "job_id": job_id,
+            "type": "bulk_candles",
+            "status": "running",
+            "stop_requested": False,
+            "completed": 0,
+            "successes": 0,
+            "failures": 0,
+            "results": [],
+            "errors": [],
+            "current": "",
+            "started_at": None,
+            "finished_at": None,
+        }
+
+        stopping = service.stop_job(job_id)
+        self.assertEqual(stopping["status"], "stopping")
+        self.assertTrue(stopping["stop_requested"])
+
+        with patch("trading_analysis.web_services._zerodha_client") as client:
+            service._run_bulk_candle_download(job_id, [], [], {}, 0)
+
+        client.assert_not_called()
+        cancelled = service.job_status(job_id)
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertIsNotNone(cancelled["finished_at"])
+
     def test_krishna_purple_live_alert_scan_analyzes_but_pauses_alerts_outside_market_hours(self) -> None:
         class FakePurpleRepo:
             def list_recent_alerts(self, limit=50):
