@@ -1319,7 +1319,7 @@ class AnalysisService:
                 "shown_symbols": len(limited_rows),
                 "error_count": len(errors),
                 "points": [
-                    f"Step 1 shortlist uses {profile.label}: latest candle must touch purple EMA9 within tolerance.",
+                    f"Step 1 shortlist uses {profile.label}: purple EMA9 must be inside the latest candle high/low range.",
                     "This stage intentionally does not require black EMA89, EMA26, or entry-trigger confirmation.",
                     f"Rows audit the {profile.confirmation_label} blue-line confirmation plus blue-above-purple and blue-to-purple approach checks.",
                     "Rows show which mandatory setup checks pass and which blockers prevent a strict entry candidate.",

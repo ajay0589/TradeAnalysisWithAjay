@@ -943,6 +943,16 @@ class AnalysisTests(unittest.TestCase):
     def test_krishna_purple_touch_detects_reviewable_candidate(self) -> None:
         closes = [100 + (index * 0.8) for index in range(95)] + [176, 172, 170, 169, 168]
         touch = self._scanner_candles(closes)
+        latest = touch[-1]
+        touch[-1] = Candle(
+            latest.timestamp,
+            latest.open,
+            171.0,
+            latest.low,
+            latest.close,
+            latest.volume,
+            latest.open_interest,
+        )
         early = self._intraday_candles([120 + (index * 0.3) for index in range(90)])
         final = prepare_candles(self._intraday_candles([118 + (index * 0.4) for index in range(120)]), "2hour", candle_window())
         confirmation = self._scanner_candles([100 + (index * 0.5) for index in range(100)])
@@ -967,6 +977,16 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(match.blue_above_purple)
         self.assertTrue(match.approach_from_blue)
         self.assertEqual(match.higher_confirmation["status"], "pass")
+
+    def test_krishna_purple_touch_rejects_near_touch_outside_candle_range(self) -> None:
+        closes = [100 + (index * 0.8) for index in range(95)] + [176, 172, 170, 169, 168]
+        touch = self._scanner_candles(closes)
+
+        step1 = scan_krishna_purple_step1_candidate("ABC", touch, purple_timeframe="week")
+        strict = scan_krishna_purple_touch_setup("ABC", touch, purple_timeframe="week")
+
+        self.assertIsNone(step1)
+        self.assertIsNone(strict)
 
     def test_krishna_purple_setup_has_no_fixed_ten_bar_expiry(self) -> None:
         start = datetime(2026, 8, 24, 9, 15)

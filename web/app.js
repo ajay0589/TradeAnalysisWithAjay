@@ -1148,8 +1148,12 @@ function renderPurpleSummary(summary) {
   }
   $("purpleSummaryCards").innerHTML = [
     ["Analyzed", summary.analyzed_symbols],
-    ["Matched", summary.matched_symbols],
-    ["Shown", summary.shown_symbols],
+    ["Step 1 touches", summary.step1_touch_count],
+    ["Strict candidates", summary.matched_symbols],
+    ["Early ready", summary.early_entry_ready],
+    ["Final ready", summary.final_entry_ready],
+    ["New entry alerts", summary.new_entry_alerts],
+    ["New exit alerts", summary.new_exit_alerts],
     ["Errors", summary.error_count],
     ["Latest candles", summary.latest_candles_pulled ? "Pulled" : "No"],
   ]
@@ -1404,6 +1408,12 @@ async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "all" } = {}
       if (purpleTimeframe === "all") await refreshCandlesForAllPurpleProfiles();
       else await refreshCandlesForPurpleProfile(purpleTimeframe);
     }
+    setPurpleProgress(
+      "running",
+      `Candle refresh complete. Analyzing ${scanLabel} setup rules, entry confirmations, and open-trade exits...`,
+    );
+    $("purpleProgressMeta").textContent = "analysis running";
+    $("purpleProgressBar").style.width = "85%";
     const data = await postApi("/api/krishna-purple-touch-live-scan", {
       purple_timeframe: purpleTimeframe,
       limit: "all",
@@ -1421,11 +1431,15 @@ async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "all" } = {}
     renderPurpleResults();
     renderPurpleAlerts(data);
     loadPurpleAlerts();
+    const newAlerts = Number(data.entry_alerts_created || 0) + Number(data.exit_alerts_created || 0);
+    setPurpleProgress(
+      "completed",
+      `${scanLabel} analysis complete: ${step1Rows.length} exact touch row(s), ${rows.length} strict candidate(s), ${newAlerts} new alert(s).`,
+    );
     $("purpleAlertMeta").textContent = data.alert_creation_skipped
       ? "analysis complete / live alerts paused"
       : `${data.entry_alerts_created || 0} entry / ${data.exit_alerts_created || 0} new alert(s)`;
     if (!quiet) {
-      const newAlerts = Number(data.entry_alerts_created || 0) + Number(data.exit_alerts_created || 0);
       setNotes(newAlerts ? `${newAlerts} new Purple Touch alert(s) are shown on the Web UI.` : "Purple Touch scan completed; no new live alerts.");
     }
   } catch (error) {
@@ -1490,19 +1504,26 @@ function scanSummaryFromLiveScan(data, rows, step1Rows = []) {
     scans.reduce((total, scan) => total + Number((scan.errors || []).length), 0) +
     step1Scans.reduce((total, scan) => total + Number((scan.errors || []).length), 0) +
     Number((data.errors || []).length);
+  const earlyReady = rows.filter((row) => (row.early_entry || {}).status === "entry_candidate").length;
+  const finalReady = rows.filter((row) => (row.final_entry || {}).status === "entry_candidate").length;
   return {
     analyzed_symbols: analyzed,
     matched_symbols: matched,
     shown_symbols: rows.length,
+    step1_touch_count: step1Matched || step1Rows.length,
+    early_entry_ready: earlyReady,
+    final_entry_ready: finalReady,
+    new_entry_alerts: Number(data.entry_alerts_created || 0),
+    new_exit_alerts: Number(data.exit_alerts_created || 0),
     error_count: errors,
     latest_candles_pulled: $("purpleRefreshToggle").checked,
     points: [
       `Scanner evaluated ${profileList(data)} purple-touch profile${(data.profiles || []).length === 1 ? "" : "s"}.`,
-      `Step 1 found ${step1Matched || step1Rows.length} higher-timeframe EMA9 touch row(s) before strict entry filters.`,
-      "Step 1 uses a wider 3% audit zone so near-touches remain visible; Latest Scan Candidates use the tighter 1% touch zone.",
-      `Latest Scan Candidates shows ${rows.length} row(s) after the tighter touch and mandatory EMA89/EMA26/trend checks; early/final entry can still be waiting.`,
+      `Step 1 found ${step1Matched || step1Rows.length} exact higher-timeframe EMA9 touch row(s); EMA9 is inside the candle high/low range (range distance 0.00%).`,
+      `Latest Scan Candidates shows ${rows.length} row(s) after mandatory EMA89, EMA26, blue/purple direction, 2-3 candle approach, and higher-confirmation checks.`,
+      `${earlyReady} strict candidate row(s) have early entry ready; ${finalReady} have final entry ready. Candidate rows are not the same as newly created alerts.`,
       data.market_hours === false && !data.forced
-        ? "Market is closed, so new alert creation was skipped unless force is enabled."
+        ? "Market is closed and Force is off: analysis was refreshed, but entry/exit events, trade IDs, and Telegram alerts were intentionally not created."
         : "Market-hours scanner created entry/exit alerts only for fresh matching opportunities.",
       `Telegram: ${telegramText(data.telegram)}.`,
     ],

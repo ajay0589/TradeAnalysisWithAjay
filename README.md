@@ -194,6 +194,17 @@ Use this same URL going forward. The script stops any older UI process already l
 .\scripts\start_web_ui.ps1 -Foreground
 ```
 
+### Purple Touch implementation guide
+
+The visual workflow, confirmed rules, timeframe matrix, entry/exit lifecycle, UI count reconciliation, and Krishna review checklist are documented in [Purple Touch Implementation Guide](docs/Purple_Touch_Implementation_Guide.pdf).
+
+Regenerate the PDF after material rule changes:
+
+```powershell
+python -m pip install reportlab
+python scripts\generate_purple_touch_guide.py
+```
+
 The dashboard supports:
 
 - analyzing one F&O stock by symbol, or by company name when the Zerodha NSE instrument cache is present

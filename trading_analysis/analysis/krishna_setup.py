@@ -68,8 +68,8 @@ class KrishnaEntryTrigger:
 class KrishnaPurpleTouchConfig:
     min_candles: int = 52
     step1_min_candles: int = 9
-    step1_touch_tolerance_percent: float = 3.0
-    purple_touch_tolerance_percent: float = 1.0
+    step1_touch_tolerance_percent: float = 0.0
+    purple_touch_tolerance_percent: float = 0.0
     approach_lookback_candles: int = 3
     approach_tolerance_percent: float = 3.0
 
@@ -626,9 +626,7 @@ def scan_krishna_purple_step1_candidate(
         symbol, final_candles, profile.final_timeframe, "final", **entry_context
     )
 
-    reasons = [
-        f"Step 1 passed: higher-timeframe candle touched or came within {config.step1_touch_tolerance_percent:.1f}% of the purple EMA9 zone."
-    ]
+    reasons = ["Step 1 passed: purple EMA9 is inside the higher-timeframe candle high/low range."]
     warnings: list[str] = []
     blockers: list[str] = []
     score = 35
