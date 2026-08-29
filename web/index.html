@@ -1027,12 +1027,14 @@
                       <tr><td>Latest Scan Candidates</td><td>Strict touch zone ±1%</td><td>Uses the tighter purple-touch tolerance plus mandatory higher-timeframe filters.</td><td>Entry alerts are created only when early or final entry is also ready.</td></tr>
                       <tr><td>Scan</td><td>Monthly / Weekly / Daily</td><td>The higher timeframe on which the purple EMA9 touch was detected.</td><td>Determines the early, final, and exit timeframes.</td></tr>
                       <tr><td>Close / Range</td><td>Close; candle high and low</td><td>The latest higher-timeframe candle used for the touch check.</td><td>Its range is compared with purple EMA9.</td></tr>
-                      <tr><td>Purple EMA9</td><td>Price level and distance %</td><td>The 9-period exponential moving average. Distance 0% means EMA9 is inside the candle range.</td><td>Must be touched/nearby for Step 1.</td></tr>
+                      <tr><td>Purple EMA9</td><td>Price, close distance, range distance</td><td>Close distance measures how far the current close is from EMA9. Range distance is 0% only when EMA9 is inside the candle high/low.</td><td>The range must touch/be near purple; close distance prevents a wide candle from looking falsely perfect.</td></tr>
                       <tr><td>Black EMA89</td><td>Pass / Block / Unknown</td><td>Pass means close is above EMA89. Block means close is below it. Unknown means fewer than 89 candles are available.</td><td>Mandatory higher-timeframe trend filter.</td></tr>
                       <tr><td>EMA26</td><td>Pass / Block / Unknown</td><td>Light-green EMA26 relationship for close and purple EMA9.</td><td>Close below EMA26 blocks strict qualification.</td></tr>
+                      <tr><td>Blue / Purple Direction</td><td>Pass / Block plus approach</td><td>Blue Chande Kroll must be above purple EMA9, and price must move from the blue area toward purple across the latest 2-3 higher-timeframe candles.</td><td>Mandatory on the touch timeframe; blue above purple is also mandatory on the entry timeframe.</td></tr>
+                      <tr><td>Higher Confirmation</td><td>5-month / Monthly / Weekly</td><td>Monthly touch: derived 5-month open or close above blue. Weekly touch: Monthly close above blue. Daily touch: Weekly close above blue.</td><td>Mandatory higher-timeframe confirmation.</td></tr>
                       <tr><td>Yellow / Brown</td><td>Chande Kroll / VWMA20 values</td><td>Shows the yellow Chande Kroll line and brown VWMA20.</td><td>Final entry requires yellow above brown.</td></tr>
-                      <tr><td>Early Entry</td><td>entry_candidate / wait / missing</td><td>Early-entry timeframe candle close relative to yellow.</td><td>Candidate when its candle closes above yellow.</td></tr>
-                      <tr><td>Final Entry</td><td>entry_candidate / wait / missing</td><td>Final-entry timeframe confirmation, including yellow above brown.</td><td>Candidate only after all final conditions pass.</td></tr>
+                      <tr><td>Early Entry</td><td>entry_candidate / wait / discarded / missing</td><td>Close above yellow and blue above purple on the early timeframe. Yellow above brown is optional. The mapped touch bar is Candle 1 and Candle 2 must close first.</td><td>From Candle 3 onward, discarded when price breaks Candle 1 low or Candle 2 low. No fixed time expiry.</td></tr>
+                      <tr><td>Final Entry</td><td>entry_candidate / wait / discarded / missing</td><td>Close above yellow, blue above purple, and yellow above brown on the final timeframe. The mapped touch bar is Candle 1 and Candle 2 must close first.</td><td>From Candle 3 onward, discarded when price breaks Candle 1 low or Candle 2 low. No fixed time expiry.</td></tr>
                       <tr><td>Status / Blockers</td><td>qualified / step1_only</td><td>Qualified passed higher-timeframe filters. Step1-only shows the exact blocker.</td><td>Alerts require a strict setup plus entry confirmation.</td></tr>
                       <tr><td>Entry Alerts</td><td>Early / Final</td><td>Historical entry events. Every entry event creates one unique trade ID.</td><td>Trade remains open until its exit condition triggers.</td></tr>
                       <tr><td>Exit Alerts</td><td>Closed trade events</td><td>Created when the configured exit-timeframe candle closes below yellow.</td><td>Closes the matching trade ID.</td></tr>
@@ -1094,6 +1096,8 @@
                         <th>Purple EMA9</th>
                         <th>Black EMA89</th>
                         <th>EMA26</th>
+                        <th>Blue / Purple Direction</th>
+                        <th>Higher Confirmation</th>
                         <th>Yellow / Brown</th>
                         <th>Early Entry</th>
                         <th>Final Entry</th>
@@ -1142,6 +1146,8 @@
                         <th>Score</th>
                         <th>Touch TF</th>
                         <th>Close / Purple</th>
+                        <th>Blue / Purple Direction</th>
+                        <th>Higher Confirmation</th>
                         <th>Yellow / Brown</th>
                         <th>Light Green</th>
                         <th>Trend Checks</th>

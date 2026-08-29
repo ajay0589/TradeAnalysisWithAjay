@@ -60,6 +60,7 @@ from trading_analysis.brokers.zerodha import (
     resolve_instrument_token,
 )
 from trading_analysis.candles import (
+    aggregate_month_span,
     candle_path,
     candle_window,
     fetch_interval,
@@ -1163,12 +1164,16 @@ class AnalysisService:
                 analyzed_symbols += 1
                 early_candles, early_source = self._load_optional_timeframe_with_summary(symbol, profile.early_timeframe, window)
                 final_candles, final_source = self._load_optional_timeframe_with_summary(symbol, profile.final_timeframe, window)
+                confirmation_candles, confirmation_source = self._load_purple_confirmation_with_summary(
+                    symbol, profile, window
+                )
                 structure = analyze_market_structure(touch_candles) if len(touch_candles) >= 10 else None
                 match = scan_krishna_purple_touch_setup(
                     symbol,
                     touch_candles,
                     early_candles=early_candles,
                     final_candles=final_candles,
+                    confirmation_candles=confirmation_candles,
                     purple_timeframe=profile.purple_timeframe,
                     structure=structure,
                 )
@@ -1182,6 +1187,8 @@ class AnalysisService:
                 row["touch_source_path"] = touch_source.get("path")
                 row["early_source_path"] = early_source.get("path")
                 row["final_source_path"] = final_source.get("path")
+                row["confirmation_source_path"] = confirmation_source.get("path")
+                row["confirmation_candle_count"] = confirmation_source.get("analyzed_count")
                 row["reasons_text"] = "; ".join(row.get("reasons") or [])
                 rows.append(row)
             except Exception as exc:
@@ -1218,7 +1225,13 @@ class AnalysisService:
                     f"Early entry status uses {timeframe_label(profile.early_timeframe)} candles.",
                     f"Final entry status uses {timeframe_label(profile.final_timeframe)} candles.",
                     f"Exit/review timeframe for both entries: {timeframe_label(profile.exit_timeframe)} close below yellow.",
-                    "Mandatory filters: close above black EMA89 on the purple-touch timeframe, and final entry needs yellow Chande Kroll above brown VWMA20.",
+                    f"Higher confirmation: {profile.confirmation_label} "
+                    + ("open or close" if profile.confirmation_open_or_close else "close")
+                    + " above its blue Chande Kroll line.",
+                    "Mandatory filters: close above black EMA89, blue Chande Kroll above purple EMA9, and price approaching purple from blue across the latest 2-3 touch-timeframe candles.",
+                    "Final entry needs yellow Chande Kroll above brown VWMA20; early entry treats that relationship as context only.",
+                    "Entry lifecycle: mapped purple touch is Candle 1, wait for Candle 2 to close, then discard from Candle 3 onward if price breaks Candle 1 or Candle 2 low.",
+                    "There is no fixed 10-candle expiry.",
                     "Light green is EMA26. Ichimoku, VWAP, and Donchian Channel 20 are ignored for this setup.",
                     "RSI bullish divergence is optional context only.",
                     "This is a manual-review candidate shortlist, not order placement or advisory.",
@@ -1248,12 +1261,16 @@ class AnalysisService:
                 analyzed_symbols += 1
                 early_candles, early_source = self._load_optional_timeframe_with_summary(symbol, profile.early_timeframe, window)
                 final_candles, final_source = self._load_optional_timeframe_with_summary(symbol, profile.final_timeframe, window)
+                confirmation_candles, confirmation_source = self._load_purple_confirmation_with_summary(
+                    symbol, profile, window
+                )
                 structure = analyze_market_structure(touch_candles) if len(touch_candles) >= 10 else None
                 candidate = scan_krishna_purple_step1_candidate(
                     symbol,
                     touch_candles,
                     early_candles=early_candles,
                     final_candles=final_candles,
+                    confirmation_candles=confirmation_candles,
                     purple_timeframe=profile.purple_timeframe,
                     structure=structure,
                 )
@@ -1267,6 +1284,8 @@ class AnalysisService:
                 row["touch_source_path"] = touch_source.get("path")
                 row["early_source_path"] = early_source.get("path")
                 row["final_source_path"] = final_source.get("path")
+                row["confirmation_source_path"] = confirmation_source.get("path")
+                row["confirmation_candle_count"] = confirmation_source.get("analyzed_count")
                 row["reasons_text"] = "; ".join(row.get("reasons") or [])
                 rows.append(row)
             except Exception as exc:
@@ -1302,6 +1321,7 @@ class AnalysisService:
                 "points": [
                     f"Step 1 shortlist uses {profile.label}: latest candle must touch purple EMA9 within tolerance.",
                     "This stage intentionally does not require black EMA89, EMA26, or entry-trigger confirmation.",
+                    f"Rows audit the {profile.confirmation_label} blue-line confirmation plus blue-above-purple and blue-to-purple approach checks.",
                     "Rows show which mandatory setup checks pass and which blockers prevent a strict entry candidate.",
                     "Entry alerts are still created only after the strict entry conditions qualify.",
                 ],
@@ -2029,6 +2049,18 @@ class AnalysisService:
         except FileNotFoundError:
             data_stem = self._data_stem(symbol_or_stem)
             return None, _missing_candle_source_summary(symbol_or_stem, timeframe, candle_path(self.daily_data_dir, timeframe, data_stem))
+
+    def _load_purple_confirmation_with_summary(self, symbol: str, profile, window):
+        source_timeframe_value = "month" if profile.confirmation_timeframe == "5month" else profile.confirmation_timeframe
+        candles, summary = self._load_timeframe_with_summary(symbol, source_timeframe_value, window)
+        if profile.confirmation_timeframe == "5month":
+            candles = aggregate_month_span(candles, 5)
+        derived_summary = dict(summary)
+        derived_summary["timeframe"] = profile.confirmation_timeframe
+        derived_summary["timeframe_label"] = profile.confirmation_label
+        derived_summary["analyzed_count"] = len(candles)
+        derived_summary["derived_from"] = source_timeframe_value
+        return candles, derived_summary
 
     def _analysis_summary(
         self,

@@ -1100,7 +1100,7 @@ function renderPurpleRules(data) {
   $("purpleRuleCards").innerHTML = profiles
     .map((profile) => [
       profile.label || profile.purple_timeframe || "-",
-      `Early ${BULK_TIMEFRAME_LABELS[profile.early_timeframe] || profile.early_timeframe}, Final ${BULK_TIMEFRAME_LABELS[profile.final_timeframe] || profile.final_timeframe}, Exit ${BULK_TIMEFRAME_LABELS[profile.exit_timeframe] || profile.exit_timeframe}`,
+      `Confirm ${profile.confirmation_label || profile.confirmation_timeframe || "-"}; Early ${BULK_TIMEFRAME_LABELS[profile.early_timeframe] || profile.early_timeframe}, Final ${BULK_TIMEFRAME_LABELS[profile.final_timeframe] || profile.final_timeframe}, Exit ${BULK_TIMEFRAME_LABELS[profile.exit_timeframe] || profile.exit_timeframe}`,
     ])
     .map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${value}</strong></div>`)
     .join("");
@@ -1110,6 +1110,10 @@ function renderPurpleRules(data) {
     "Weekly: early entry 30m, final entry 2H.",
     "Daily: use only 10m for early/final/exit tracking.",
     "Purple-touch filter requires close above black EMA89.",
+    "Blue Chande Kroll must be above purple EMA9 and price must approach purple from blue across the latest 2-3 higher-timeframe candles.",
+    "Monthly touch confirms on derived 5-month open or close above blue; Weekly confirms on Monthly close; Daily confirms on Weekly close.",
+    "The mapped purple-touch bar is Candle 1. Wait for Candle 2 to close before allowing entry confirmation.",
+    "From Candle 3 onward, discard the setup if price breaks the low of Candle 1 or Candle 2. There is no fixed candle-count expiry.",
     "Entry condition: selected entry timeframe candle closes above yellow Chande Kroll.",
     "Final entry additionally requires yellow Chande Kroll above brown VWMA20.",
     "Exit/review condition: exit timeframe candle closes below yellow Chande Kroll.",
@@ -1158,6 +1162,8 @@ function renderPurpleResults(rows = null) {
           <td>${fmtInt(row.score)}<div class="cell-note">${escapeHtml(row.confidence || "-")}</div></td>
           <td>${escapeHtml(row.purple_timeframe_label || row.purple_timeframe || "-")}</td>
           <td>${fmt(row.close)} / ${fmt(row.purple_ema9)}<div class="cell-note">${row.purple_touch ? "purple touched" : "not touched"}</div></td>
+          <td>${purpleDirectionCell(row)}</td>
+          <td>${higherConfirmationCell(row.higher_confirmation)}</td>
           <td>${fmt(row.yellow_line)} / ${fmt(row.brown_vwma20)}<div class="cell-note">final needs yellow above brown</div></td>
           <td>${fmt(row.light_green_level)}<div class="cell-note">EMA26; yellow ${row.yellow_below_ema26 === true ? "below" : row.yellow_below_ema26 === false ? "not below" : "unknown"}</div></td>
           <td>
@@ -1175,7 +1181,7 @@ function renderPurpleResults(rows = null) {
       `;
     })
     .join("")
-    : emptyTableRow(11, "No strict candidates match these filters.");
+    : emptyTableRow(13, "No strict candidates match these filters.");
 
   document.querySelectorAll("#purpleBody .linkBtn").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1213,7 +1219,8 @@ function renderPurpleStep1Results(rows = null) {
           </td>
           <td>
             ${fmt(row.purple_ema9)}
-            <div class="cell-note">distance ${fmt(row.purple_touch_distance_percent)}%</div>
+            <div class="cell-note">close distance ${fmt(row.purple_touch_distance_percent)}%</div>
+            <div class="cell-note">range distance ${fmt(row.purple_range_distance_percent)}%</div>
           </td>
           <td>
             ${passFailCell(row.above_black_line, "above black EMA89")}
@@ -1224,6 +1231,8 @@ function renderPurpleStep1Results(rows = null) {
             ${passFailCell(row.above_ema26, "above EMA26")}
             <div class="cell-note">EMA9 ${row.ema9_above_ema26 === true ? "above" : row.ema9_above_ema26 === false ? "not above" : "unknown"} EMA26</div>
           </td>
+          <td>${purpleDirectionCell(row)}</td>
+          <td>${higherConfirmationCell(row.higher_confirmation)}</td>
           <td>
             Y ${fmt(row.yellow_line)} / B ${fmt(row.brown_vwma20)}
             <div class="cell-note">final needs yellow above brown</div>
@@ -1239,7 +1248,7 @@ function renderPurpleStep1Results(rows = null) {
       `;
     })
     .join("")
-    : emptyTableRow(10, "No Step 1 purple EMA9 touches match these filters.");
+    : emptyTableRow(12, "No Step 1 purple EMA9 touches match these filters.");
 
   document.querySelectorAll("#purpleStep1Body .linkBtn").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1254,6 +1263,23 @@ function passFailCell(value, label) {
   if (value === true) return `<span class="points-positive">pass</span><div class="cell-note">${escapeHtml(label)}</div>`;
   if (value === false) return `<span class="points-negative">block</span><div class="cell-note">${escapeHtml(label)}</div>`;
   return `<span class="points-warn">unknown</span><div class="cell-note">${escapeHtml(label)}</div>`;
+}
+
+function purpleDirectionCell(row) {
+  return `
+    ${passFailCell(row.blue_above_purple, "blue above purple")}
+    <div class="cell-note">${row.approach_from_blue === true ? "approached blue -> purple" : row.approach_from_blue === false ? "no blue -> purple approach" : "approach unknown"}</div>
+  `;
+}
+
+function higherConfirmationCell(confirmation = {}) {
+  const status = confirmation.status || "missing";
+  const cls = status === "pass" ? "points-positive" : status === "block" ? "points-negative" : "points-warn";
+  return `
+    <span class="${cls}">${escapeHtml(status)}</span>
+    <div class="cell-note">${escapeHtml(confirmation.label || confirmation.timeframe || "-")}</div>
+    <div class="cell-note">O ${fmt(confirmation.open)} / C ${fmt(confirmation.close)} / Blue ${fmt(confirmation.blue_line)}</div>
+  `;
 }
 
 function filterPurpleCandidateRows(rows, profileFilterId, entryFilterId) {
@@ -1272,11 +1298,15 @@ function emptyTableRow(columns, message) {
 
 function entryCell(entry) {
   const status = entry.status || "missing";
-  const cls = status === "entry_candidate" ? "points-positive" : status === "wait" ? "points-warn" : "";
+  const cls = status === "entry_candidate" ? "points-positive" : status === "discarded" ? "points-negative" : status === "wait" ? "points-warn" : "";
   return `
     <span class="${cls}">${escapeHtml(status)}</span>
     <div class="cell-note">C ${fmt(entry.close)} / Y ${fmt(entry.yellow_line)}</div>
     <div class="cell-note">Brown ${fmt(entry.brown_vwma20)} / RSI ${fmt(entry.rsi14)}</div>
+    <div class="cell-note">Blue ${entry.blue_above_purple === true ? "above" : entry.blue_above_purple === false ? "not above" : "unknown"} purple</div>
+    <div class="cell-note">${entry.bars_since_touch == null ? "touch not mapped" : `${entry.bars_since_touch} bar(s) after Candle 1`}</div>
+    <div class="cell-note">C1 low ${fmt(entry.candle1_low)} / C2 low ${fmt(entry.candle2_low)}</div>
+    <div class="cell-note">${entry.setup_discarded ? `discarded at ${fmt(entry.invalidation_level)}` : entry.reference_lows_ready ? `active; break level ${fmt(entry.invalidation_level)}` : "waiting for Candle 2"}</div>
     <div class="cell-note">${entry.rsi_divergence ? "RSI divergence" : "no RSI divergence"}</div>
   `;
 }
@@ -1297,6 +1327,12 @@ function downloadPurpleCsv() {
     { label: "Purple Timeframe", value: (row) => row.purple_timeframe_label },
     { label: "Close", value: (row) => row.close },
     { label: "Purple EMA9", value: (row) => row.purple_ema9 },
+    { label: "Blue CK", value: (row) => row.blue_line },
+    { label: "Blue Above Purple", value: (row) => row.blue_above_purple },
+    { label: "Approach From Blue", value: (row) => row.approach_from_blue },
+    { label: "Higher Confirmation", value: (row) => row.higher_confirmation && row.higher_confirmation.label },
+    { label: "Higher Confirmation Status", value: (row) => row.higher_confirmation && row.higher_confirmation.status },
+    { label: "Higher Confirmation Blue", value: (row) => row.higher_confirmation && row.higher_confirmation.blue_line },
     { label: "Yellow CK", value: (row) => row.yellow_line },
     { label: "Brown VWMA20", value: (row) => row.brown_vwma20 },
     { label: "EMA26 Light Green", value: (row) => row.light_green_level },

@@ -161,6 +161,17 @@ def convert_timeframe(candles: list[Candle], timeframe: str) -> list[Candle]:
     return candles
 
 
+def aggregate_month_span(candles: list[Candle], months: int) -> list[Candle]:
+    """Aggregate monthly candles into stable multi-month calendar buckets."""
+    if months <= 0:
+        raise ValueError("months must be greater than zero")
+    monthly = convert_timeframe(candles, "month")
+    return _resample(
+        monthly,
+        lambda candle: (((candle.timestamp.year * 12) + candle.timestamp.month - 1) // months, months),
+    )
+
+
 def prepare_candles(candles: list[Candle], timeframe: str, window: CandleWindow) -> list[Candle]:
     return convert_timeframe(apply_window(candles, window), timeframe)
 

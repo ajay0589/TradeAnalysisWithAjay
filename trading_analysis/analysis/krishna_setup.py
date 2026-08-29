@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from typing import Any
 
 from trading_analysis.analysis.market_structure import MarketStructure
@@ -69,6 +70,8 @@ class KrishnaPurpleTouchConfig:
     step1_min_candles: int = 9
     step1_touch_tolerance_percent: float = 3.0
     purple_touch_tolerance_percent: float = 1.0
+    approach_lookback_candles: int = 3
+    approach_tolerance_percent: float = 3.0
 
 
 @dataclass(frozen=True)
@@ -79,6 +82,9 @@ class KrishnaPurpleProfile:
     final_timeframe: str
     exit_timeframe: str
     minimum_days: int
+    confirmation_timeframe: str
+    confirmation_label: str
+    confirmation_open_or_close: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -104,6 +110,9 @@ class KrishnaPurpleTouchMatch:
     yellow_below_ema26: bool | None
     brown_vs_light_green: str
     above_black_line: bool | None
+    blue_above_purple: bool | None
+    approach_from_blue: bool | None
+    higher_confirmation: dict[str, Any]
     early_entry: dict[str, Any]
     final_entry: dict[str, Any]
     exit_rule: str
@@ -130,6 +139,7 @@ class KrishnaPurpleStep1Candidate:
     purple_ema9: float | None
     purple_touch: bool
     purple_touch_distance_percent: float | None
+    purple_range_distance_percent: float | None
     light_green_level: float | None
     brown_vwma20: float | None
     yellow_line: float | None
@@ -140,6 +150,9 @@ class KrishnaPurpleStep1Candidate:
     volume_ratio20: float | None
     structure_trend: str | None
     above_black_line: bool | None
+    blue_above_purple: bool | None
+    approach_from_blue: bool | None
+    higher_confirmation: dict[str, Any]
     above_ema26: bool | None
     ema9_above_ema26: bool | None
     yellow_below_ema26: bool | None
@@ -157,9 +170,18 @@ class KrishnaPurpleStep1Candidate:
 
 
 PURPLE_TOUCH_PROFILES: dict[str, KrishnaPurpleProfile] = {
-    "month": KrishnaPurpleProfile("month", "Monthly purple touch", "120minute", "day", "120minute", 3000),
-    "week": KrishnaPurpleProfile("week", "Weekly purple touch", "30minute", "120minute", "30minute", 730),
-    "day": KrishnaPurpleProfile("day", "Daily purple touch", "10minute", "10minute", "10minute", 365),
+    "month": KrishnaPurpleProfile(
+        "month", "Monthly purple touch", "120minute", "day", "120minute", 3000,
+        "5month", "Derived 5-month", True,
+    ),
+    "week": KrishnaPurpleProfile(
+        "week", "Weekly purple touch", "30minute", "120minute", "30minute", 730,
+        "month", "Monthly", False,
+    ),
+    "day": KrishnaPurpleProfile(
+        "day", "Daily purple touch", "10minute", "10minute", "10minute", 365,
+        "week", "Weekly", False,
+    ),
 }
 
 
@@ -380,6 +402,7 @@ def scan_krishna_purple_touch_setup(
     touch_candles: list[Candle],
     early_candles: list[Candle] | None = None,
     final_candles: list[Candle] | None = None,
+    confirmation_candles: list[Candle] | None = None,
     purple_timeframe: str = "week",
     structure: MarketStructure | None = None,
     config: KrishnaPurpleTouchConfig | None = None,
@@ -408,6 +431,27 @@ def scan_krishna_purple_touch_setup(
         return None
     score += 20
     reasons.append("Latest higher-timeframe candle touched the purple EMA9 zone.")
+
+    blue = levels["ck_blue_line"]
+    blue_above_purple = blue > ema9 if blue is not None else None
+    if blue_above_purple is not True:
+        return None
+    score += 8
+    reasons.append("Blue Chande Kroll is above purple EMA9 on the touch timeframe.")
+
+    approach_from_blue = _approaches_purple_from_blue(touch_candles, ema9, blue, config)
+    if approach_from_blue is not True:
+        return None
+    score += 8
+    reasons.append(
+        f"Price approached purple EMA9 from the blue-line area across the latest {config.approach_lookback_candles} candles."
+    )
+
+    higher_confirmation = _purple_higher_confirmation(profile, confirmation_candles)
+    if higher_confirmation["status"] != "pass":
+        return None
+    score += 8
+    reasons.extend(higher_confirmation["reasons"])
 
     if levels["ema9"] > levels["ema26"]:
         score += 8
@@ -455,8 +499,18 @@ def scan_krishna_purple_touch_setup(
     if brown_relation != "unknown":
         reasons.append(f"Brown VWMA20 is {brown_relation} light-green EMA26.")
 
-    early_entry = _purple_entry_snapshot(symbol, early_candles, profile.early_timeframe, "early")
-    final_entry = _purple_entry_snapshot(symbol, final_candles, profile.final_timeframe, "final")
+    entry_context = {
+        "purple_timeframe": profile.purple_timeframe,
+        "purple_ema9": ema9,
+        "touch_timestamp": latest.timestamp,
+        "touch_tolerance_percent": config.purple_touch_tolerance_percent,
+    }
+    early_entry = _purple_entry_snapshot(
+        symbol, early_candles, profile.early_timeframe, "early", **entry_context
+    )
+    final_entry = _purple_entry_snapshot(
+        symbol, final_candles, profile.final_timeframe, "final", **entry_context
+    )
     if early_entry["status"] == "entry_candidate":
         score += 7
     if final_entry["status"] == "entry_candidate":
@@ -470,6 +524,11 @@ def scan_krishna_purple_touch_setup(
         f"Final entry timeframe: {profile.final_timeframe}; candle close above yellow Chande Kroll line.",
         f"Exit for both entry styles: {profile.exit_timeframe} candle close below yellow Chande Kroll line.",
         "Black EMA89 filter is mandatory.",
+        "Blue Chande Kroll must be above purple EMA9 on both the touch and entry timeframes.",
+        f"Price must approach purple from the blue-line area within the latest {config.approach_lookback_candles} touch-timeframe candles.",
+        higher_confirmation["rule"],
+        "The mapped touch bar is Candle 1; Candle 2 must close before entry confirmation becomes active.",
+        "From Candle 3 onward, the setup is discarded if a candle breaks the low of Candle 1 or Candle 2; there is no fixed candle-count expiry.",
         "Light green is EMA26; Ichimoku, VWAP, and Donchian Channel 20 are ignored for this setup.",
         "Final entry requires yellow Chande Kroll above brown VWMA20.",
         "RSI bullish divergence is optional and only improves quality when present.",
@@ -495,6 +554,9 @@ def scan_krishna_purple_touch_setup(
         yellow_below_ema26=yellow_below_ema26,
         brown_vs_light_green=brown_relation,
         above_black_line=above_black,
+        blue_above_purple=blue_above_purple,
+        approach_from_blue=approach_from_blue,
+        higher_confirmation=higher_confirmation,
         early_entry=early_entry,
         final_entry=final_entry,
         exit_rule=f"Exit/review if {profile.exit_timeframe} candle closes below yellow Chande Kroll line.",
@@ -510,6 +572,7 @@ def scan_krishna_purple_step1_candidate(
     touch_candles: list[Candle],
     early_candles: list[Candle] | None = None,
     final_candles: list[Candle] | None = None,
+    confirmation_candles: list[Candle] | None = None,
     purple_timeframe: str = "week",
     structure: MarketStructure | None = None,
     config: KrishnaPurpleTouchConfig | None = None,
@@ -543,10 +606,25 @@ def scan_krishna_purple_step1_candidate(
     ema9_above_ema26 = ema9 > ema26 if ema26 is not None else None
     yellow_below_ema26 = yellow < ema26 if yellow is not None and ema26 is not None else None
     brown_relation = _relation(brown, light_green)
-    distance = _purple_touch_distance_percent(latest, ema9)
+    distance = _purple_close_distance_percent(latest, ema9)
+    range_distance = _purple_touch_distance_percent(latest, ema9)
+    blue = levels["ck_blue_line"]
+    blue_above_purple = blue > ema9 if blue is not None else None
+    approach_from_blue = _approaches_purple_from_blue(touch_candles, ema9, blue, config)
+    higher_confirmation = _purple_higher_confirmation(profile, confirmation_candles)
 
-    early_entry = _purple_entry_snapshot(symbol, early_candles, profile.early_timeframe, "early")
-    final_entry = _purple_entry_snapshot(symbol, final_candles, profile.final_timeframe, "final")
+    entry_context = {
+        "purple_timeframe": profile.purple_timeframe,
+        "purple_ema9": ema9,
+        "touch_timestamp": latest.timestamp,
+        "touch_tolerance_percent": config.step1_touch_tolerance_percent,
+    }
+    early_entry = _purple_entry_snapshot(
+        symbol, early_candles, profile.early_timeframe, "early", **entry_context
+    )
+    final_entry = _purple_entry_snapshot(
+        symbol, final_candles, profile.final_timeframe, "final", **entry_context
+    )
 
     reasons = [
         f"Step 1 passed: higher-timeframe candle touched or came within {config.step1_touch_tolerance_percent:.1f}% of the purple EMA9 zone."
@@ -576,6 +654,32 @@ def scan_krishna_purple_step1_candidate(
         blockers.append("Close is not above black EMA89 mandatory filter.")
     else:
         blockers.append("Black EMA89 is unavailable; strict setup cannot qualify yet.")
+
+    if blue_above_purple is True:
+        score += 8
+        reasons.append("Blue Chande Kroll is above purple EMA9 on the touch timeframe.")
+    elif blue_above_purple is False:
+        blockers.append("Blue Chande Kroll is not above purple EMA9 on the touch timeframe.")
+    else:
+        blockers.append("Blue Chande Kroll is unavailable on the touch timeframe.")
+
+    if approach_from_blue is True:
+        score += 7
+        reasons.append(
+            f"Price approached purple from the blue-line area across the latest {config.approach_lookback_candles} candles."
+        )
+    elif approach_from_blue is False:
+        blockers.append(
+            f"Price did not approach purple from the blue-line area across the latest {config.approach_lookback_candles} candles."
+        )
+    else:
+        blockers.append("Blue-to-purple approach could not be evaluated.")
+
+    if higher_confirmation["status"] == "pass":
+        score += 8
+        reasons.extend(higher_confirmation["reasons"])
+    else:
+        blockers.extend(higher_confirmation["warnings"])
 
     if structure and structure.trend == "downtrend":
         blockers.append("Market structure is downtrend.")
@@ -618,16 +722,20 @@ def scan_krishna_purple_step1_candidate(
         purple_ema9=ema9,
         purple_touch=purple_touch,
         purple_touch_distance_percent=distance,
+        purple_range_distance_percent=range_distance,
         light_green_level=light_green,
         brown_vwma20=brown,
         yellow_line=yellow,
-        blue_line=levels["ck_blue_line"],
+        blue_line=blue,
         ema26=ema26,
         ema89=ema89,
         rsi14=levels["rsi14"],
         volume_ratio20=levels["volume_ratio20"],
         structure_trend=structure.trend if structure else None,
         above_black_line=above_black,
+        blue_above_purple=blue_above_purple,
+        approach_from_blue=approach_from_blue,
+        higher_confirmation=higher_confirmation,
         above_ema26=above_ema26,
         ema9_above_ema26=ema9_above_ema26,
         yellow_below_ema26=yellow_below_ema26,
@@ -806,6 +914,10 @@ def _purple_entry_snapshot(
     candles: list[Candle] | None,
     timeframe: str,
     entry_kind: str,
+    purple_timeframe: str,
+    purple_ema9: float,
+    touch_timestamp: datetime,
+    touch_tolerance_percent: float,
 ) -> dict[str, Any]:
     if not candles:
         return {
@@ -831,6 +943,7 @@ def _purple_entry_snapshot(
     latest = candles[-1]
     yellow = levels["ck_yellow_line"]
     blue = levels["ck_blue_line"]
+    entry_ema9 = levels["ema9"]
     brown = levels["vwma20"]
     rsi14 = levels["rsi14"]
     reasons: list[str] = []
@@ -854,7 +967,64 @@ def _purple_entry_snapshot(
     close_above_blue = latest.close > blue if blue is not None else None
     if close_above_blue:
         reasons.append("Close is above the blue Chande Kroll line; Krishna marked this as rare/stronger.")
-    status = "entry_candidate" if close_above_yellow and (entry_kind != "final" or yellow_above_brown is True) else "wait"
+    blue_above_purple = blue > entry_ema9 if blue is not None and entry_ema9 is not None else None
+    if blue_above_purple is True:
+        reasons.append("Blue Chande Kroll is above purple EMA9 on the entry timeframe.")
+    elif blue_above_purple is False:
+        warnings.append("Blue Chande Kroll is not above purple EMA9 on the entry timeframe.")
+    else:
+        warnings.append("Blue/purple relationship is unavailable on the entry timeframe.")
+
+    touch_index = _mapped_touch_index(
+        candles,
+        purple_timeframe=purple_timeframe,
+        touch_timestamp=touch_timestamp,
+        purple_ema9=purple_ema9,
+        tolerance_percent=touch_tolerance_percent,
+    )
+    bars_since_touch = len(candles) - 1 - touch_index if touch_index is not None else None
+    candle1 = candles[touch_index] if touch_index is not None else None
+    candle2_index = touch_index + 1 if touch_index is not None else None
+    candle2 = candles[candle2_index] if candle2_index is not None and candle2_index < len(candles) else None
+    reference_lows_ready = candle1 is not None and candle2 is not None
+    invalidation_level = max(candle1.low, candle2.low) if reference_lows_ready else None
+    invalidation_candle = None
+    if reference_lows_ready:
+        invalidation_candle = next(
+            (
+                candle
+                for candle in candles[candle2_index + 1 :]
+                if candle.low < candle1.low or candle.low < candle2.low
+            ),
+            None,
+        )
+    setup_discarded = invalidation_candle is not None
+    if touch_index is None:
+        warnings.append("The higher-timeframe purple touch could not be mapped to this entry timeframe.")
+    elif candle2 is None:
+        warnings.append("Candle 1 is the purple-touch candle; waiting for Candle 2 to close before entry confirmation.")
+    elif setup_discarded:
+        warnings.append(
+            "Setup discarded from Candle 3 onward because price broke the low of Candle 1 or Candle 2."
+        )
+    else:
+        reasons.append(
+            "Candle 2 has closed and no later candle has broken the low of Candle 1 or Candle 2; setup remains active."
+        )
+
+    entry_rules_pass = (
+        close_above_yellow
+        and blue_above_purple is True
+        and reference_lows_ready
+        and not setup_discarded
+        and (entry_kind != "final" or yellow_above_brown is True)
+    )
+    if entry_rules_pass:
+        status = "entry_candidate"
+    elif setup_discarded:
+        status = "discarded"
+    else:
+        status = "wait"
     return {
         "symbol": symbol.upper(),
         "timeframe": timeframe,
@@ -869,8 +1039,18 @@ def _purple_entry_snapshot(
         "close_above_yellow": close_above_yellow,
         "yellow_above_brown": yellow_above_brown,
         "close_above_blue": close_above_blue,
+        "blue_above_purple": blue_above_purple,
         "rsi_divergence": divergence,
-        "entry_price_reference": latest.close if close_above_yellow else None,
+        "touch_timestamp": candle1.timestamp.isoformat() if candle1 is not None else None,
+        "bars_since_touch": bars_since_touch,
+        "candle1_low": candle1.low if candle1 is not None else None,
+        "candle2_timestamp": candle2.timestamp.isoformat() if candle2 is not None else None,
+        "candle2_low": candle2.low if candle2 is not None else None,
+        "reference_lows_ready": reference_lows_ready,
+        "invalidation_level": invalidation_level,
+        "setup_discarded": setup_discarded,
+        "invalidation_timestamp": invalidation_candle.timestamp.isoformat() if invalidation_candle else None,
+        "entry_price_reference": latest.close if entry_rules_pass else None,
         "exit_rule": f"Exit/review if {timeframe} candle closes below yellow Chande Kroll line.",
         "reasons": reasons,
         "warnings": warnings,
@@ -897,6 +1077,102 @@ def _bullish_rsi_divergence(candles: list[Candle], lookback: int = 24) -> bool:
     )
 
 
+def _purple_higher_confirmation(
+    profile: KrishnaPurpleProfile,
+    candles: list[Candle] | None,
+) -> dict[str, Any]:
+    rule = (
+        f"{profile.label} requires the latest {profile.confirmation_label} candle "
+        + ("open or close" if profile.confirmation_open_or_close else "close")
+        + " above its blue Chande Kroll line."
+    )
+    if not candles:
+        return {
+            "timeframe": profile.confirmation_timeframe,
+            "label": profile.confirmation_label,
+            "status": "missing",
+            "rule": rule,
+            "open": None,
+            "close": None,
+            "blue_line": None,
+            "reasons": [],
+            "warnings": [f"{profile.confirmation_label} candles are unavailable for the mandatory confirmation."],
+        }
+    ordered = sorted(candles, key=lambda candle: candle.timestamp)
+    latest = ordered[-1]
+    blue = _levels(ordered)["ck_blue_line"]
+    if blue is None:
+        return {
+            "timeframe": profile.confirmation_timeframe,
+            "label": profile.confirmation_label,
+            "status": "insufficient",
+            "rule": rule,
+            "open": latest.open,
+            "close": latest.close,
+            "blue_line": None,
+            "reasons": [],
+            "warnings": [f"{profile.confirmation_label} blue Chande Kroll needs more candle history."],
+        }
+    passed = latest.close > blue or (profile.confirmation_open_or_close and latest.open > blue)
+    value_text = "open or close" if profile.confirmation_open_or_close else "close"
+    return {
+        "timeframe": profile.confirmation_timeframe,
+        "label": profile.confirmation_label,
+        "status": "pass" if passed else "block",
+        "rule": rule,
+        "timestamp": latest.timestamp.isoformat(),
+        "open": latest.open,
+        "close": latest.close,
+        "blue_line": blue,
+        "reasons": [f"{profile.confirmation_label} {value_text} is above blue Chande Kroll."] if passed else [],
+        "warnings": [f"{profile.confirmation_label} {value_text} is not above blue Chande Kroll."] if not passed else [],
+    }
+
+
+def _approaches_purple_from_blue(
+    candles: list[Candle],
+    purple_ema9: float,
+    blue_line: float | None,
+    config: KrishnaPurpleTouchConfig,
+) -> bool | None:
+    if blue_line is None or len(candles) < 2:
+        return None
+    ordered = sorted(candles, key=lambda candle: candle.timestamp)
+    window = ordered[-max(2, config.approach_lookback_candles) :]
+    latest = window[-1]
+    prior = window[:-1]
+    tolerance = config.approach_tolerance_percent / 100
+    came_from_blue = any(candle.close >= blue_line * (1 - tolerance) for candle in prior)
+    moved_toward_purple = latest.close < max(candle.close for candle in prior) or latest.close <= purple_ema9 * (1 + tolerance)
+    return came_from_blue and moved_toward_purple
+
+
+def _mapped_touch_index(
+    candles: list[Candle],
+    purple_timeframe: str,
+    touch_timestamp: datetime,
+    purple_ema9: float,
+    tolerance_percent: float,
+) -> int | None:
+    tolerance = tolerance_percent / 100
+    matches = []
+    for index, candle in enumerate(candles):
+        if not _same_period(candle.timestamp, touch_timestamp, purple_timeframe):
+            continue
+        if candle.low <= purple_ema9 * (1 + tolerance) and candle.high >= purple_ema9 * (1 - tolerance):
+            matches.append(index)
+    return matches[-1] if matches else None
+
+
+def _same_period(left: datetime, right: datetime, timeframe: str) -> bool:
+    normalized = _normalize_purple_timeframe(timeframe)
+    if normalized == "month":
+        return (left.year, left.month) == (right.year, right.month)
+    if normalized == "week":
+        return left.isocalendar()[:2] == right.isocalendar()[:2]
+    return left.date() == right.date()
+
+
 def _relation(left: float | None, right: float | None) -> str:
     if left is None or right is None:
         return "unknown"
@@ -914,6 +1190,12 @@ def _purple_touch_distance_percent(candle: Candle, ema9: float) -> float | None:
         return 0.0
     nearest = candle.low if ema9 < candle.low else candle.high
     return abs((nearest - ema9) / ema9) * 100
+
+
+def _purple_close_distance_percent(candle: Candle, ema9: float) -> float | None:
+    if ema9 == 0:
+        return None
+    return abs((candle.close - ema9) / ema9) * 100
 
 
 def _normalize_purple_timeframe(value: str) -> str:
@@ -947,6 +1229,7 @@ def _confidence(score: int, warnings: list[str]) -> str:
 def timeframe_label_text(timeframe: str) -> str:
     labels = {
         "month": "Monthly",
+        "5month": "5-month",
         "week": "Weekly",
         "day": "Daily",
         "120minute": "2-hour",
