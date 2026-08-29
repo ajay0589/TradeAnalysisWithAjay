@@ -567,6 +567,30 @@ label {
   margin: 10px 0;
 }
 
+.monitor-interval-grid {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+
+.monitor-interval-grid label {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.monitor-interval-grid label span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.monitor-interval-grid select {
+  width: 100%;
+}
+
 .monitor-status {
   border: 1px solid var(--line);
   background: #f9fafb;
@@ -803,6 +827,30 @@ tr:last-child td {
 
 .table-actions button {
   min-height: 32px;
+}
+
+.table-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  background: #fbfcfd;
+}
+
+.table-pagination button {
+  width: auto;
+  min-width: 84px;
+  min-height: 32px;
+}
+
+.table-pagination span {
+  min-width: 92px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
 }
 
 .table-filter {

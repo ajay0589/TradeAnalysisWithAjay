@@ -1475,9 +1475,52 @@ class AnalysisService:
         else:
             telegram_status["errors"].append(result.get("error") or "Telegram send failed.")
 
-    def krishna_purple_touch_alerts(self, limit: int = 50) -> dict[str, Any]:
+    def krishna_purple_touch_alerts(
+        self,
+        limit: int = 50,
+        page_size: int = 25,
+        entry_page: int = 1,
+        exit_page: int = 1,
+        trade_page: int = 1,
+        entry_profile: str | None = None,
+        entry_kind: str | None = None,
+        exit_profile: str | None = None,
+        exit_kind: str | None = None,
+        trade_profile: str | None = None,
+        trade_kind: str | None = None,
+    ) -> dict[str, Any]:
         repository = KrishnaPurpleAlertRepository()
         notifier = TelegramNotifier.from_env()
+        page_size = max(5, min(int(page_size), 100))
+        entry_page = max(1, int(entry_page))
+        exit_page = max(1, int(exit_page))
+        trade_page = max(1, int(trade_page))
+        entry_total = repository.count_alerts("entry", entry_profile, entry_kind)
+        exit_total = repository.count_alerts("exit", exit_profile, exit_kind)
+        trade_total = repository.count_open_trades(trade_profile, trade_kind)
+        entry_page = min(entry_page, max(1, (entry_total + page_size - 1) // page_size))
+        exit_page = min(exit_page, max(1, (exit_total + page_size - 1) // page_size))
+        trade_page = min(trade_page, max(1, (trade_total + page_size - 1) // page_size))
+        entry_alerts = repository.list_recent_alerts(
+            limit=page_size,
+            offset=(entry_page - 1) * page_size,
+            alert_type="entry",
+            purple_timeframe=entry_profile,
+            entry_kind=entry_kind,
+        )
+        exit_alerts = repository.list_recent_alerts(
+            limit=page_size,
+            offset=(exit_page - 1) * page_size,
+            alert_type="exit",
+            purple_timeframe=exit_profile,
+            entry_kind=exit_kind,
+        )
+        open_trades = repository.list_open_trades(
+            limit=page_size,
+            offset=(trade_page - 1) * page_size,
+            purple_timeframe=trade_profile,
+            entry_kind=trade_kind,
+        )
         return {
             "type": "krishna_purple_touch_alerts",
             "profiles": _purple_profile_dicts("all"),
@@ -1489,9 +1532,16 @@ class AnalysisService:
                 "errors": [],
             },
             "recent_alerts": repository.list_recent_alerts(limit=limit),
-            "open_trades": repository.list_open_trades(limit=200),
+            "entry_alerts": entry_alerts,
+            "exit_alerts": exit_alerts,
+            "open_trades": open_trades,
             "alert_counts": repository.counts(),
             "recent_alert_limit": limit,
+            "pagination": {
+                "entry": _page_info(entry_page, page_size, entry_total, len(entry_alerts)),
+                "exit": _page_info(exit_page, page_size, exit_total, len(exit_alerts)),
+                "trades": _page_info(trade_page, page_size, trade_total, len(open_trades)),
+            },
         }
 
     def backtest_krishna_setup(
@@ -3399,6 +3449,20 @@ def _mtf_row(multi_timeframe: dict[str, Any], timeframe: str) -> dict[str, Any] 
 
 def _fmt_decimal(value: float | None) -> str:
     return "-" if value is None else f"{value:.2f}"
+
+
+def _page_info(page: int, page_size: int, total: int, shown: int) -> dict[str, int | bool]:
+    pages = max(1, (total + page_size - 1) // page_size)
+    effective_page = min(max(1, page), pages)
+    return {
+        "page": effective_page,
+        "page_size": page_size,
+        "total": total,
+        "shown": shown,
+        "pages": pages,
+        "has_previous": effective_page > 1,
+        "has_next": effective_page < pages,
+    }
 
 
 def _option_trade_guide(setup: dict[str, str], structure, option_chain) -> dict[str, Any]:

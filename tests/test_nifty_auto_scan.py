@@ -164,6 +164,50 @@ class NiftyAutoScanTests(unittest.TestCase):
                 },
             )
 
+    def test_krishna_purple_alert_history_supports_filtered_pagination(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = KrishnaPurpleAlertRepository(Path(tmp) / "purple-pages.db")
+            for index in range(30):
+                profile = "week" if index % 2 == 0 else "month"
+                entry_kind = "early" if index % 3 else "final"
+                repo.open_entry_alert(
+                    {
+                        "symbol": f"SYM{index:02d}",
+                        "purple_timeframe": profile,
+                        "score": 75 + (index % 10),
+                        "confidence": "high",
+                        "profile": {"exit_timeframe": "30minute"},
+                        "reasons": ["Synthetic pagination setup."],
+                        "warnings": [],
+                    },
+                    {
+                        "timeframe": "30minute",
+                        "status": "entry_candidate",
+                        "close": 100 + index,
+                        "yellow_line": 99 + index,
+                        "reasons": ["Synthetic confirmation."],
+                        "warnings": [],
+                    },
+                    entry_kind,
+                )
+
+            weekly_total = repo.count_alerts("entry", "week", None)
+            weekly_page_2 = repo.list_recent_alerts(
+                limit=5,
+                offset=5,
+                alert_type="entry",
+                purple_timeframe="week",
+            )
+            final_open_total = repo.count_open_trades(None, "final")
+            final_open_page = repo.list_open_trades(limit=4, offset=4, entry_kind="final")
+
+            self.assertEqual(weekly_total, 15)
+            self.assertEqual(len(weekly_page_2), 5)
+            self.assertTrue(all(row["purple_timeframe"] == "week" for row in weekly_page_2))
+            self.assertEqual(final_open_total, 10)
+            self.assertEqual(len(final_open_page), 4)
+            self.assertTrue(all(row["entry_kind"] == "final" for row in final_open_page))
+
     def test_context_snapshot_and_candidates_save_load(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = NiftyContextRepository(Path(tmp) / "context.db")

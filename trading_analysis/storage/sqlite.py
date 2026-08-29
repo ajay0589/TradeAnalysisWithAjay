@@ -664,21 +664,73 @@ class KrishnaPurpleAlertRepository:
             ).fetchone()
         return _purple_trade_row(row) if row else None
 
-    def list_open_trades(self, limit: int = 200) -> list[dict[str, Any]]:
+    def list_open_trades(
+        self,
+        limit: int = 200,
+        offset: int = 0,
+        purple_timeframe: str | None = None,
+        entry_kind: str | None = None,
+    ) -> list[dict[str, Any]]:
+        where, params = _purple_history_filters(
+            status="open",
+            purple_timeframe=purple_timeframe,
+            entry_kind=entry_kind,
+        )
         with _connection(self.db_path) as conn:
             rows = conn.execute(
-                "SELECT * FROM krishna_purple_trades WHERE status = 'open' ORDER BY opened_at DESC LIMIT ?",
-                (max(1, int(limit)),),
+                f"SELECT * FROM krishna_purple_trades {where} ORDER BY opened_at DESC, id DESC LIMIT ? OFFSET ?",
+                (*params, max(1, int(limit)), max(0, int(offset))),
             ).fetchall()
         return [_purple_trade_row(row) for row in rows]
 
-    def list_recent_alerts(self, limit: int = 50) -> list[dict[str, Any]]:
+    def count_open_trades(
+        self,
+        purple_timeframe: str | None = None,
+        entry_kind: str | None = None,
+    ) -> int:
+        where, params = _purple_history_filters(
+            status="open",
+            purple_timeframe=purple_timeframe,
+            entry_kind=entry_kind,
+        )
+        with _connection(self.db_path) as conn:
+            row = conn.execute(f"SELECT COUNT(*) AS count FROM krishna_purple_trades {where}", params).fetchone()
+        return int(row["count"] if row else 0)
+
+    def list_recent_alerts(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        alert_type: str | None = None,
+        purple_timeframe: str | None = None,
+        entry_kind: str | None = None,
+    ) -> list[dict[str, Any]]:
+        where, params = _purple_history_filters(
+            alert_type=alert_type,
+            purple_timeframe=purple_timeframe,
+            entry_kind=entry_kind,
+        )
         with _connection(self.db_path) as conn:
             rows = conn.execute(
-                "SELECT * FROM krishna_purple_alerts ORDER BY created_at DESC, id DESC LIMIT ?",
-                (max(1, int(limit)),),
+                f"SELECT * FROM krishna_purple_alerts {where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+                (*params, max(1, int(limit)), max(0, int(offset))),
             ).fetchall()
         return [_purple_alert_row(row) for row in rows]
+
+    def count_alerts(
+        self,
+        alert_type: str | None = None,
+        purple_timeframe: str | None = None,
+        entry_kind: str | None = None,
+    ) -> int:
+        where, params = _purple_history_filters(
+            alert_type=alert_type,
+            purple_timeframe=purple_timeframe,
+            entry_kind=entry_kind,
+        )
+        with _connection(self.db_path) as conn:
+            row = conn.execute(f"SELECT COUNT(*) AS count FROM krishna_purple_alerts {where}", params).fetchone()
+        return int(row["count"] if row else 0)
 
     def counts(self) -> dict[str, Any]:
         with _connection(self.db_path) as conn:
@@ -1377,6 +1429,30 @@ def _alert_row(row: sqlite3.Row) -> dict[str, Any]:
         "is_active": bool(row["is_active"]),
         "acknowledged_at": row["acknowledged_at"],
     }
+
+
+def _purple_history_filters(
+    *,
+    status: str | None = None,
+    alert_type: str | None = None,
+    purple_timeframe: str | None = None,
+    entry_kind: str | None = None,
+) -> tuple[str, tuple[Any, ...]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    if alert_type in {"entry", "exit"}:
+        clauses.append("alert_type = ?")
+        params.append(alert_type)
+    if purple_timeframe in {"month", "week", "day"}:
+        clauses.append("purple_timeframe = ?")
+        params.append(purple_timeframe)
+    if entry_kind in {"early", "final"}:
+        clauses.append("entry_kind = ?")
+        params.append(entry_kind)
+    return (f"WHERE {' AND '.join(clauses)}" if clauses else "", tuple(params))
 
 
 def _purple_alert_row(row: sqlite3.Row) -> dict[str, Any]:

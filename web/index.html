@@ -960,12 +960,36 @@
                   <input id="purpleTelegramToggle" type="checkbox" checked />
                   Send new entry/exit alerts to Telegram
                 </label>
-                <label for="purpleAutoSeconds">Monitor interval</label>
-                <select id="purpleAutoSeconds">
-                  <option value="60">Every 1 min</option>
-                  <option value="180" selected>Every 3 min</option>
-                  <option value="300">Every 5 min</option>
-                </select>
+                <label>Monitor intervals</label>
+                <div class="monitor-interval-grid">
+                  <label for="purpleMonthIntervalSeconds">
+                    <span>Monthly scan</span>
+                    <select id="purpleMonthIntervalSeconds">
+                      <option value="900">Every 15 min</option>
+                      <option value="1800" selected>Every 30 min</option>
+                      <option value="3600">Every 1 hour</option>
+                      <option value="7200">Every 2 hours</option>
+                    </select>
+                  </label>
+                  <label for="purpleWeekIntervalSeconds">
+                    <span>Weekly scan</span>
+                    <select id="purpleWeekIntervalSeconds">
+                      <option value="300">Every 5 min</option>
+                      <option value="600" selected>Every 10 min</option>
+                      <option value="900">Every 15 min</option>
+                      <option value="1800">Every 30 min</option>
+                    </select>
+                  </label>
+                  <label for="purpleDayIntervalSeconds">
+                    <span>Daily scan</span>
+                    <select id="purpleDayIntervalSeconds">
+                      <option value="180">Every 3 min</option>
+                      <option value="300" selected>Every 5 min</option>
+                      <option value="600">Every 10 min</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="field-hint">Each profile becomes due independently. Due scans are queued so candle refresh, entry checks, and exit checks do not overlap.</div>
                 <label class="check-row">
                   <input id="purpleForceToggle" type="checkbox" />
                   Force cached-data run outside market hours
@@ -1036,7 +1060,7 @@
                       <tr><td>Early Entry</td><td>entry_candidate / wait / discarded / missing</td><td>Close above yellow and blue above purple on the early timeframe. Yellow above brown is optional. The mapped touch bar is Candle 1 and Candle 2 must close first.</td><td>From Candle 3 onward, discarded when price breaks Candle 1 low or Candle 2 low. No fixed time expiry.</td></tr>
                       <tr><td>Final Entry</td><td>entry_candidate / wait / discarded / missing</td><td>Close above yellow, blue above purple, and yellow above brown on the final timeframe. The mapped touch bar is Candle 1 and Candle 2 must close first.</td><td>From Candle 3 onward, discarded when price breaks Candle 1 low or Candle 2 low. No fixed time expiry.</td></tr>
                       <tr><td>Status / Blockers</td><td>qualified / step1_only</td><td>Qualified passed higher-timeframe filters. Step1-only shows the exact blocker.</td><td>Alerts require a strict setup plus entry confirmation.</td></tr>
-                      <tr><td>Entry Alerts</td><td>Early / Final</td><td>Historical entry events. Every entry event creates one unique trade ID.</td><td>Trade remains open until its exit condition triggers.</td></tr>
+                      <tr><td>Entry Alert History</td><td>Early / Final</td><td>Historical entry events. Every entry event creates one unique trade ID.</td><td>Trade remains open until its exit condition triggers.</td></tr>
                       <tr><td>Exit Alerts</td><td>Closed trade events</td><td>Created when the configured exit-timeframe candle closes below yellow.</td><td>Closes the matching trade ID.</td></tr>
                       <tr><td>Open Trade IDs</td><td>Currently open</td><td>Entry alerts that do not yet have an exit alert.</td><td>All-time entries should equal open plus closed trades.</td></tr>
                     </tbody>
@@ -1107,6 +1131,11 @@
                     <tbody id="purpleStep1Body"></tbody>
                   </table>
                 </div>
+                <div class="table-pagination" id="purpleStep1Pager">
+                  <button id="purpleStep1Prev" type="button">Previous</button>
+                  <span id="purpleStep1PageLabel">Page 1 of 1</span>
+                  <button id="purpleStep1Next" type="button">Next</button>
+                </div>
               </section>
 
               <section class="table-panel">
@@ -1160,6 +1189,11 @@
                     <tbody id="purpleBody"></tbody>
                   </table>
                 </div>
+                <div class="table-pagination" id="purpleCandidatePager">
+                  <button id="purpleCandidatePrev" type="button">Previous</button>
+                  <span id="purpleCandidatePageLabel">Page 1 of 1</span>
+                  <button id="purpleCandidateNext" type="button">Next</button>
+                </div>
               </section>
 
               <section class="table-panel alert-delivery-panel">
@@ -1176,11 +1210,11 @@
 
               <section class="table-panel">
                 <div class="panel-head">
-                  <h2>Entry Alerts</h2>
+                  <h2>Entry Alert History</h2>
                   <span id="purpleEntryAlertMeta">0 alert(s)</span>
                 </div>
                 <div class="ops-body">
-                  <p class="helper-text">A new trade ID is created when a strict Monthly, Weekly, or Daily setup meets its early or final entry confirmation during market hours.</p>
+                  <p class="helper-text">Historical entry events are retained here. A new trade ID is created when a strict Monthly, Weekly, or Daily setup meets its early or final entry confirmation during market hours.</p>
                 </div>
                 <div class="table-actions">
                   <label class="table-filter" for="purpleEntryAlertProfileFilter">
@@ -1217,6 +1251,11 @@
                     </thead>
                     <tbody id="purpleEntryAlertsBody"></tbody>
                   </table>
+                </div>
+                <div class="table-pagination">
+                  <button id="purpleEntryPrev" type="button">Previous</button>
+                  <span id="purpleEntryPageLabel">Page 1 of 1</span>
+                  <button id="purpleEntryNext" type="button">Next</button>
                 </div>
               </section>
 
@@ -1264,6 +1303,11 @@
                     <tbody id="purpleExitAlertsBody"></tbody>
                   </table>
                 </div>
+                <div class="table-pagination">
+                  <button id="purpleExitPrev" type="button">Previous</button>
+                  <span id="purpleExitPageLabel">Page 1 of 1</span>
+                  <button id="purpleExitNext" type="button">Next</button>
+                </div>
               </section>
 
               <section class="table-panel">
@@ -1309,6 +1353,11 @@
                     </thead>
                     <tbody id="purpleTradesBody"></tbody>
                   </table>
+                </div>
+                <div class="table-pagination">
+                  <button id="purpleTradePrev" type="button">Previous</button>
+                  <span id="purpleTradePageLabel">Page 1 of 1</span>
+                  <button id="purpleTradeNext" type="button">Next</button>
                 </div>
               </section>
             </section>

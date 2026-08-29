@@ -150,6 +150,16 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(
                     self.service.krishna_purple_touch_alerts(
                         limit=_optional_int(params.get("limit", ["50"])[0]) or 50,
+                        page_size=_optional_int(params.get("page_size", ["25"])[0]) or 25,
+                        entry_page=_optional_int(params.get("entry_page", ["1"])[0]) or 1,
+                        exit_page=_optional_int(params.get("exit_page", ["1"])[0]) or 1,
+                        trade_page=_optional_int(params.get("trade_page", ["1"])[0]) or 1,
+                        entry_profile=params.get("entry_profile", [None])[0] or None,
+                        entry_kind=params.get("entry_kind", [None])[0] or None,
+                        exit_profile=params.get("exit_profile", [None])[0] or None,
+                        exit_kind=params.get("exit_kind", [None])[0] or None,
+                        trade_profile=params.get("trade_profile", [None])[0] or None,
+                        trade_kind=params.get("trade_kind", [None])[0] or None,
                     )
                 )
             elif parsed.path == "/api/krishna-setup-backtest":
