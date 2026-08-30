@@ -823,8 +823,8 @@ def build_story() -> list[Flowable]:
         heading("11", "What happens when Run scanner now is clicked"),
         flowchart(
             [
-                ("Refresh queued", "The bulk candle job updates 702 symbol/timeframe targets in the current configuration.", BLUE),
-                ("Refresh completed", "702/702 means broker/cache refresh ended. It is not the end of setup analysis.", PURPLE_DARK),
+                ("Refresh queued", "The bulk job count is unique market targets multiplied by source timeframes. 2-hour analysis uses downloaded 1-hour source candles.", BLUE),
+                ("Refresh completed", "Completed/total means broker/cache refresh ended. It is not the end of setup analysis.", PURPLE_DARK),
                 ("Analysis running", "The service scans all selected symbols and profiles, calculates indicators, applies gates, and checks open exits.", YELLOW),
                 ("Analysis completed", "UI renders Step 1, strict candidates, early/final-ready counts, and newly created alert counts.", GREEN),
             ]

@@ -2841,7 +2841,7 @@ def _refresh_window_for_analysis(window, timeframe: str):
 
 def _normalize_bulk_requested_timeframes(values: list[str]) -> list[str]:
     requested = values or ["day", "60minute", "15minute"]
-    order = ["month", "week", "day", "60minute", "30minute", "15minute", "10minute"]
+    order = ["month", "week", "day", "60minute", "120minute", "30minute", "15minute", "10minute"]
     normalized = {normalize_timeframe(value) for value in requested if str(value).strip()}
     return [timeframe for timeframe in order if timeframe in normalized]
 

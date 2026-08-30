@@ -532,11 +532,11 @@ class AnalysisTests(unittest.TestCase):
             self.assertEqual(by_frame["week"]["status"], "analyzed")
             self.assertEqual(by_frame["day"]["status"], "analyzed")
 
-    def test_bulk_download_timeframes_include_monthly_weekly_as_day_source(self) -> None:
-        requested = _normalize_bulk_requested_timeframes(["month", "week", "15minute"])
+    def test_bulk_download_timeframes_include_derived_sources(self) -> None:
+        requested = _normalize_bulk_requested_timeframes(["month", "week", "120minute", "15minute"])
 
-        self.assertEqual(requested, ["month", "week", "15minute"])
-        self.assertEqual(_normalize_bulk_timeframes(requested), ["day", "15minute"])
+        self.assertEqual(requested, ["month", "week", "120minute", "15minute"])
+        self.assertEqual(_normalize_bulk_timeframes(requested), ["day", "60minute", "15minute"])
         self.assertEqual(_bulk_window_days(requested, 90), 3000)
         self.assertEqual(_bulk_window_days(["week"], 90), 730)
         self.assertEqual(_bulk_window_days(["day", "60minute"], 90), 90)
