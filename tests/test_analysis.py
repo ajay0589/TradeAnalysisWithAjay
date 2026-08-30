@@ -20,6 +20,7 @@ from trading_analysis.analysis.entry_context import build_entry_context
 from trading_analysis.analysis.fundamental import analyze_fundamentals
 from trading_analysis.analysis.indicator_suite import analyze_indicator_suite
 from trading_analysis.analysis.krishna_setup import (
+    KrishnaPurpleTouchConfig,
     _purple_entry_snapshot,
     krishna_purple_profile,
     scan_krishna_bullish_setup,
@@ -938,7 +939,9 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(monthly.confirmation_timeframe, "5month")
         self.assertTrue(monthly.confirmation_open_or_close)
         self.assertEqual(weekly.confirmation_timeframe, "month")
+        self.assertTrue(weekly.confirmation_open_or_close)
         self.assertEqual(daily.confirmation_timeframe, "week")
+        self.assertTrue(daily.confirmation_open_or_close)
 
     def test_krishna_purple_touch_detects_reviewable_candidate(self) -> None:
         closes = [100 + (index * 0.8) for index in range(95)] + [176, 172, 170, 169, 168]
@@ -977,16 +980,30 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(match.blue_above_purple)
         self.assertTrue(match.approach_from_blue)
         self.assertEqual(match.higher_confirmation["status"], "pass")
+        self.assertEqual(match.purple_range_distance_percent, 0.0)
 
-    def test_krishna_purple_touch_rejects_near_touch_outside_candle_range(self) -> None:
+    def test_krishna_purple_touch_accepts_near_touch_within_one_percent(self) -> None:
         closes = [100 + (index * 0.8) for index in range(95)] + [176, 172, 170, 169, 168]
         touch = self._scanner_candles(closes)
 
         step1 = scan_krishna_purple_step1_candidate("ABC", touch, purple_timeframe="week")
-        strict = scan_krishna_purple_touch_setup("ABC", touch, purple_timeframe="week")
+
+        self.assertIsNotNone(step1)
+        self.assertGreater(step1.purple_range_distance_percent, 0.0)
+        self.assertLessEqual(step1.purple_range_distance_percent, 1.0)
+
+    def test_krishna_purple_touch_rejects_distance_beyond_configured_maximum(self) -> None:
+        closes = [100 + (index * 0.8) for index in range(95)] + [176, 172, 170, 169, 168]
+        touch = self._scanner_candles(closes)
+
+        step1 = scan_krishna_purple_step1_candidate(
+            "ABC",
+            touch,
+            purple_timeframe="week",
+            config=KrishnaPurpleTouchConfig(step1_touch_tolerance_percent=0.5),
+        )
 
         self.assertIsNone(step1)
-        self.assertIsNone(strict)
 
     def test_krishna_purple_setup_has_no_fixed_ten_bar_expiry(self) -> None:
         start = datetime(2026, 8, 24, 9, 15)
@@ -1020,7 +1037,7 @@ class AnalysisTests(unittest.TestCase):
         self.assertFalse(entry["setup_discarded"])
         self.assertNotEqual(entry["status"], "discarded")
 
-    def test_krishna_purple_setup_discards_from_candle_three_on_reference_low_break(self) -> None:
+    def test_krishna_purple_setup_keeps_active_when_only_higher_reference_low_breaks(self) -> None:
         start = datetime(2026, 8, 24, 9, 15)
         values = [100.0] + [130.0 + index for index in range(29)]
         candles = []
@@ -1050,11 +1067,48 @@ class AnalysisTests(unittest.TestCase):
             touch_tolerance_percent=0.1,
         )
 
-        self.assertEqual(entry["status"], "discarded")
-        self.assertTrue(entry["setup_discarded"])
+        self.assertNotEqual(entry["status"], "discarded")
+        self.assertFalse(entry["setup_discarded"])
         self.assertEqual(entry["candle1_low"], 99.5)
         self.assertEqual(entry["candle2_low"], 129.5)
-        self.assertEqual(entry["invalidation_level"], 129.5)
+        self.assertEqual(entry["invalidation_level"], 99.5)
+        self.assertIsNone(entry["invalidation_timestamp"])
+
+    def test_krishna_purple_setup_discards_when_lower_reference_low_breaks(self) -> None:
+        # Candle 1 is the only entry candle in the mapped higher-timeframe day;
+        # subsequent candles deliberately fall on the following date.
+        start = datetime(2026, 8, 24, 23, 55)
+        values = [100.0] + [130.0 + index for index in range(29)]
+        candles = []
+        for index, close in enumerate(values):
+            low = 99.5 if index == 0 else close - 0.5
+            if index == 2:
+                low = 99.0
+            candles.append(
+                Candle(
+                    timestamp=start + timedelta(minutes=index * 10),
+                    open=close - 0.2,
+                    high=close + 0.5,
+                    low=low,
+                    close=close,
+                    volume=1000,
+                )
+            )
+
+        entry = _purple_entry_snapshot(
+            "ABC",
+            candles,
+            "10minute",
+            "early",
+            purple_timeframe="day",
+            purple_ema9=100.0,
+            touch_timestamp=start,
+            touch_tolerance_percent=1.0,
+        )
+
+        self.assertEqual(entry["status"], "discarded")
+        self.assertTrue(entry["setup_discarded"])
+        self.assertEqual(entry["invalidation_level"], 99.5)
         self.assertEqual(entry["invalidation_timestamp"], candles[2].timestamp.isoformat())
 
     def test_five_month_confirmation_uses_stable_calendar_buckets(self) -> None:

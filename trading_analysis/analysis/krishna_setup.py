@@ -68,8 +68,8 @@ class KrishnaEntryTrigger:
 class KrishnaPurpleTouchConfig:
     min_candles: int = 52
     step1_min_candles: int = 9
-    step1_touch_tolerance_percent: float = 0.0
-    purple_touch_tolerance_percent: float = 0.0
+    step1_touch_tolerance_percent: float = 1.0
+    purple_touch_tolerance_percent: float = 1.0
     approach_lookback_candles: int = 3
     approach_tolerance_percent: float = 3.0
 
@@ -107,6 +107,8 @@ class KrishnaPurpleTouchMatch:
     ema89: float | None
     rsi14: float | None
     purple_touch: bool
+    purple_touch_distance_percent: float | None
+    purple_range_distance_percent: float | None
     yellow_below_ema26: bool | None
     brown_vs_light_green: str
     above_black_line: bool | None
@@ -176,11 +178,11 @@ PURPLE_TOUCH_PROFILES: dict[str, KrishnaPurpleProfile] = {
     ),
     "week": KrishnaPurpleProfile(
         "week", "Weekly purple touch", "30minute", "120minute", "30minute", 730,
-        "month", "Monthly", False,
+        "month", "Monthly", True,
     ),
     "day": KrishnaPurpleProfile(
         "day", "Daily purple touch", "10minute", "10minute", "10minute", 365,
-        "week", "Weekly", False,
+        "week", "Weekly", True,
     ),
 }
 
@@ -429,8 +431,10 @@ def scan_krishna_purple_touch_setup(
     purple_touch = latest.low <= ema9 * (1 + tolerance) and latest.high >= ema9 * (1 - tolerance)
     if not purple_touch:
         return None
+    close_distance = _purple_close_distance_percent(latest, ema9)
+    range_distance = _purple_touch_distance_percent(latest, ema9)
     score += 20
-    reasons.append("Latest higher-timeframe candle touched the purple EMA9 zone.")
+    reasons.append(_purple_touch_reason(range_distance, config.purple_touch_tolerance_percent))
 
     blue = levels["ck_blue_line"]
     blue_above_purple = blue > ema9 if blue is not None else None
@@ -528,7 +532,7 @@ def scan_krishna_purple_touch_setup(
         f"Price must approach purple from the blue-line area within the latest {config.approach_lookback_candles} touch-timeframe candles.",
         higher_confirmation["rule"],
         "The mapped touch bar is Candle 1; Candle 2 must close before entry confirmation becomes active.",
-        "From Candle 3 onward, the setup is discarded if a candle breaks the low of Candle 1 or Candle 2; there is no fixed candle-count expiry.",
+        "From Candle 3 onward, the setup is discarded only if a candle breaks the lower of Candle 1 and Candle 2 lows; there is no fixed candle-count expiry.",
         "Light green is EMA26; Ichimoku, VWAP, and Donchian Channel 20 are ignored for this setup.",
         "Final entry requires yellow Chande Kroll above brown VWMA20.",
         "RSI bullish divergence is optional and only improves quality when present.",
@@ -551,6 +555,8 @@ def scan_krishna_purple_touch_setup(
         ema89=levels["ema89"],
         rsi14=levels["rsi14"],
         purple_touch=purple_touch,
+        purple_touch_distance_percent=close_distance,
+        purple_range_distance_percent=range_distance,
         yellow_below_ema26=yellow_below_ema26,
         brown_vs_light_green=brown_relation,
         above_black_line=above_black,
@@ -626,7 +632,7 @@ def scan_krishna_purple_step1_candidate(
         symbol, final_candles, profile.final_timeframe, "final", **entry_context
     )
 
-    reasons = ["Step 1 passed: purple EMA9 is inside the higher-timeframe candle high/low range."]
+    reasons = [_purple_touch_reason(range_distance, config.step1_touch_tolerance_percent, prefix="Step 1 passed: ")]
     warnings: list[str] = []
     blockers: list[str] = []
     score = 35
@@ -985,14 +991,14 @@ def _purple_entry_snapshot(
     candle2_index = touch_index + 1 if touch_index is not None else None
     candle2 = candles[candle2_index] if candle2_index is not None and candle2_index < len(candles) else None
     reference_lows_ready = candle1 is not None and candle2 is not None
-    invalidation_level = max(candle1.low, candle2.low) if reference_lows_ready else None
+    invalidation_level = min(candle1.low, candle2.low) if reference_lows_ready else None
     invalidation_candle = None
     if reference_lows_ready:
         invalidation_candle = next(
             (
                 candle
                 for candle in candles[candle2_index + 1 :]
-                if candle.low < candle1.low or candle.low < candle2.low
+                if candle.low < invalidation_level
             ),
             None,
         )
@@ -1003,11 +1009,11 @@ def _purple_entry_snapshot(
         warnings.append("Candle 1 is the purple-touch candle; waiting for Candle 2 to close before entry confirmation.")
     elif setup_discarded:
         warnings.append(
-            "Setup discarded from Candle 3 onward because price broke the low of Candle 1 or Candle 2."
+            "Setup discarded from Candle 3 onward because price broke the lower of Candle 1 and Candle 2 lows."
         )
     else:
         reasons.append(
-            "Candle 2 has closed and no later candle has broken the low of Candle 1 or Candle 2; setup remains active."
+            "Candle 2 has closed and no later candle has broken the lower of Candle 1 and Candle 2 lows; setup remains active."
         )
 
     entry_rules_pass = (
@@ -1188,6 +1194,23 @@ def _purple_touch_distance_percent(candle: Candle, ema9: float) -> float | None:
         return 0.0
     nearest = candle.low if ema9 < candle.low else candle.high
     return abs((nearest - ema9) / ema9) * 100
+
+
+def _purple_touch_reason(
+    range_distance_percent: float | None,
+    tolerance_percent: float,
+    prefix: str = "",
+) -> str:
+    if range_distance_percent is not None and range_distance_percent <= 1e-9:
+        detail = "purple EMA9 is inside the higher-timeframe candle high/low range (exact 0.00% touch)."
+    else:
+        detail = (
+            f"higher-timeframe candle is within {range_distance_percent:.2f}% of purple EMA9 "
+            f"(maximum {tolerance_percent:.2f}%)."
+            if range_distance_percent is not None
+            else f"higher-timeframe candle is within the {tolerance_percent:.2f}% purple EMA9 zone."
+        )
+    return prefix + detail[0].upper() + detail[1:]
 
 
 def _purple_close_distance_percent(candle: Candle, ema9: float) -> float | None:

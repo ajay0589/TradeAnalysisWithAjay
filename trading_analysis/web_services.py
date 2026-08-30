@@ -1194,12 +1194,13 @@ class AnalysisService:
             except Exception as exc:
                 errors.append({"symbol": symbol, "error": str(exc)})
 
-        def rank(row: dict[str, Any]) -> tuple[int, int, int]:
+        def rank(row: dict[str, Any]) -> tuple[float, int, int, int, str]:
             early_ready = 1 if (row.get("early_entry") or {}).get("status") == "entry_candidate" else 0
             final_ready = 1 if (row.get("final_entry") or {}).get("status") == "entry_candidate" else 0
-            return (final_ready, early_ready, int(row.get("score") or 0))
+            distance = float(row.get("purple_range_distance_percent") or 0)
+            return (distance, -final_ready, -early_ready, -int(row.get("score") or 0), str(row.get("symbol") or ""))
 
-        rows = sorted(rows, key=rank, reverse=True)
+        rows = sorted(rows, key=rank)
         limited_rows = rows if limit is None else rows[:limit]
         return {
             "type": "krishna_purple_touch_entry",
@@ -1230,7 +1231,8 @@ class AnalysisService:
                     + " above its blue Chande Kroll line.",
                     "Mandatory filters: close above black EMA89, blue Chande Kroll above purple EMA9, and price approaching purple from blue across the latest 2-3 touch-timeframe candles.",
                     "Final entry needs yellow Chande Kroll above brown VWMA20; early entry treats that relationship as context only.",
-                    "Entry lifecycle: mapped purple touch is Candle 1, wait for Candle 2 to close, then discard from Candle 3 onward if price breaks Candle 1 or Candle 2 low.",
+                    "Purple-touch qualification accepts a candle-range distance up to 1.00%; rows are ranked from closest to farthest.",
+                    "Entry lifecycle: mapped purple touch is Candle 1, wait for Candle 2 to close, then discard from Candle 3 onward only if price breaks the lower of Candle 1 and Candle 2 lows.",
                     "There is no fixed 10-candle expiry.",
                     "Light green is EMA26. Ichimoku, VWAP, and Donchian Channel 20 are ignored for this setup.",
                     "RSI bullish divergence is optional context only.",
@@ -1291,13 +1293,14 @@ class AnalysisService:
             except Exception as exc:
                 errors.append({"symbol": symbol, "error": str(exc)})
 
-        def rank(row: dict[str, Any]) -> tuple[int, int, int, int]:
+        def rank(row: dict[str, Any]) -> tuple[float, int, int, int, int, str]:
             full = 1 if row.get("full_setup_status") == "qualified" else 0
             early_ready = 1 if (row.get("early_entry") or {}).get("status") == "entry_candidate" else 0
             final_ready = 1 if (row.get("final_entry") or {}).get("status") == "entry_candidate" else 0
-            return (full, final_ready, early_ready, int(row.get("score") or 0))
+            distance = float(row.get("purple_range_distance_percent") or 0)
+            return (distance, -full, -final_ready, -early_ready, -int(row.get("score") or 0), str(row.get("symbol") or ""))
 
-        rows = sorted(rows, key=rank, reverse=True)
+        rows = sorted(rows, key=rank)
         limited_rows = rows if limit is None else rows[:limit]
         return {
             "type": "krishna_purple_touch_step1",
@@ -1319,7 +1322,8 @@ class AnalysisService:
                 "shown_symbols": len(limited_rows),
                 "error_count": len(errors),
                 "points": [
-                    f"Step 1 shortlist uses {profile.label}: purple EMA9 must be inside the latest candle high/low range.",
+                    f"Step 1 shortlist uses {profile.label}: the latest candle range must touch purple EMA9 or come within 1.00% of it.",
+                    "Rows are ranked by purple range distance from 0.00% upward; UI filters expose exact, 0.20%, 0.50%, and 1.00% bands.",
                     "This stage intentionally does not require black EMA89, EMA26, or entry-trigger confirmation.",
                     f"Rows audit the {profile.confirmation_label} blue-line confirmation plus blue-above-purple and blue-to-purple approach checks.",
                     "Rows show which mandatory setup checks pass and which blockers prevent a strict entry candidate.",

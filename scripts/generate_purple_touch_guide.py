@@ -377,7 +377,7 @@ class ExactTouchSketch(Flowable):
         c.drawCentredString(x + 34 * mm, 45 * mm, title)
         c.setStrokeColor(PURPLE)
         c.setLineWidth(3)
-        line_y = 26 * mm if touched else 16 * mm
+        line_y = 26 * mm if touched else 19 * mm
         c.line(x + 6 * mm, line_y, x + 62 * mm, line_y)
         c.setStrokeColor(GREEN)
         c.setFillColor(GREEN_BG)
@@ -391,14 +391,14 @@ class ExactTouchSketch(Flowable):
             c.setFillColor(GREEN)
             c.drawString(x + 53 * mm, 35 * mm, "PASS")
         else:
-            c.drawCentredString(x + 34 * mm, 5 * mm, "Near is not touch; range distance > 0")
-            c.setFillColor(RED)
-            c.drawString(x + 53 * mm, 35 * mm, "BLOCK")
+            c.drawCentredString(x + 34 * mm, 5 * mm, "Nearest edge within 1.00% of EMA9")
+            c.setFillColor(GREEN)
+            c.drawString(x + 53 * mm, 35 * mm, "PASS")
 
     def draw(self) -> None:
         self.canv.saveState()
         self.draw_case(5 * mm, "Exact range touch", True)
-        self.draw_case(94 * mm, "Near-touch outside range", False)
+        self.draw_case(94 * mm, "Near-touch distance zone", False)
         self.canv.restoreState()
 
 
@@ -419,7 +419,7 @@ class EntryTimelineSketch(Flowable):
             (24, PURPLE, "Candle 1", "Mapped purple touch"),
             (68, BLUE, "Candle 2", "Must close first"),
             (112, GREEN, "Candle 3+", "Check entry + lows"),
-            (153, RED, "Discard", "Break C1 or C2 low"),
+            (153, RED, "Discard", "Break lower C1/C2 low"),
         ]
         for x_mm, color, title, body in nodes:
             x = x_mm * mm
@@ -455,7 +455,7 @@ def page_header_footer(canvas, doc) -> None:
     canvas.line(18 * mm, 13 * mm, A4[0] - 18 * mm, 13 * mm)
     canvas.setFillColor(MUTED)
     canvas.setFont("Helvetica", 7.3)
-    canvas.drawString(18 * mm, 8 * mm, "Implementation snapshot: scanner-audit-and-v3 | 29 Aug 2026")
+    canvas.drawString(18 * mm, 8 * mm, "Implementation snapshot: scanner-audit-and-v3 | 30 Aug 2026")
     canvas.drawRightString(A4[0] - 18 * mm, 8 * mm, f"Page {page}")
     canvas.restoreState()
 
@@ -489,7 +489,7 @@ def build_story() -> list[Flowable]:
             YELLOW,
         ),
         Spacer(1, 10 * mm),
-        p("Version 1.0 | Branch scanner-audit-and-v3 | Generated 29 Aug 2026", "Smallx"),
+        p("Version 1.1 | Branch scanner-audit-and-v3 | Generated 30 Aug 2026", "Smallx"),
         PageBreak(),
     ]
 
@@ -501,7 +501,7 @@ def build_story() -> list[Flowable]:
         flowchart(
             [
                 ("1. Refresh cached candles", "Download/update all required Monthly, Weekly, Daily and lower-timeframe candles for the F&amp;O list.", BLUE),
-                ("2. Step 1 - exact purple EMA9 touch", "Purple EMA9 must lie inside the latest higher-timeframe candle high/low range. Range distance = 0.00%.", PURPLE_DARK),
+                ("2. Step 1 - purple EMA9 distance", "Latest higher-timeframe candle must touch EMA9 or come within 1.00%. Rows rank from 0.00% upward.", PURPLE_DARK),
                 ("3. Strict higher-timeframe qualification", "Apply EMA89, EMA26, blue-above-purple, blue-to-purple approach, higher confirmation, and structure checks.", GREEN),
                 ("4. Entry status", "Evaluate early and final entry timeframes. Status can be waiting, candidate, discarded, missing, or insufficient.", YELLOW),
                 ("5. Alert + trade ID", "During NSE market hours, a fresh entry candidate creates one entry event and one open trade ID. Duplicates are suppressed.", BLUE),
@@ -525,8 +525,8 @@ def build_story() -> list[Flowable]:
             ["Profile", "Touch timeframe", "Higher confirmation", "Early entry", "Final entry", "Exit"],
             [
                 ["Monthly", "Monthly", "Derived 5-month candle: open or close above blue", "120 minute (2 hour)", "Daily", "120 minute"],
-                ["Weekly", "Weekly", "Monthly candle: close above blue", "30 minute", "120 minute (2 hour)", "30 minute"],
-                ["Daily", "Daily", "Weekly candle: close above blue", "10 minute", "10 minute", "10 minute"],
+                ["Weekly", "Weekly", "Monthly candle: open or close above blue", "30 minute", "120 minute (2 hour)", "30 minute"],
+                ["Daily", "Daily", "Weekly candle: open or close above blue", "10 minute", "10 minute", "10 minute"],
             ],
             [22, 26, 48, 26, 26, 26],
         ),
@@ -558,7 +558,7 @@ def build_story() -> list[Flowable]:
         data_table(
             ["Color", "Implemented indicator", "Role in this setup", "Mandatory?"],
             [
-                ["Purple", "EMA 9", "Touch line and fast trend reference.", "Yes - exact range touch for Step 1"],
+                ["Purple", "EMA 9", "Touch line and fast trend reference.", "Yes - range distance <= 1.00%"],
                 ["Blue", "Upper Chande Kroll stop (10, 1, 9)", "Must be above purple; used for approach and higher confirmation.", "Yes"],
                 ["Yellow", "Lower Chande Kroll stop (10, 1, 9)", "Entry close-above trigger and exit close-below trigger.", "Yes"],
                 ["Light green", "EMA 26", "Higher-timeframe trend filter; close and EMA9 relationships are displayed.", "Yes in strict scan"],
@@ -579,15 +579,15 @@ def build_story() -> list[Flowable]:
     ]
 
     story += [
-        heading("4", "Step 1 - exact Purple EMA9 touch"),
+        heading("4", "Step 1 - Purple EMA9 touch and distance"),
         p(
-            "Step 1 is now deliberately strict and easy to audit. The latest candle on the selected touch timeframe must physically contain the EMA9 price within its high/low range.",
+            "The latest candle on the selected touch timeframe must physically contain EMA9 within its high/low range or its nearest edge must be no more than 1.00% away. Rows are ranked from the smallest range distance upward.",
         ),
         ExactTouchSketch(),
         Spacer(1, 4 * mm),
         callout(
             "Implemented expression",
-            "PASS when candle.low &lt;= purple_ema9 and candle.high &gt;= purple_ema9. The displayed range distance is 0.00%. A close can still be far from EMA9 if the candle is wide; close distance is shown only as context.",
+            "PASS when EMA9 is inside the candle range (0.00%) or the nearest candle edge is within 1.00% of EMA9. Close distance remains separate context. UI bands show exact 0.00%, within 0.20%, within 0.50%, and the full 1.00% shortlist.",
             PURPLE_BG,
             PURPLE_DARK,
         ),
@@ -596,18 +596,18 @@ def build_story() -> list[Flowable]:
         data_table(
             ["Step 1 result", "Meaning", "Next action"],
             [
-                ["Touch row", "The latest Monthly/Weekly/Daily candle range includes purple EMA9.", "Audit the strict blockers shown in the same row."],
-                ["No row", "EMA9 is outside the latest candle range, or required candle data/EMA9 is unavailable.", "The stock does not proceed in that profile for this scan."],
+                ["Touch row", "The latest Monthly/Weekly/Daily candle range touches EMA9 or comes within 1.00%.", "Audit the strict blockers shown in the same row."],
+                ["No row", "EMA9 is more than 1.00% from the latest candle range, or required data is unavailable.", "The stock does not proceed in that profile for this scan."],
                 ["Same symbol in multiple rows", "The symbol independently touched in more than one profile.", "Review each profile using its own entry/exit matrix."],
             ],
             [34, 78, 62],
         ),
         Spacer(1, 5 * mm),
         callout(
-            "Historical change recorded",
-            "Earlier UI versions used a 3% Step 1 audit zone and 1% strict zone. Those near-touch tolerances were removed on 29 Aug 2026 after review. Both stages now use exact range touch.",
-            RED_BG,
-            RED,
+            "Confirmed distance rule",
+            "Krishna confirmed a maximum 1.00% range distance. Near-touch rows may proceed through strict qualification and entry alerts. The UI can narrow the view to 0.00%, 0.20%, or 0.50% without changing the scanner's 1.00% maximum.",
+            GREEN_BG,
+            GREEN,
         ),
         PageBreak(),
     ]
@@ -617,7 +617,7 @@ def build_story() -> list[Flowable]:
         p("A Step 1 touch becomes a strict candidate only when every mandatory higher-timeframe gate passes."),
         horizontal_flow(
             [
-                ("Exact touch", "EMA9 inside H/L", PURPLE_DARK),
+                ("Purple distance", "Range distance <= 1%", PURPLE_DARK),
                 ("Trend", "Close > EMA89 and EMA26", BLACK_LINE),
                 ("Direction", "Blue > purple", BLUE),
             ]
@@ -660,8 +660,8 @@ def build_story() -> list[Flowable]:
             ["Purple touch", "Confirmation data", "PASS", "BLOCK"],
             [
                 ["Monthly", "Daily candles are aggregated into stable calendar 5-month buckets.", "Latest derived 5-month open OR close > its blue Chande Kroll.", "Both open and close are <= blue, or blue/data is unavailable."],
-                ["Weekly", "Monthly candles.", "Latest Monthly close > its blue Chande Kroll.", "Monthly close <= blue, or blue/data is unavailable."],
-                ["Daily", "Weekly candles.", "Latest Weekly close > its blue Chande Kroll.", "Weekly close <= blue, or blue/data is unavailable."],
+                ["Weekly", "Monthly candles.", "Latest Monthly open OR close > its blue Chande Kroll.", "Both Monthly open and close are <= blue, or blue/data is unavailable."],
+                ["Daily", "Weekly candles.", "Latest Weekly open OR close > its blue Chande Kroll.", "Both Weekly open and close are <= blue, or blue/data is unavailable."],
             ],
             [30, 52, 54, 38],
         ),
@@ -669,8 +669,8 @@ def build_story() -> list[Flowable]:
         flowchart(
             [
                 ("Monthly touch", "Confirm with derived 5-month open OR close above blue.", PURPLE_DARK),
-                ("Weekly touch", "Confirm with Monthly close above blue.", BLUE),
-                ("Daily touch", "Confirm with Weekly close above blue.", GREEN),
+                ("Weekly touch", "Confirm with Monthly open OR close above blue.", BLUE),
+                ("Daily touch", "Confirm with Weekly open OR close above blue.", GREEN),
             ]
         ),
         Spacer(1, 6 * mm),
@@ -709,7 +709,7 @@ def build_story() -> list[Flowable]:
         Spacer(1, 6 * mm),
         callout(
             "Important",
-            "The 3% shown here belongs only to the directional 'came from blue' interpretation. It is not used for Step 1 purple touch, which is exact.",
+            "The 3% shown here belongs only to the directional 'came from blue' interpretation. Step 1 uses a separate confirmed maximum range distance of 1.00%.",
             RED_BG,
             RED,
         ),
@@ -726,8 +726,8 @@ def build_story() -> list[Flowable]:
             [
                 ["Candle 1", "Map the higher-timeframe touch period onto the entry timeframe. Record Candle 1 low.", "wait"],
                 ["Candle 2", "Wait for the next entry-timeframe candle to close. Record Candle 2 low.", "wait until closed"],
-                ["Candle 3 onward", "Entry rules may qualify. Continuously check whether any later candle breaks Candle 1 low OR Candle 2 low.", "entry_candidate or wait"],
-                ["Invalidation", "Any later candle low < Candle 1 low OR < Candle 2 low.", "discarded"],
+                ["Candle 3 onward", "Entry rules may qualify. Continuously check whether any later candle breaks the lower of Candle 1 and Candle 2 lows.", "entry_candidate or wait"],
+                ["Invalidation", "Any later candle low < min(Candle 1 low, Candle 2 low).", "discarded"],
                 ["Expiry", "No fixed 10-candle expiry is used.", "remains active until discarded or entered"],
             ],
             [30, 106, 38],
@@ -735,7 +735,7 @@ def build_story() -> list[Flowable]:
         Spacer(1, 6 * mm),
         callout(
             "Implemented invalidation level",
-            "The UI reports max(Candle 1 low, Candle 2 low) as the effective threshold because breaking either low means crossing the higher of the two. The first later candle that breaks either reference low records the invalidation timestamp.",
+            "The UI reports min(Candle 1 low, Candle 2 low) as the effective threshold. Breaking only the higher reference low does not discard the setup. The first later candle below the lower reference low records the invalidation timestamp.",
             PURPLE_BG,
             PURPLE_DARK,
         ),
@@ -849,8 +849,8 @@ def build_story() -> list[Flowable]:
             ["UI count", "Definition", "Does it create an alert?"],
             [
                 ["Analyzed", "Stock-profile rows with enough source data to run strict scanning.", "No"],
-                ["Step 1 touches", "Exact purple EMA9 high/low intersections before mandatory filters.", "No"],
-                ["Strict candidates", "Exact touches that also pass all mandatory higher-timeframe gates.", "Not by itself"],
+                ["Step 1 touches", "Purple EMA9 range distance <=1.00% before mandatory filters.", "No"],
+                ["Strict candidates", "Touch/near-touch rows that also pass all mandatory higher-timeframe gates.", "Not by itself"],
                 ["Early ready", "Strict rows whose early entry snapshot is entry_candidate.", "Eligible during market hours"],
                 ["Final ready", "Strict rows whose final entry snapshot is entry_candidate.", "Eligible during market hours"],
                 ["New entry alerts", "Fresh eligible entries actually persisted this run.", "Yes"],
@@ -859,10 +859,10 @@ def build_story() -> list[Flowable]:
             [39, 95, 40],
         ),
         Spacer(1, 7 * mm),
-        p("Reference run after exact-touch correction", "H2x"),
+        p("Reference run after the confirmed 1% distance update", "H2x"),
         data_table(
             ["Captured", "Step 1", "Strict", "Early ready", "Final ready", "New alerts", "Reason"],
-            [["29 Aug 2026", "284", "39", "5", "0", "0", "Saturday; Force off"]],
+            [["30 Aug 2026", "405", "73", "14", "0", "0", "Sunday; Force off"]],
             [33, 22, 22, 27, 27, 24, 46],
         ),
         Spacer(1, 6 * mm),
@@ -880,7 +880,7 @@ def build_story() -> list[Flowable]:
         data_table(
             ["Data", "Why needed", "Current practical window"],
             [
-                ["Monthly", "EMA89, exact touch, Chande Kroll, VWMA20, structure.", "3000 calendar days for the Monthly profile."],
+                ["Monthly", "EMA89, purple distance, Chande Kroll, VWMA20, structure.", "3000 calendar days for the Monthly profile."],
                 ["Weekly", "Weekly touch and Daily-profile higher confirmation.", "730 days for Weekly; all-profile refresh requests 3000 days."],
                 ["Daily", "Daily touch, Monthly final entry, and derived higher aggregations.", "365 days minimum; all-profile refresh requests 3000 days."],
                 ["120 minute", "Monthly early/exit and Weekly final entry.", "Broker limits may constrain historical intraday depth."],
@@ -910,10 +910,10 @@ def build_story() -> list[Flowable]:
             ["Scenario", "Observed state", "Expected result"],
             [
                 ["A - Step 1 only", "Weekly EMA9 lies inside candle range, but close is below EMA89.", "Appears in Step 1 with EMA89 blocker; absent from strict candidates; no alert."],
-                ["B - Strict but waiting", "Monthly exact touch; all strict gates pass; 2H close remains below yellow.", "Appears in strict candidates; early=wait; final depends on Daily; no early alert."],
+                ["B - Strict but waiting", "Monthly purple distance <=1%; all strict gates pass; 2H close remains below yellow.", "Appears in strict candidates; early=wait; final depends on Daily; no early alert."],
                 ["C - Early ready", "Weekly strict gates pass; Candle 2 closed; no low break; 30m close > yellow; blue > purple.", "early=entry_candidate. Fresh market-hour run can create early trade ID."],
                 ["D - Final blocked", "Final timeframe close > yellow but yellow <= brown VWMA20.", "final=wait because yellow-above-brown is mandatory."],
-                ["E - Discarded", "From Candle 3 onward, an entry-timeframe candle breaks Candle 1 or Candle 2 low.", "Entry status=discarded; setup cannot create an entry alert."],
+                ["E - Discarded", "From Candle 3 onward, an entry-timeframe candle breaks the lower of Candle 1 and Candle 2 lows.", "Entry status=discarded; setup cannot create an entry alert."],
                 ["F - Exit", "Open trade ID exists and latest configured exit-timeframe candle closes below yellow.", "Exit alert is persisted and matching trade ID is closed."],
             ],
             [38, 85, 51],
@@ -926,7 +926,7 @@ def build_story() -> list[Flowable]:
         Spacer(1, 5 * mm),
         callout(
             "Audit sequence for an unexpected alert",
-            "Open the trade ID -> identify profile and entry kind -> inspect Step 1 exact touch -> inspect each strict gate -> inspect Candle 1/Candle 2 lifecycle -> verify entry close/yellow/blue/brown -> confirm market-hour and Telegram status.",
+            "Open the trade ID -> identify profile and entry kind -> inspect Step 1 range distance -> inspect each strict gate -> inspect Candle 1/Candle 2 lifecycle -> verify entry close/yellow/blue/brown -> confirm market-hour and Telegram status.",
             PURPLE_BG,
             PURPLE_DARK,
         ),
@@ -939,14 +939,14 @@ def build_story() -> list[Flowable]:
         data_table(
             ["Topic", "Current implementation", "Review decision"],
             [
-                ["Purple touch", "Exact: EMA9 inside latest candle high/low.", "Confirm wick touch counts, or require body/open/close contact."],
+                ["Purple touch", "Range distance <=1%; UI bands at 0.00%, 0.20%, and 0.50%.", "Compare candidate quality by distance band."],
                 ["Touch timing", "Only the latest higher-timeframe candle qualifies.", "Confirm whether a prior touch should remain active while lifecycle waits."],
                 ["Blue approach", "Latest 3 candles; prior close within 3% of blue; latest moves toward purple.", "Confirm geometry and replace 3% if needed."],
                 ["5-month candle", "Stable calendar-derived 5-month buckets.", "Confirm calendar versus rolling construction."],
                 ["Higher confirmation", "Latest confirmation candle only.", "Confirm open/close rules and whether incomplete candles are allowed."],
                 ["EMA26", "Strict close >= EMA26; EMA9 > EMA26 adds context.", "Confirm whether both relationships are mandatory."],
                 ["Market structure", "Explicit downtrend blocks.", "Confirm whether this filter should remain mandatory."],
-                ["C1/C2 invalidation", "Any later low below either reference low discards setup.", "Confirm wick-low versus candle-close break."],
+                ["C1/C2 invalidation", "Any later low below the lower of the two reference lows discards setup.", "Confirm wick-low versus candle-close break."],
                 ["Exit", "Exit-timeframe candle close below yellow.", "Confirm whether re-entry is allowed after an exit and new touch."],
             ],
             [38, 82, 54],
@@ -984,11 +984,11 @@ def build_story() -> list[Flowable]:
         data_table(
             ["Status", "Meaning"],
             [
-                ["step1_only", "Exact purple touch found, but one or more mandatory strict gates failed/are unavailable."],
+                ["step1_only", "Purple range distance is <=1%, but one or more mandatory strict gates failed/are unavailable."],
                 ["qualified", "All higher-timeframe strict gates passed; entry status is evaluated separately."],
                 ["wait", "Setup remains valid but entry confirmation is not yet complete."],
                 ["entry_candidate", "All rules for that early/final entry snapshot currently pass."],
-                ["discarded", "A candle from Candle 3 onward broke Candle 1 or Candle 2 low."],
+                ["discarded", "A candle from Candle 3 onward broke the lower of Candle 1 and Candle 2 lows."],
                 ["missing", "Required cached timeframe candles do not exist."],
                 ["insufficient", "Some candles exist, but not enough to calculate the required indicators."],
                 ["open", "Entry event has a trade ID and no matching exit yet."],

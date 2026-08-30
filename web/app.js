@@ -1124,9 +1124,9 @@ function renderPurpleRules(data) {
     "Daily: use only 10m for early/final/exit tracking.",
     "Purple-touch filter requires close above black EMA89.",
     "Blue Chande Kroll must be above purple EMA9 and price must approach purple from blue across the latest 2-3 higher-timeframe candles.",
-    "Monthly touch confirms on derived 5-month open or close above blue; Weekly confirms on Monthly close; Daily confirms on Weekly close.",
+    "Monthly touch confirms on derived 5-month open or close above blue; Weekly confirms on Monthly open or close; Daily confirms on Weekly open or close.",
     "The mapped purple-touch bar is Candle 1. Wait for Candle 2 to close before allowing entry confirmation.",
-    "From Candle 3 onward, discard the setup if price breaks the low of Candle 1 or Candle 2. There is no fixed candle-count expiry.",
+    "From Candle 3 onward, discard the setup only if price breaks the lower of Candle 1 and Candle 2 lows. There is no fixed candle-count expiry.",
     "Entry condition: selected entry timeframe candle closes above yellow Chande Kroll.",
     "Final entry additionally requires yellow Chande Kroll above brown VWMA20.",
     "Exit/review condition: exit timeframe candle closes below yellow Chande Kroll.",
@@ -1164,7 +1164,7 @@ function renderPurpleSummary(summary) {
 
 function renderPurpleResults(rows = null) {
   if (Array.isArray(rows)) state.lastPurpleRows = rows;
-  const filteredRows = filterPurpleCandidateRows(state.lastPurpleRows, "purpleCandidateProfileFilter", "purpleCandidateEntryFilter");
+  const filteredRows = filterPurpleCandidateRows(state.lastPurpleRows, "purpleCandidateProfileFilter", "purpleCandidateEntryFilter", "purpleCandidateDistanceFilter");
   const page = paginatePurpleRows(filteredRows, "candidates", "purpleCandidate");
   $("purpleResultMeta").textContent = `${page.rows.length} shown / ${filteredRows.length} filtered / ${state.lastPurpleRows.length} candidate row(s)`;
   $("purpleBody").innerHTML = page.rows.length
@@ -1179,7 +1179,7 @@ function renderPurpleResults(rows = null) {
           <td><button class="linkBtn symbol-chip" data-symbol="${escapeHtml(row.symbol)}">${escapeHtml(row.symbol)}</button></td>
           <td>${fmtInt(row.score)}<div class="cell-note">${escapeHtml(row.confidence || "-")}</div></td>
           <td>${escapeHtml(row.purple_timeframe_label || row.purple_timeframe || "-")}</td>
-          <td>${fmt(row.close)} / ${fmt(row.purple_ema9)}<div class="cell-note">${row.purple_touch ? "purple touched" : "not touched"}</div></td>
+          <td>${fmt(row.close)} / ${fmt(row.purple_ema9)}<div class="cell-note">range distance ${fmt(row.purple_range_distance_percent)}%</div></td>
           <td>${purpleDirectionCell(row)}</td>
           <td>${higherConfirmationCell(row.higher_confirmation)}</td>
           <td>${fmt(row.yellow_line)} / ${fmt(row.brown_vwma20)}<div class="cell-note">final needs yellow above brown</div></td>
@@ -1215,7 +1215,7 @@ function renderPurpleStep1Results(rows = null) {
   const meta = $("purpleStep1Meta");
   const body = $("purpleStep1Body");
   if (!body) return;
-  const filteredRows = filterPurpleCandidateRows(state.lastPurpleStep1Rows, "purpleStep1ProfileFilter", "purpleStep1EntryFilter");
+  const filteredRows = filterPurpleCandidateRows(state.lastPurpleStep1Rows, "purpleStep1ProfileFilter", "purpleStep1EntryFilter", "purpleStep1DistanceFilter");
   const page = paginatePurpleRows(filteredRows, "step1", "purpleStep1");
   if (meta) {
     const higherTfPassed = filteredRows.filter((row) => row.full_setup_status === "qualified").length;
@@ -1301,11 +1301,16 @@ function higherConfirmationCell(confirmation = {}) {
   `;
 }
 
-function filterPurpleCandidateRows(rows, profileFilterId, entryFilterId) {
+function filterPurpleCandidateRows(rows, profileFilterId, entryFilterId, distanceFilterId = null) {
   const profile = $(profileFilterId)?.value || "all";
   const entryKind = $(entryFilterId)?.value || "all";
+  const maximumDistance = distanceFilterId ? Number($(distanceFilterId)?.value ?? 1) : null;
   return (rows || []).filter((row) => {
     if (profile !== "all" && row.purple_timeframe !== profile) return false;
+    if (maximumDistance !== null) {
+      const distance = Number(row.purple_range_distance_percent);
+      if (!Number.isFinite(distance) || distance > maximumDistance + 1e-9) return false;
+    }
     if (entryKind === "all") return true;
     return (row[`${entryKind}_entry`] || {}).status === "entry_candidate";
   });
@@ -1349,14 +1354,14 @@ function entryCell(entry) {
 }
 
 function copyPurpleSymbols() {
-  const symbols = filterPurpleCandidateRows(state.lastPurpleRows, "purpleCandidateProfileFilter", "purpleCandidateEntryFilter")
+  const symbols = filterPurpleCandidateRows(state.lastPurpleRows, "purpleCandidateProfileFilter", "purpleCandidateEntryFilter", "purpleCandidateDistanceFilter")
     .map((row) => row.symbol)
     .filter(Boolean);
   copyText(symbols.join(", "), `Copied ${symbols.length} purple-touch symbol(s).`);
 }
 
 function downloadPurpleCsv() {
-  const rows = filterPurpleCandidateRows(state.lastPurpleRows, "purpleCandidateProfileFilter", "purpleCandidateEntryFilter");
+  const rows = filterPurpleCandidateRows(state.lastPurpleRows, "purpleCandidateProfileFilter", "purpleCandidateEntryFilter", "purpleCandidateDistanceFilter");
   downloadCsv("krishna_purple_touch_filtered_stocks.csv", rows, [
     { label: "Symbol", value: (row) => row.symbol },
     { label: "Score", value: (row) => row.score },
@@ -1364,6 +1369,8 @@ function downloadPurpleCsv() {
     { label: "Purple Timeframe", value: (row) => row.purple_timeframe_label },
     { label: "Close", value: (row) => row.close },
     { label: "Purple EMA9", value: (row) => row.purple_ema9 },
+    { label: "Purple Close Distance %", value: (row) => row.purple_touch_distance_percent },
+    { label: "Purple Range Distance %", value: (row) => row.purple_range_distance_percent },
     { label: "Blue CK", value: (row) => row.blue_line },
     { label: "Blue Above Purple", value: (row) => row.blue_above_purple },
     { label: "Approach From Blue", value: (row) => row.approach_from_blue },
@@ -1434,7 +1441,7 @@ async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "all" } = {}
     const newAlerts = Number(data.entry_alerts_created || 0) + Number(data.exit_alerts_created || 0);
     setPurpleProgress(
       "completed",
-      `${scanLabel} analysis complete: ${step1Rows.length} exact touch row(s), ${rows.length} strict candidate(s), ${newAlerts} new alert(s).`,
+      `${scanLabel} analysis complete: ${step1Rows.length} touch/near-touch row(s), ${rows.length} strict candidate(s), ${newAlerts} new alert(s).`,
     );
     $("purpleAlertMeta").textContent = data.alert_creation_skipped
       ? "analysis complete / live alerts paused"
@@ -1463,6 +1470,8 @@ function mergePurpleProfileRows(existing, incoming, purpleTimeframe) {
     .sort((left, right) => {
       const profileDifference = (PURPLE_PROFILE_ORDER[left.purple_timeframe] ?? 99) - (PURPLE_PROFILE_ORDER[right.purple_timeframe] ?? 99);
       if (profileDifference) return profileDifference;
+      const distanceDifference = Number(left.purple_range_distance_percent || 0) - Number(right.purple_range_distance_percent || 0);
+      if (distanceDifference) return distanceDifference;
       return String(left.symbol || "").localeCompare(String(right.symbol || ""));
     });
 }
@@ -1519,7 +1528,7 @@ function scanSummaryFromLiveScan(data, rows, step1Rows = []) {
     latest_candles_pulled: $("purpleRefreshToggle").checked,
     points: [
       `Scanner evaluated ${profileList(data)} purple-touch profile${(data.profiles || []).length === 1 ? "" : "s"}.`,
-      `Step 1 found ${step1Matched || step1Rows.length} exact higher-timeframe EMA9 touch row(s); EMA9 is inside the candle high/low range (range distance 0.00%).`,
+      `Step 1 found ${step1Matched || step1Rows.length} higher-timeframe EMA9 touch/near-touch row(s) within 1.00%; rows are ordered from range distance 0.00% upward.`,
       `Latest Scan Candidates shows ${rows.length} row(s) after mandatory EMA89, EMA26, blue/purple direction, 2-3 candle approach, and higher-confirmation checks.`,
       `${earlyReady} strict candidate row(s) have early entry ready; ${finalReady} have final entry ready. Candidate rows are not the same as newly created alerts.`,
       data.market_hours === false && !data.forced
@@ -3248,8 +3257,10 @@ $("purpleCopyBtn").addEventListener("click", copyPurpleSymbols);
 $("purpleDownloadBtn").addEventListener("click", downloadPurpleCsv);
 $("purpleStep1ProfileFilter").addEventListener("change", () => { state.purplePages.step1 = 1; renderPurpleStep1Results(); });
 $("purpleStep1EntryFilter").addEventListener("change", () => { state.purplePages.step1 = 1; renderPurpleStep1Results(); });
+$("purpleStep1DistanceFilter").addEventListener("change", () => { state.purplePages.step1 = 1; renderPurpleStep1Results(); });
 $("purpleCandidateProfileFilter").addEventListener("change", () => { state.purplePages.candidates = 1; renderPurpleResults(); });
 $("purpleCandidateEntryFilter").addEventListener("change", () => { state.purplePages.candidates = 1; renderPurpleResults(); });
+$("purpleCandidateDistanceFilter").addEventListener("change", () => { state.purplePages.candidates = 1; renderPurpleResults(); });
 [
   ["purpleEntryAlertProfileFilter", "entry"],
   ["purpleEntryAlertKindFilter", "entry"],
