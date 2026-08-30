@@ -11,6 +11,7 @@ const state = {
   lastPurpleAlerts: [],
   lastPurpleTrades: [],
   lastPurpleAlertResponse: null,
+  lastPurpleBacktest: null,
   purpleAutoTimers: {},
   purplePendingProfiles: [],
   purpleNextRunAt: {},
@@ -1832,7 +1833,7 @@ function renderPurpleAlerts(data = null) {
   $("purpleOpenTradeMeta").textContent = `${lifecycleTrades.length} shown / ${tradeFilteredTotal} filtered / ${totalLifecycleCount} total trade(s)`;
   updatePurpleServerPager("entry", pagination.entry, entryAlerts.length);
   updatePurpleServerPager("exit", pagination.exit, exitAlerts.length);
-  updatePurpleServerPager("trades", pagination.trades, openTrades.length);
+  updatePurpleServerPager("trades", pagination.trades, lifecycleTrades.length);
   $("purpleAlertTallyCards").innerHTML = [
     ["Historical entries", totalEntryCount],
     ["Open trade IDs", totalOpenCount],
@@ -1973,6 +1974,171 @@ function durationBetween(openedAt, closedAt = null) {
   if (days) return `${days}d ${hours}h ${rest}m`;
   if (hours) return `${hours}h ${rest}m`;
   return `${rest}m`;
+}
+
+function setPurpleBacktestDefaults() {
+  const to = new Date();
+  const from = new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const localDate = (value) => {
+    const offset = value.getTimezoneOffset() * 60 * 1000;
+    return new Date(value.getTime() - offset).toISOString().slice(0, 10);
+  };
+  if (!$('purpleBtTo').value) $('purpleBtTo').value = localDate(to);
+  if (!$('purpleBtFrom').value) $('purpleBtFrom').value = localDate(from);
+}
+
+async function runPurpleBacktest() {
+  const profiles = [
+    ["month", "purpleBtMonth"],
+    ["week", "purpleBtWeek"],
+    ["day", "purpleBtDay"],
+  ].filter(([, id]) => $(id).checked).map(([profile]) => profile);
+  if (!profiles.length) {
+    setNotes("Select at least one Purple Touch profile.", true);
+    return;
+  }
+  if (!$('purpleBtFrom').value || !$('purpleBtTo').value) {
+    setNotes("Select both From and To dates for the Purple Touch backtest.", true);
+    return;
+  }
+  const symbolsText = $('purpleBtSymbols').value.trim();
+  const payload = {
+    symbols: symbolsText ? symbolsText.split(",").map((value) => value.trim()).filter(Boolean) : null,
+    limit_symbols: Number($('purpleBtLimit').value || 5),
+    params: {
+      from_date: $('purpleBtFrom').value,
+      to_date: $('purpleBtTo').value,
+      profiles,
+      entry_mode: $('purpleBtEntryMode').value,
+      touch_tolerance_percent: Number($('purpleBtDistance').value),
+      min_score: Number($('purpleBtMinScore').value),
+      stop_mode: $('purpleBtStopMode').value,
+      stop_percent: Number($('purpleBtStopPercent').value),
+      target_r_multiple: Number($('purpleBtTargetR').value),
+      max_holding_bars: Number($('purpleBtMaxHold').value),
+      capital: Number($('purpleBtCapital').value),
+      risk_per_trade_percent: Number($('purpleBtRiskPercent').value),
+      slippage_bps: Number($('purpleBtSlippage').value),
+      costs_bps: Number($('purpleBtCosts').value),
+    },
+  };
+  $('purpleBacktestRunBtn').disabled = true;
+  $('purpleBacktestStatus').textContent = "Running historical simulation from cached candles...";
+  $('purpleBacktestMeta').textContent = "Running";
+  setNotes("Running Purple Touch historical simulation. Larger symbol/date selections may take several minutes.");
+  try {
+    const data = await postApi("/api/krishna-purple-touch-backtest", payload);
+    state.lastPurpleBacktest = data;
+    renderPurpleBacktest(data);
+    $('purpleBacktestDownloadBtn').disabled = !(data.trades || []).length;
+    setNotes(`Purple Touch backtest completed with ${data.trade_count || 0} historical trade(s).`);
+  } catch (error) {
+    $('purpleBacktestMeta').textContent = "Failed";
+    $('purpleBacktestStatus').textContent = error.message;
+    setNotes(error.message, true);
+  } finally {
+    $('purpleBacktestRunBtn').disabled = false;
+  }
+}
+
+function renderPurpleBacktest(data) {
+  const metrics = data.metrics || {};
+  $('purpleBacktestMeta').textContent = `${fmtInt(data.analyzed_symbols || 0)} symbols / ${fmtInt(data.signal_count || 0)} signals / ${fmtInt(data.trade_count || 0)} trades`;
+  $('purpleBacktestStatus').textContent = `Completed. ${fmtInt(data.suppressed_entries || 0)} entry event(s) were suppressed by open-trade/final-entry precedence.`;
+  const cards = [
+    ["Trades", fmtInt(metrics.trades || 0)],
+    ["Win rate", fmtPct(metrics.win_rate_percent)],
+    ["Average return", fmtPct(metrics.average_return_percent)],
+    ["Average R", metrics.average_r_multiple === null || metrics.average_r_multiple === undefined ? "-" : `${fmt(metrics.average_r_multiple)}R`],
+    ["Profit factor", fmt(metrics.profit_factor)],
+    ["Expectancy", fmtPct(metrics.expectancy_percent)],
+    ["Max drawdown", fmtPct(metrics.max_drawdown_percent)],
+    ["Aggregate return", fmtPct(metrics.ending_return_percent)],
+    ["Target", metrics.target_r_multiple === null || metrics.target_r_multiple === undefined ? "-" : `${fmt(metrics.target_r_multiple)}R`],
+    ["Break-even win rate", fmtPct(metrics.break_even_win_rate_percent)],
+    ["Sample", metrics.sample_quality === "useful" ? "30+ trades" : "Small (<30)"],
+  ];
+  $('purpleBacktestCards').innerHTML = cards
+    .map(([label, value]) => `<div class="compact-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`)
+    .join("");
+  $('purpleBacktestNotes').innerHTML = [
+    ...((data.summary && data.summary.points) || []),
+    ...((data.summary && data.summary.limitations) || []),
+    ...(data.errors || []).slice(0, 10).map((row) => `${row.symbol || ""} ${row.profile || row.timeframe || ""}: ${row.error}`.trim()),
+  ].map((point) => `<div>${escapeHtml(point)}</div>`).join("");
+  $('purpleBacktestProfileBody').innerHTML = purpleBacktestPerformanceRows(data.profile_performance || [], "profile", "No profile trades were generated.");
+  $('purpleBacktestEntryBody').innerHTML = purpleBacktestPerformanceRows(data.entry_performance || [], "entry_kind", "No entry-type trades were generated.");
+  $('purpleBacktestCoverageBody').innerHTML = (data.coverage || []).length
+    ? data.coverage.map((row) => `
+      <tr>
+        <td>${escapeHtml(row.symbol)}</td>
+        <td>${escapeHtml(purpleProfileLabel(row.profile))}</td>
+        <td><span class="status-badge status-${escapeHtml(row.status)}">${escapeHtml(row.status)}</span></td>
+        <td>${fmtDateTime(row.from)}</td>
+        <td>${fmtDateTime(row.to)}</td>
+        <td>${escapeHtml((row.missing_timeframes || []).join(", ") || "-")}</td>
+      </tr>`).join("")
+    : emptyTableRow(6, "No coverage rows are available.");
+  const trades = data.trades || [];
+  $('purpleBacktestTradesBody').innerHTML = trades.length
+    ? trades.slice(0, 250).map((trade) => `
+      <tr>
+        <td>${escapeHtml(trade.symbol)}</td>
+        <td>${escapeHtml(purpleProfileLabel(trade.profile))}</td>
+        <td>${escapeHtml(trade.entry_kind)}</td>
+        <td>${fmtDateTime(trade.entry_time)}</td>
+        <td>${fmtDateTime(trade.exit_time)}<div class="cell-note">${escapeHtml(durationMinutes(trade.holding_minutes))}</div></td>
+        <td>${fmt(trade.entry_price)} / ${fmt(trade.stop_loss)} / ${fmt(trade.target)}</td>
+        <td>${fmt(trade.exit_price)}</td>
+        <td class="${pointClass(trade.net_return_percent)}">${fmtPct(trade.net_return_percent)}</td>
+        <td class="${pointClass(trade.r_multiple)}">${trade.r_multiple === null || trade.r_multiple === undefined ? "-" : `${fmt(trade.r_multiple)}R`}</td>
+        <td>${escapeHtml(trade.exit_reason)}${trade.intrabar_ambiguous ? '<div class="cell-note">stop/target same bar; stop first</div>' : ""}</td>
+      </tr>`).join("")
+    : emptyTableRow(10, "No historical trades matched these settings.");
+}
+
+function purpleBacktestPerformanceRows(rows, key, emptyMessage) {
+  if (!rows.length) return emptyTableRow(6, emptyMessage);
+  return rows.map((row) => `
+    <tr>
+      <td>${escapeHtml(key === "profile" ? purpleProfileLabel(row[key]) : row[key])}</td>
+      <td>${fmtInt(row.trades)}</td>
+      <td>${fmtPct(row.win_rate_percent)}</td>
+      <td class="${pointClass(row.average_return_percent)}">${fmtPct(row.average_return_percent)}</td>
+      <td class="${pointClass(row.average_r_multiple)}">${row.average_r_multiple === null || row.average_r_multiple === undefined ? "-" : `${fmt(row.average_r_multiple)}R`}</td>
+      <td>${fmt(row.profit_factor)}</td>
+    </tr>`).join("");
+}
+
+function durationMinutes(value) {
+  const minutes = Number(value || 0);
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const rest = Math.floor(minutes % 60);
+  if (days) return `${days}d ${hours}h ${rest}m`;
+  if (hours) return `${hours}h ${rest}m`;
+  return `${rest}m`;
+}
+
+function downloadPurpleBacktestTrades() {
+  const rows = state.lastPurpleBacktest?.trades || [];
+  downloadCsv("purple_touch_backtest_trades.csv", rows, [
+    { label: "Symbol", value: (row) => row.symbol },
+    { label: "Profile", value: (row) => row.profile },
+    { label: "Entry Type", value: (row) => row.entry_kind },
+    { label: "Signal Time", value: (row) => row.signal_time },
+    { label: "Entry Time", value: (row) => row.entry_time },
+    { label: "Exit Time", value: (row) => row.exit_time },
+    { label: "Entry", value: (row) => row.entry_price },
+    { label: "Stop", value: (row) => row.stop_loss },
+    { label: "Target", value: (row) => row.target },
+    { label: "Exit", value: (row) => row.exit_price },
+    { label: "Exit Reason", value: (row) => row.exit_reason },
+    { label: "Net Return %", value: (row) => row.net_return_percent },
+    { label: "R Multiple", value: (row) => row.r_multiple },
+    { label: "Holding Minutes", value: (row) => row.holding_minutes },
+    { label: "Score", value: (row) => row.score },
+  ]);
 }
 
 async function loadStrategies() {
@@ -3483,6 +3649,8 @@ $("purpleExitPrev").addEventListener("click", () => { state.purplePages.exit -= 
 $("purpleExitNext").addEventListener("click", () => { state.purplePages.exit += 1; loadPurpleAlerts(); });
 $("purpleTradePrev").addEventListener("click", () => { state.purplePages.trades -= 1; loadPurpleAlerts(); });
 $("purpleTradeNext").addEventListener("click", () => { state.purplePages.trades += 1; loadPurpleAlerts(); });
+$("purpleBacktestRunBtn").addEventListener("click", runPurpleBacktest);
+$("purpleBacktestDownloadBtn").addEventListener("click", downloadPurpleBacktestTrades);
 $("genericStrategySelect").addEventListener("change", populateStrategyParams);
 $("genericBacktestRunBtn").addEventListener("click", runGenericBacktest);
 $("backtestRunBtn").addEventListener("click", runKrishnaBacktest);
@@ -3524,6 +3692,7 @@ document.querySelectorAll("[data-tab-target]").forEach((button) => {
 });
 enhanceCollapsibleSections();
 updatePurpleDefaults();
+setPurpleBacktestDefaults();
 updatePurpleMonitorUi();
 renderPurpleProfileProgress();
 loadPurpleAlerts();

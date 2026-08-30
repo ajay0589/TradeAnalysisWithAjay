@@ -32,6 +32,10 @@ from trading_analysis.analysis.krishna_setup import (
     scan_krishna_purple_step1_candidate,
     scan_krishna_purple_touch_setup,
 )
+from trading_analysis.analysis.krishna_purple_backtest import (
+    PurpleTouchBacktestConfig,
+    backtest_krishna_purple_touch,
+)
 from trading_analysis.analysis.market_structure import analyze_market_structure
 from trading_analysis.analysis.options import (
     analyze_option_chain,
@@ -1381,7 +1385,10 @@ class AnalysisService:
             if not alerts_allowed:
                 continue
             for row in scan.get("results") or []:
-                for entry_kind in ("early", "final"):
+                # Final is evaluated first. If it is active, the repository suppresses
+                # a later early entry for this symbol/profile. An early trade opened
+                # on an earlier scan may remain open while final confirmation develops.
+                for entry_kind in ("final", "early"):
                     entry = row.get(f"{entry_kind}_entry") or {}
                     if entry.get("status") != "entry_candidate":
                         continue
@@ -1454,7 +1461,11 @@ class AnalysisService:
                 "points": [
                     "Live alert scan checks Monthly, Weekly, and Daily purple-touch profiles together.",
                     "Entry alerts get a trade ID and remain open until the configured exit timeframe closes below yellow.",
-                    "Duplicate entry alerts are suppressed while the same symbol/timeframe/entry kind trade is already open.",
+                    "Each stock/profile can hold one early and one final trade; final confirmation suppresses any later early entry.",
+                    "Because Monthly, Weekly, and Daily are independent, one stock can have at most six open trade IDs: early plus final in each of three profiles.",
+                    "An early trade may remain open while the same stock/profile continues toward final confirmation.",
+                    "A closed final trade also suppresses a later early alert from the same mapped Purple Touch candle; a new touch candle starts a new setup lifecycle.",
+                    "Duplicate entry alerts are suppressed for the same symbol, profile, entry kind, and mapped Purple Touch candle.",
                     "Cached candles are analyzed even outside market hours so Step 1 and strict candidates remain visible.",
                     "Fresh entry/exit alerts and Telegram delivery are gated to NSE market hours unless force is enabled for testing.",
                     "This is read-only alert tracking for manual review, not order placement.",
@@ -1672,6 +1683,44 @@ class AnalysisService:
                 1,
                 "Entry mode: daily Krishna filter first, then derived 2-hour trigger where close is above yellow Chande Kroll and yellow is below VWMA20.",
             )
+        return payload
+
+    def backtest_krishna_purple_touch(
+        self,
+        symbols: list[str] | None = None,
+        params: dict[str, Any] | None = None,
+        limit_symbols: int | None = 20,
+    ) -> dict[str, Any]:
+        config = PurpleTouchBacktestConfig.from_mapping(params or {})
+        requested = [str(symbol).strip().upper() for symbol in (symbols or []) if str(symbol).strip()]
+        candidates = requested or self._watchlist_symbols()
+        if limit_symbols is not None:
+            candidates = candidates[: max(1, int(limit_symbols))]
+        required_timeframes = {"day"}
+        for profile_key in config.profiles:
+            profile = krishna_purple_profile(profile_key)
+            required_timeframes.update(
+                {profile.early_timeframe, profile.final_timeframe, profile.exit_timeframe}
+            )
+        window = candle_window(to_date=config.to_date)
+        symbol_candles: dict[str, dict[str, list[Any]]] = {}
+        load_errors: list[dict[str, str]] = []
+        for symbol in candidates:
+            rows: dict[str, list[Any]] = {}
+            for timeframe in sorted(required_timeframes):
+                try:
+                    candles, _summary = self._load_timeframe_with_summary(symbol, timeframe, window)
+                    rows[timeframe] = candles
+                except FileNotFoundError:
+                    rows[timeframe] = []
+                except Exception as exc:
+                    rows[timeframe] = []
+                    load_errors.append({"symbol": symbol, "timeframe": timeframe, "error": str(exc)})
+            symbol_candles[symbol] = rows
+        payload = backtest_krishna_purple_touch(symbol_candles, config)
+        payload["requested_symbols"] = requested
+        payload["limit_symbols"] = limit_symbols
+        payload["errors"] = load_errors + list(payload.get("errors") or [])
         return payload
 
     def strategies(self) -> dict[str, Any]:

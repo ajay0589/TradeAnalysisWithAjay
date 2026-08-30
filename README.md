@@ -200,6 +200,23 @@ The visual workflow, confirmed rules, timeframe matrix, entry/exit lifecycle, UI
 
 Purple Touch entry alerts and trade lifecycle records are retained in local SQLite storage for audit and setup-quality review. The UI provides profile, entry type, lifecycle status, symbol, date, and sorting controls; it does not automatically purge open or closed Purple Touch trades.
 
+Purple Touch lifecycle precedence:
+
+- Monthly, Weekly, and Daily are independent setup profiles.
+- A symbol can have one early and one final lifecycle row per profile, for a theoretical maximum of six open trade IDs across all three profiles.
+- An early entry may be followed by a final entry for the same mapped Purple Touch setup.
+- Once final entry has been recorded, a later early entry from that same mapped touch candle is suppressed, even if the final lifecycle row has subsequently closed.
+- A newly mapped Purple Touch candle starts a new setup lifecycle.
+
+The `Purple Touch` tab also includes a cached-candle historical simulation with date range, symbol/profile selection, early/final mode, touch tolerance, score threshold, stop model, target R, holding limit, slippage, costs, capital, and risk-per-trade controls. It uses next-candle-open entry and only candles available at each historical event. Results include profile and entry-type performance, trade rows, data coverage, win rate, expectancy, average R, profit factor, and maximum drawdown.
+
+Risk/reward interpretation:
+
+- `1R` is the initial per-share distance from entry to stop. The default setup stop is the lower of Candle 1 and Candle 2 lows, with a configurable percentage fallback.
+- A `2R` target is twice that initial risk. The configured yellow-line exit or maximum holding period may close a simulation before the target.
+- A positive average R/expectancy and profit factor above 1 show positive historical results for that sample, but must be reviewed with drawdown, costs, profile consistency, and sample size. A minimum of 30 trades is only a first evidence checkpoint, not proof of future performance.
+- The simulation uses underlying-stock candles, not option premiums, IV, theta, margin, strike liquidity, or expiry effects. Its aggregate return does not reserve capital across overlapping symbols.
+
 Regenerate the PDF after material rule changes:
 
 ```powershell

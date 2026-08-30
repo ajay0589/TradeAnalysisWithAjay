@@ -356,6 +356,22 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         send_telegram=bool(payload.get("send_telegram", True)),
                     )
                 )
+            elif parsed.path == "/api/krishna-purple-touch-backtest":
+                payload = self._read_json()
+                raw_symbols = payload.get("symbols")
+                if isinstance(raw_symbols, str):
+                    symbols = _split_symbols(raw_symbols)
+                elif raw_symbols:
+                    symbols = [str(symbol).strip() for symbol in raw_symbols if str(symbol).strip()]
+                else:
+                    symbols = None
+                self._send_json(
+                    self.service.backtest_krishna_purple_touch(
+                        symbols=symbols,
+                        params=payload.get("params") or {},
+                        limit_symbols=_optional_limit(str(payload.get("limit_symbols") or "20")),
+                    )
+                )
             elif parsed.path == "/api/option-chain-monitor/start":
                 payload = self._read_json()
                 raw_symbols = payload.get("symbols") or []

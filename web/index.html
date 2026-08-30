@@ -1529,6 +1529,154 @@
                   <button id="purpleTradeNext" type="button">Next</button>
                 </div>
               </section>
+
+              <section class="table-panel purple-backtest-panel">
+                <div class="panel-head">
+                  <h2>Purple Touch Historical Simulation</h2>
+                  <span id="purpleBacktestMeta">Not run</span>
+                </div>
+                <div class="ops-body">
+                  <div class="purple-backtest-controls">
+                    <div class="control-group profile-picker" title="Profiles are evaluated independently using their configured touch, confirmation, early, final, and exit timeframes.">
+                      <span class="control-label">Profiles</span>
+                      <label><input id="purpleBtMonth" type="checkbox" checked /> Monthly</label>
+                      <label><input id="purpleBtWeek" type="checkbox" checked /> Weekly</label>
+                      <label><input id="purpleBtDay" type="checkbox" checked /> Daily</label>
+                    </div>
+                    <label class="control-group" for="purpleBtFrom" title="First date on which a new historical signal may be generated. Earlier candles are retained only as indicator warm-up data.">
+                      <span class="control-label">From</span>
+                      <input id="purpleBtFrom" type="date" />
+                    </label>
+                    <label class="control-group" for="purpleBtTo" title="Last date included in the historical simulation.">
+                      <span class="control-label">To</span>
+                      <input id="purpleBtTo" type="date" />
+                    </label>
+                    <label class="control-group" for="purpleBtSymbols" title="Optional comma-separated F&O symbols. Leave blank to use the watchlist up to the symbol limit.">
+                      <span class="control-label">Symbols</span>
+                      <input id="purpleBtSymbols" placeholder="e.g. VEDL, CIPLA" />
+                    </label>
+                    <label class="control-group" for="purpleBtLimit" title="Maximum watchlist symbols loaded when Symbols is blank. Larger runs can take several minutes.">
+                      <span class="control-label">Symbol limit</span>
+                      <input id="purpleBtLimit" type="number" min="1" max="250" value="5" />
+                    </label>
+                    <label class="control-group" for="purpleBtEntryMode" title="Both applies lifecycle precedence: early may be followed by final; final suppresses a later early for the same stock/profile setup.">
+                      <span class="control-label">Entry mode</span>
+                      <select id="purpleBtEntryMode">
+                        <option value="both">Early then final</option>
+                        <option value="early">Early only</option>
+                        <option value="final">Final only</option>
+                      </select>
+                    </label>
+                    <label class="control-group" for="purpleBtDistance" title="Maximum higher-timeframe candle distance from purple EMA9. Smaller values test stricter touch definitions.">
+                      <span class="control-label">Touch distance</span>
+                      <select id="purpleBtDistance">
+                        <option value="0">Exact 0.00%</option>
+                        <option value="0.2">Within 0.20%</option>
+                        <option value="0.5">Within 0.50%</option>
+                        <option value="1">Within 1.00%</option>
+                        <option value="1.5">Within 1.50%</option>
+                        <option value="2">Within 2.00%</option>
+                        <option value="3" selected>Within 3.00%</option>
+                      </select>
+                    </label>
+                    <label class="control-group" for="purpleBtMinScore" title="Rejects historical candidates below this scanner score.">
+                      <span class="control-label">Minimum score</span>
+                      <input id="purpleBtMinScore" type="number" min="0" max="100" value="60" />
+                    </label>
+                    <label class="control-group" for="purpleBtStopMode" title="Setup invalidation uses the lower of Candle 1 and Candle 2 lows. Percentage uses a fixed distance below entry.">
+                      <span class="control-label">Stop model</span>
+                      <select id="purpleBtStopMode">
+                        <option value="setup_invalidation">C1/C2 invalidation</option>
+                        <option value="percent">Fixed percentage</option>
+                        <option value="none">Yellow exit only</option>
+                      </select>
+                    </label>
+                    <label class="control-group" for="purpleBtStopPercent" title="Used for fixed percentage stop and as fallback when C1/C2 invalidation is unavailable.">
+                      <span class="control-label">Stop % / fallback</span>
+                      <input id="purpleBtStopPercent" type="number" min="0.1" step="0.1" value="3" />
+                    </label>
+                    <label class="control-group" for="purpleBtTargetR" title="Target distance in multiples of initial risk. At 2R, reward is twice the entry-to-stop risk.">
+                      <span class="control-label">Target R</span>
+                      <input id="purpleBtTargetR" type="number" min="0" step="0.25" value="2" />
+                    </label>
+                    <label class="control-group" for="purpleBtMaxHold" title="Optional safety exit after this many exit-timeframe bars. Zero keeps the yellow exit or end-of-data behavior.">
+                      <span class="control-label">Max holding bars</span>
+                      <input id="purpleBtMaxHold" type="number" min="0" value="0" />
+                    </label>
+                    <label class="control-group" for="purpleBtCapital" title="Reference capital used only for risk-sized quantity and simulated currency P&L.">
+                      <span class="control-label">Capital</span>
+                      <input id="purpleBtCapital" type="number" min="1000" step="10000" value="1000000" />
+                    </label>
+                    <label class="control-group" for="purpleBtRiskPercent" title="Capital risk allocated per entry when an initial stop is available.">
+                      <span class="control-label">Risk per trade %</span>
+                      <input id="purpleBtRiskPercent" type="number" min="0.1" step="0.1" value="1" />
+                    </label>
+                    <label class="control-group" for="purpleBtSlippage" title="Entry and exit price allowance in basis points. 10 bps equals 0.10%.">
+                      <span class="control-label">Slippage bps</span>
+                      <input id="purpleBtSlippage" type="number" min="0" step="1" value="5" />
+                    </label>
+                    <label class="control-group" for="purpleBtCosts" title="Round-trip brokerage, taxes, and other cost allowance in basis points.">
+                      <span class="control-label">Costs bps</span>
+                      <input id="purpleBtCosts" type="number" min="0" step="1" value="10" />
+                    </label>
+                  </div>
+                  <div class="button-row">
+                    <button id="purpleBacktestRunBtn" type="button">Run Purple Touch backtest</button>
+                    <button id="purpleBacktestDownloadBtn" type="button" disabled>Download trade CSV</button>
+                  </div>
+                  <details class="backtest-explainer">
+                    <summary>How risk/reward and result quality are measured</summary>
+                    <div class="backtest-explainer-grid">
+                      <div><strong>1R risk</strong><span>Entry minus the initial stop. The default stop is the lower of Candle 1 and Candle 2 lows.</span></div>
+                      <div><strong>Target R</strong><span>At 2R, the target distance is twice the initial risk. Yellow-line exit can close the simulation earlier.</span></div>
+                      <div><strong>Average R</strong><span>Average result measured in units of initial risk. Above 0 means positive historical expectancy after configured costs.</span></div>
+                      <div><strong>Profit factor</strong><span>Gross historical gains divided by gross historical losses. Above 1 means gains exceeded losses in the selected sample.</span></div>
+                      <div><strong>Break-even win rate</strong><span>For a pure 2R target and 1R loss it is 33.33%; actual break-even differs when yellow or time exits occur.</span></div>
+                      <div><strong>Evidence check</strong><span>Review expectancy, drawdown, at least 30 trades, profile consistency, costs, and out-of-sample dates together.</span></div>
+                    </div>
+                  </details>
+                  <div id="purpleBacktestStatus" class="mini-status">Select a date range and run the historical simulation.</div>
+                  <div id="purpleBacktestCards" class="compact-metrics"></div>
+                  <div id="purpleBacktestNotes" class="mini-list"></div>
+                </div>
+
+                <div class="panel-subsection">
+                  <h3>Profile Performance</h3>
+                  <div class="wide-table">
+                    <table class="krishna-table">
+                      <thead><tr><th>Profile</th><th>Trades</th><th>Win Rate</th><th>Avg Return</th><th>Avg R</th><th>Profit Factor</th></tr></thead>
+                      <tbody id="purpleBacktestProfileBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+                <div class="panel-subsection">
+                  <h3>Entry-Type Performance</h3>
+                  <div class="wide-table">
+                    <table class="krishna-table">
+                      <thead><tr><th>Entry</th><th>Trades</th><th>Win Rate</th><th>Avg Return</th><th>Avg R</th><th>Profit Factor</th></tr></thead>
+                      <tbody id="purpleBacktestEntryBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+                <div class="panel-subsection">
+                  <h3>Data Coverage</h3>
+                  <div class="wide-table">
+                    <table class="krishna-table">
+                      <thead><tr><th>Symbol</th><th>Profile</th><th>Status</th><th>Usable From</th><th>Usable To</th><th>Missing</th></tr></thead>
+                      <tbody id="purpleBacktestCoverageBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+                <div class="panel-subsection">
+                  <h3>Historical Trades</h3>
+                  <div class="wide-table">
+                    <table class="krishna-table">
+                      <thead><tr><th>Symbol</th><th>Profile</th><th>Entry</th><th>Entry Time</th><th>Exit Time</th><th>Entry / Stop / Target</th><th>Exit</th><th>Return</th><th>R</th><th>Reason</th></tr></thead>
+                      <tbody id="purpleBacktestTradesBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </section>
             </section>
           </section>
         </section>

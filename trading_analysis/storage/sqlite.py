@@ -540,9 +540,54 @@ class KrishnaPurpleAlertRepository:
     def open_entry_alert(self, match: dict[str, Any], entry: dict[str, Any], entry_kind: str) -> dict[str, Any]:
         symbol = str(match.get("symbol") or "").upper()
         purple_timeframe = str(match.get("purple_timeframe") or "")
+        setup_touch_timestamp = str(entry.get("touch_timestamp") or "")
+        if entry_kind == "early":
+            final_setup_trade = self.trade_for_setup(
+                symbol,
+                purple_timeframe,
+                "final",
+                setup_touch_timestamp,
+            )
+            if final_setup_trade:
+                return {
+                    "created": False,
+                    "suppressed": True,
+                    "reason": "final_entry_already_recorded_for_setup",
+                    "trade": final_setup_trade,
+                    "alert": None,
+                }
+            final_trade = self.open_trade(symbol, purple_timeframe, "final")
+            if final_trade:
+                return {
+                    "created": False,
+                    "suppressed": True,
+                    "reason": "final_entry_already_open",
+                    "trade": final_trade,
+                    "alert": None,
+                }
+        setup_trade = self.trade_for_setup(
+            symbol,
+            purple_timeframe,
+            entry_kind,
+            setup_touch_timestamp,
+        )
+        if setup_trade:
+            return {
+                "created": False,
+                "suppressed": True,
+                "reason": f"{entry_kind}_entry_already_recorded_for_setup",
+                "trade": setup_trade,
+                "alert": None,
+            }
         existing = self.open_trade(symbol, purple_timeframe, entry_kind)
         if existing:
-            return {"created": False, "trade": existing, "alert": None}
+            return {
+                "created": False,
+                "suppressed": True,
+                "reason": f"{entry_kind}_entry_already_open",
+                "trade": existing,
+                "alert": None,
+            }
 
         trade_id = _purple_trade_id(symbol, purple_timeframe, entry_kind)
         now = _now()
@@ -663,6 +708,32 @@ class KrishnaPurpleAlertRepository:
                 (symbol.upper(), purple_timeframe, entry_kind),
             ).fetchone()
         return _purple_trade_row(row) if row else None
+
+    def trade_for_setup(
+        self,
+        symbol: str,
+        purple_timeframe: str,
+        entry_kind: str,
+        touch_timestamp: str | None,
+    ) -> dict[str, Any] | None:
+        """Return a prior lifecycle row for the same mapped Purple Touch candle."""
+        if not touch_timestamp:
+            return None
+        with _connection(self.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM krishna_purple_trades
+                WHERE symbol = ? AND purple_timeframe = ? AND entry_kind = ?
+                ORDER BY opened_at DESC
+                """,
+                (symbol.upper(), purple_timeframe, entry_kind),
+            ).fetchall()
+        for row in rows:
+            trade = _purple_trade_row(row)
+            saved_touch = str(((trade.get("metadata") or {}).get("entry") or {}).get("touch_timestamp") or "")
+            if saved_touch == str(touch_timestamp):
+                return trade
+        return None
 
     def list_open_trades(
         self,
