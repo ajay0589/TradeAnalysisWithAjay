@@ -1062,7 +1062,7 @@
                       <tr><td>Status / Blockers</td><td>qualified / step1_only</td><td>Qualified passed higher-timeframe filters. Step1-only shows the exact blocker.</td><td>Alerts require a strict setup plus entry confirmation.</td></tr>
                       <tr><td>Entry Alert History</td><td>Early / Final</td><td>Historical entry events. Every entry event creates one unique trade ID.</td><td>Trade remains open until its exit condition triggers.</td></tr>
                       <tr><td>Exit Alerts</td><td>Closed trade events</td><td>Created when the configured exit-timeframe candle closes below yellow.</td><td>Closes the matching trade ID.</td></tr>
-                      <tr><td>Open Trade IDs</td><td>Currently open</td><td>Entry alerts that do not yet have an exit alert.</td><td>All-time entries should equal open plus closed trades.</td></tr>
+                      <tr><td>Trade Lifecycle</td><td>Open / Closed / All</td><td>Links each entry timestamp to its exit timestamp using the same trade ID and calculates the holding duration.</td><td>History is retained locally; use status, symbol, date, profile, entry-type, and sort controls instead of deleting records.</td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -1136,6 +1136,16 @@
                       <option value="all">All entry states</option>
                       <option value="early">Early entry ready</option>
                       <option value="final">Final entry ready</option>
+                      <option value="waiting">Waiting</option>
+                      <option value="discarded">Discarded</option>
+                    </select>
+                  </label>
+                  <label class="table-filter" for="purpleStep1StatusFilter">
+                    <span>Setup status</span>
+                    <select id="purpleStep1StatusFilter">
+                      <option value="all">All setup states</option>
+                      <option value="qualified">Qualified</option>
+                      <option value="step1_only">Step 1 only</option>
                     </select>
                   </label>
                   <label class="table-filter" for="purpleStep1DistanceFilter">
@@ -1148,6 +1158,16 @@
                       <option value="1.5">Within 1.50%</option>
                       <option value="2">Within 2.00%</option>
                       <option value="3" selected>Within 3.00%</option>
+                    </select>
+                  </label>
+                  <label class="table-filter" for="purpleStep1Sort">
+                    <span>Sort by</span>
+                    <select id="purpleStep1Sort">
+                      <option value="distance_asc">Distance: nearest first</option>
+                      <option value="distance_desc">Distance: farthest first</option>
+                      <option value="profile_asc">Profile: Monthly to Daily</option>
+                      <option value="symbol_asc">Symbol: A to Z</option>
+                      <option value="status_asc">Setup status</option>
                     </select>
                   </label>
                 </div>
@@ -1203,6 +1223,8 @@
                       <option value="all">All entry states</option>
                       <option value="early">Early entry ready</option>
                       <option value="final">Final entry ready</option>
+                      <option value="waiting">Waiting</option>
+                      <option value="discarded">Discarded</option>
                     </select>
                   </label>
                   <label class="table-filter" for="purpleCandidateDistanceFilter">
@@ -1215,6 +1237,16 @@
                       <option value="1.5">Within 1.50%</option>
                       <option value="2">Within 2.00%</option>
                       <option value="3" selected>Within 3.00%</option>
+                    </select>
+                  </label>
+                  <label class="table-filter" for="purpleCandidateSort">
+                    <span>Sort by</span>
+                    <select id="purpleCandidateSort">
+                      <option value="score_desc">Score: highest first</option>
+                      <option value="distance_asc">Distance: nearest first</option>
+                      <option value="distance_desc">Distance: farthest first</option>
+                      <option value="profile_asc">Profile: Monthly to Daily</option>
+                      <option value="symbol_asc">Symbol: A to Z</option>
                     </select>
                   </label>
                   <button id="purpleCopyBtn" type="button">Copy symbols</button>
@@ -1267,7 +1299,7 @@
                   <span id="purpleEntryAlertMeta">0 alert(s)</span>
                 </div>
                 <div class="ops-body">
-                  <p class="helper-text">Historical entry events are retained here. A new trade ID is created when a strict Monthly, Weekly, or Daily setup meets its early or final entry confirmation during market hours.</p>
+                  <p class="helper-text">Historical entry events are retained locally for audit and review. A new trade ID is created when a strict Monthly, Weekly, or Daily setup meets its early or final entry confirmation during market hours.</p>
                 </div>
                 <div class="table-actions">
                   <label class="table-filter" for="purpleEntryAlertProfileFilter">
@@ -1285,6 +1317,36 @@
                       <option value="all">Early and final</option>
                       <option value="early">Early entry</option>
                       <option value="final">Final entry</option>
+                    </select>
+                  </label>
+                  <label class="table-filter" for="purpleEntryAlertStatusFilter">
+                    <span>Trade status</span>
+                    <select id="purpleEntryAlertStatusFilter">
+                      <option value="all">Open and closed</option>
+                      <option value="open">Open</option>
+                      <option value="closed">Closed</option>
+                    </select>
+                  </label>
+                  <label class="table-filter" for="purpleEntryAlertSymbolFilter">
+                    <span>Symbol</span>
+                    <input id="purpleEntryAlertSymbolFilter" placeholder="All symbols" />
+                  </label>
+                  <label class="table-filter" for="purpleEntryAlertFromFilter">
+                    <span>From</span>
+                    <input id="purpleEntryAlertFromFilter" type="date" />
+                  </label>
+                  <label class="table-filter" for="purpleEntryAlertToFilter">
+                    <span>To</span>
+                    <input id="purpleEntryAlertToFilter" type="date" />
+                  </label>
+                  <label class="table-filter" for="purpleEntryAlertSort">
+                    <span>Sort by</span>
+                    <select id="purpleEntryAlertSort">
+                      <option value="created_at:desc">Newest first</option>
+                      <option value="created_at:asc">Oldest first</option>
+                      <option value="symbol:asc">Symbol: A to Z</option>
+                      <option value="profile:asc">Profile</option>
+                      <option value="score:desc">Score: highest first</option>
                     </select>
                   </label>
                 </div>
@@ -1338,6 +1400,27 @@
                       <option value="final">Final entry</option>
                     </select>
                   </label>
+                  <label class="table-filter" for="purpleExitAlertSymbolFilter">
+                    <span>Symbol</span>
+                    <input id="purpleExitAlertSymbolFilter" placeholder="All symbols" />
+                  </label>
+                  <label class="table-filter" for="purpleExitAlertFromFilter">
+                    <span>From</span>
+                    <input id="purpleExitAlertFromFilter" type="date" />
+                  </label>
+                  <label class="table-filter" for="purpleExitAlertToFilter">
+                    <span>To</span>
+                    <input id="purpleExitAlertToFilter" type="date" />
+                  </label>
+                  <label class="table-filter" for="purpleExitAlertSort">
+                    <span>Sort by</span>
+                    <select id="purpleExitAlertSort">
+                      <option value="created_at:desc">Newest first</option>
+                      <option value="created_at:asc">Oldest first</option>
+                      <option value="symbol:asc">Symbol: A to Z</option>
+                      <option value="profile:asc">Profile</option>
+                    </select>
+                  </label>
                 </div>
                 <div class="wide-table">
                   <table class="krishna-table">
@@ -1365,11 +1448,11 @@
 
               <section class="table-panel">
                 <div class="panel-head">
-                  <h2>Open Trade IDs</h2>
-                  <span id="purpleOpenTradeMeta">0 open</span>
+                  <h2>Trade Lifecycle</h2>
+                  <span id="purpleOpenTradeMeta">0 trade(s)</span>
                 </div>
                 <div class="ops-body">
-                  <p class="helper-text">These are active entry alerts awaiting their matching exit condition. The same trade ID links the future exit alert back to its entry.</p>
+                  <p class="helper-text">Entry and exit timestamps are retained locally. Open duration uses the current time; closed duration is the difference between entry and exit timestamps. History is not automatically deleted.</p>
                 </div>
                 <div class="table-actions">
                   <label class="table-filter" for="purpleTradeProfileFilter">
@@ -1389,18 +1472,51 @@
                       <option value="final">Final entry</option>
                     </select>
                   </label>
+                  <label class="table-filter" for="purpleTradeStatusFilter">
+                    <span>Status</span>
+                    <select id="purpleTradeStatusFilter">
+                      <option value="all">Open and closed</option>
+                      <option value="open">Open</option>
+                      <option value="closed">Closed</option>
+                    </select>
+                  </label>
+                  <label class="table-filter" for="purpleTradeSymbolFilter">
+                    <span>Symbol</span>
+                    <input id="purpleTradeSymbolFilter" placeholder="All symbols" />
+                  </label>
+                  <label class="table-filter" for="purpleTradeFromFilter">
+                    <span>Entry from</span>
+                    <input id="purpleTradeFromFilter" type="date" />
+                  </label>
+                  <label class="table-filter" for="purpleTradeToFilter">
+                    <span>Entry to</span>
+                    <input id="purpleTradeToFilter" type="date" />
+                  </label>
+                  <label class="table-filter" for="purpleTradeSort">
+                    <span>Sort by</span>
+                    <select id="purpleTradeSort">
+                      <option value="opened_at:desc">Newest entry first</option>
+                      <option value="opened_at:asc">Oldest entry first</option>
+                      <option value="holding_duration:desc">Longest duration first</option>
+                      <option value="symbol:asc">Symbol: A to Z</option>
+                      <option value="status:asc">Status</option>
+                    </select>
+                  </label>
                 </div>
                 <div class="wide-table">
                   <table class="krishna-table">
                     <thead>
                       <tr>
-                        <th>Open Trade ID</th>
+                        <th>Trade ID</th>
                         <th>Symbol</th>
                         <th>Scan</th>
                         <th>Entry</th>
-                        <th>Opened</th>
-                        <th>Open Time</th>
+                        <th>Status</th>
+                        <th>Entry Time</th>
+                        <th>Exit Time</th>
+                        <th>Holding Duration</th>
                         <th>Entry Price</th>
+                        <th>Exit Price</th>
                         <th>Exit TF</th>
                       </tr>
                     </thead>

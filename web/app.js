@@ -87,6 +87,12 @@ const PURPLE_PROFILES = {
   day: { label: "Daily", early: "10minute", final: "30minute", exit: "10minute", days: 365 },
 };
 
+const PURPLE_PROFILE_ANALYSIS_DETAILS = {
+  month: "Analyzing Monthly touch, derived 5-month confirmation, 2-hour early/exit, and Daily final-entry rules.",
+  week: "Analyzing Weekly touch, Monthly confirmation, 30-minute early/exit, and 2-hour final-entry rules.",
+  day: "Analyzing Daily touch, Weekly confirmation, 10-minute early/exit, and 30-minute final-entry rules.",
+};
+
 const PURPLE_PAGE_SIZE = 25;
 const PURPLE_PROFILE_ORDER = { month: 0, week: 1, day: 2 };
 
@@ -1229,7 +1235,14 @@ function renderPurpleSummary(summary) {
 
 function renderPurpleResults(rows = null) {
   if (Array.isArray(rows)) state.lastPurpleRows = rows;
-  const filteredRows = filterPurpleCandidateRows(state.lastPurpleRows, "purpleCandidateProfileFilter", "purpleCandidateEntryFilter", "purpleCandidateDistanceFilter");
+  const filteredRows = filterPurpleCandidateRows(
+    state.lastPurpleRows,
+    "purpleCandidateProfileFilter",
+    "purpleCandidateEntryFilter",
+    "purpleCandidateDistanceFilter",
+    null,
+    "purpleCandidateSort",
+  );
   const page = paginatePurpleRows(filteredRows, "candidates", "purpleCandidate");
   $("purpleResultMeta").textContent = `${page.rows.length} shown / ${filteredRows.length} filtered / ${state.lastPurpleRows.length} candidate row(s)`;
   $("purpleBody").innerHTML = page.rows.length
@@ -1280,7 +1293,14 @@ function renderPurpleStep1Results(rows = null) {
   const meta = $("purpleStep1Meta");
   const body = $("purpleStep1Body");
   if (!body) return;
-  const filteredRows = filterPurpleCandidateRows(state.lastPurpleStep1Rows, "purpleStep1ProfileFilter", "purpleStep1EntryFilter", "purpleStep1DistanceFilter");
+  const filteredRows = filterPurpleCandidateRows(
+    state.lastPurpleStep1Rows,
+    "purpleStep1ProfileFilter",
+    "purpleStep1EntryFilter",
+    "purpleStep1DistanceFilter",
+    "purpleStep1StatusFilter",
+    "purpleStep1Sort",
+  );
   const page = paginatePurpleRows(filteredRows, "step1", "purpleStep1");
   if (meta) {
     const higherTfPassed = filteredRows.filter((row) => row.full_setup_status === "qualified").length;
@@ -1366,19 +1386,55 @@ function higherConfirmationCell(confirmation = {}) {
   `;
 }
 
-function filterPurpleCandidateRows(rows, profileFilterId, entryFilterId, distanceFilterId = null) {
+function filterPurpleCandidateRows(
+  rows,
+  profileFilterId,
+  entryFilterId,
+  distanceFilterId = null,
+  setupStatusFilterId = null,
+  sortId = null,
+) {
   const profile = $(profileFilterId)?.value || "all";
   const entryKind = $(entryFilterId)?.value || "all";
+  const setupStatus = setupStatusFilterId ? $(setupStatusFilterId)?.value || "all" : "all";
   const maximumDistance = distanceFilterId ? Number($(distanceFilterId)?.value ?? 1) : null;
-  return (rows || []).filter((row) => {
+  const filtered = (rows || []).filter((row) => {
     if (profile !== "all" && row.purple_timeframe !== profile) return false;
+    if (setupStatus !== "all" && row.full_setup_status !== setupStatus) return false;
     if (maximumDistance !== null) {
       const distance = Number(row.purple_range_distance_percent);
       if (!Number.isFinite(distance) || distance > maximumDistance + 1e-9) return false;
     }
     if (entryKind === "all") return true;
-    return (row[`${entryKind}_entry`] || {}).status === "entry_candidate";
+    const earlyStatus = (row.early_entry || {}).status;
+    const finalStatus = (row.final_entry || {}).status;
+    if (entryKind === "early" || entryKind === "final") {
+      return (row[`${entryKind}_entry`] || {}).status === "entry_candidate";
+    }
+    if (entryKind === "waiting") return earlyStatus === "wait" || finalStatus === "wait";
+    if (entryKind === "discarded") return earlyStatus === "discarded" || finalStatus === "discarded";
+    return true;
   });
+  return sortPurpleRows(filtered, sortId ? $(sortId)?.value : null);
+}
+
+function sortPurpleRows(rows, sortValue) {
+  const sorted = [...rows];
+  const profileOrder = (row) => PURPLE_PROFILE_ORDER[row.purple_timeframe] ?? 99;
+  const distance = (row) => {
+    const value = Number(row.purple_range_distance_percent);
+    return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+  };
+  const comparators = {
+    distance_asc: (left, right) => distance(left) - distance(right),
+    distance_desc: (left, right) => distance(right) - distance(left),
+    score_desc: (left, right) => Number(right.score || 0) - Number(left.score || 0),
+    profile_asc: (left, right) => profileOrder(left) - profileOrder(right),
+    symbol_asc: (left, right) => String(left.symbol || "").localeCompare(String(right.symbol || "")),
+    status_asc: (left, right) => String(left.full_setup_status || "").localeCompare(String(right.full_setup_status || "")),
+  };
+  const comparator = comparators[sortValue] || comparators.distance_asc;
+  return sorted.sort((left, right) => comparator(left, right) || profileOrder(left) - profileOrder(right) || String(left.symbol || "").localeCompare(String(right.symbol || "")));
 }
 
 function paginatePurpleRows(rows, pageKey, elementPrefix) {
@@ -1419,14 +1475,14 @@ function entryCell(entry) {
 }
 
 function copyPurpleSymbols() {
-  const symbols = filterPurpleCandidateRows(state.lastPurpleRows, "purpleCandidateProfileFilter", "purpleCandidateEntryFilter", "purpleCandidateDistanceFilter")
+  const symbols = filterPurpleCandidateRows(state.lastPurpleRows, "purpleCandidateProfileFilter", "purpleCandidateEntryFilter", "purpleCandidateDistanceFilter", null, "purpleCandidateSort")
     .map((row) => row.symbol)
     .filter(Boolean);
   copyText(symbols.join(", "), `Copied ${symbols.length} purple-touch symbol(s).`);
 }
 
 function downloadPurpleCsv() {
-  const rows = filterPurpleCandidateRows(state.lastPurpleRows, "purpleCandidateProfileFilter", "purpleCandidateEntryFilter", "purpleCandidateDistanceFilter");
+  const rows = filterPurpleCandidateRows(state.lastPurpleRows, "purpleCandidateProfileFilter", "purpleCandidateEntryFilter", "purpleCandidateDistanceFilter", null, "purpleCandidateSort");
   downloadCsv("krishna_purple_touch_filtered_stocks.csv", rows, [
     { label: "Symbol", value: (row) => row.symbol },
     { label: "Score", value: (row) => row.score },
@@ -1488,6 +1544,11 @@ async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "all" } = {}
       purpleTimeframe,
       85,
     );
+    if (purpleTimeframe === "all") {
+      Object.keys(PURPLE_PROFILES).forEach((profileKey) => {
+        setPurpleProfileProgress(profileKey, "running", PURPLE_PROFILE_ANALYSIS_DETAILS[profileKey], 85);
+      });
+    }
     $("purpleProgressMeta").textContent = "analysis running";
     const data = await postApi("/api/krishna-purple-touch-live-scan", {
       purple_timeframe: purpleTimeframe,
@@ -1623,6 +1684,26 @@ async function loadPurpleAlerts() {
     addPurpleAlertFilterParams(params, "entry", "purpleEntryAlertProfileFilter", "purpleEntryAlertKindFilter");
     addPurpleAlertFilterParams(params, "exit", "purpleExitAlertProfileFilter", "purpleExitAlertKindFilter");
     addPurpleAlertFilterParams(params, "trade", "purpleTradeProfileFilter", "purpleTradeEntryFilter");
+    addPurpleHistoryFilterParams(params, "entry", {
+      statusId: "purpleEntryAlertStatusFilter",
+      symbolId: "purpleEntryAlertSymbolFilter",
+      fromId: "purpleEntryAlertFromFilter",
+      toId: "purpleEntryAlertToFilter",
+      sortId: "purpleEntryAlertSort",
+    });
+    addPurpleHistoryFilterParams(params, "exit", {
+      symbolId: "purpleExitAlertSymbolFilter",
+      fromId: "purpleExitAlertFromFilter",
+      toId: "purpleExitAlertToFilter",
+      sortId: "purpleExitAlertSort",
+    });
+    addPurpleHistoryFilterParams(params, "trade", {
+      statusId: "purpleTradeStatusFilter",
+      symbolId: "purpleTradeSymbolFilter",
+      fromId: "purpleTradeFromFilter",
+      toId: "purpleTradeToFilter",
+      sortId: "purpleTradeSort",
+    });
     renderPurpleAlerts(await api(`/api/krishna-purple-touch-alerts?${params.toString()}`));
   } catch (error) {
     $("purpleAlertMeta").textContent = "alerts unavailable";
@@ -1634,6 +1715,20 @@ function addPurpleAlertFilterParams(params, prefix, profileFilterId, entryFilter
   const entryKind = $(entryFilterId)?.value || "all";
   if (profile !== "all") params.set(`${prefix}_profile`, profile);
   if (entryKind !== "all") params.set(`${prefix}_kind`, entryKind);
+}
+
+function addPurpleHistoryFilterParams(params, prefix, controls) {
+  const status = controls.statusId ? $(controls.statusId)?.value || "all" : "all";
+  const symbol = controls.symbolId ? $(controls.symbolId)?.value.trim() : "";
+  const fromDate = controls.fromId ? $(controls.fromId)?.value : "";
+  const toDate = controls.toId ? $(controls.toId)?.value : "";
+  const [sortBy, sortOrder] = (controls.sortId ? $(controls.sortId)?.value : "created_at:desc").split(":");
+  if (status !== "all" || prefix === "trade") params.set(`${prefix}_status`, status);
+  if (symbol) params.set(`${prefix}_symbol`, symbol);
+  if (fromDate) params.set(`${prefix}_from`, fromDate);
+  if (toDate) params.set(`${prefix}_to`, toDate);
+  params.set(`${prefix}_sort`, sortBy);
+  params.set(`${prefix}_order`, sortOrder || "desc");
 }
 
 function startPurpleAutoMonitor() {
@@ -1706,11 +1801,11 @@ function renderPurpleAlerts(data = null) {
   if (data) {
     state.lastPurpleAlertResponse = data;
     state.lastPurpleAlerts = data.recent_alerts || [];
-    state.lastPurpleTrades = data.open_trades || [];
+    state.lastPurpleTrades = data.trades || data.open_trades || [];
   }
   data = state.lastPurpleAlertResponse || {};
   const alerts = data.recent_alerts || [];
-  const trades = data.open_trades || [];
+  const trades = data.trades || data.open_trades || [];
   const counts = data.alert_counts || {};
   const pagination = data.pagination || {};
   const recentEntryCount = alerts.filter((alert) => alert.alert_type === "entry").length;
@@ -1725,7 +1820,7 @@ function renderPurpleAlerts(data = null) {
   const exitAlerts = Array.isArray(data.exit_alerts)
     ? data.exit_alerts
     : filterPurpleAlertRows(alerts.filter((alert) => alert.alert_type === "exit"), "purpleExitAlertProfileFilter", "purpleExitAlertKindFilter");
-  const openTrades = pagination.trades
+  const lifecycleTrades = pagination.trades
     ? trades
     : filterPurpleAlertRows(trades, "purpleTradeProfileFilter", "purpleTradeEntryFilter");
   const entryFilteredTotal = Number(pagination.entry?.total ?? totalEntryCount);
@@ -1733,7 +1828,8 @@ function renderPurpleAlerts(data = null) {
   const tradeFilteredTotal = Number(pagination.trades?.total ?? totalOpenCount);
   $("purpleEntryAlertMeta").textContent = `${entryAlerts.length} shown / ${entryFilteredTotal} filtered / ${totalEntryCount} historical entry event(s)`;
   $("purpleExitAlertMeta").textContent = `${exitAlerts.length} shown / ${exitFilteredTotal} filtered / ${totalExitCount} total exit alert(s)`;
-  $("purpleOpenTradeMeta").textContent = `${openTrades.length} shown / ${tradeFilteredTotal} filtered / ${totalOpenCount} total open`;
+  const totalLifecycleCount = totalOpenCount + totalClosedCount;
+  $("purpleOpenTradeMeta").textContent = `${lifecycleTrades.length} shown / ${tradeFilteredTotal} filtered / ${totalLifecycleCount} total trade(s)`;
   updatePurpleServerPager("entry", pagination.entry, entryAlerts.length);
   updatePurpleServerPager("exit", pagination.exit, exitAlerts.length);
   updatePurpleServerPager("trades", pagination.trades, openTrades.length);
@@ -1753,8 +1849,9 @@ function renderPurpleAlerts(data = null) {
       : "",
     `Entry alerts created this run: ${fmtMetric(data.entry_alerts_created || 0)}`,
     `Exit alerts created this run: ${fmtMetric(data.exit_alerts_created || 0)}`,
-    `Open trade IDs loaded on this page: ${fmtMetric(openTrades.length)} of ${fmtMetric(tradeFilteredTotal)} filtered (${fmtMetric(totalOpenCount)} total).`,
+    `Trade lifecycle rows loaded on this page: ${fmtMetric(lifecycleTrades.length)} of ${fmtMetric(tradeFilteredTotal)} filtered (${fmtMetric(totalOpenCount)} open, ${fmtMetric(totalClosedCount)} closed).`,
     `Web UI alert history loaded: latest ${alerts.length} event(s) of ${fmtMetric(totalEntryCount + totalExitCount)} total`,
+    data.retention?.automatic_purge === false ? "Purple Touch history retention: no automatic purge; use date/status filters to review retained records." : "",
     `Telegram: ${telegramText(data.telegram)}`,
   ]
     .filter(Boolean)
@@ -1771,8 +1868,8 @@ function renderPurpleAlerts(data = null) {
     .join("");
   $("purpleEntryAlertsBody").innerHTML = renderPurpleAlertTableRows(entryAlerts, "No entry alerts match these filters.", "alert-entry-row");
   $("purpleExitAlertsBody").innerHTML = renderPurpleAlertTableRows(exitAlerts, "No exit alerts match these filters.", "alert-exit-row");
-  $("purpleTradesBody").innerHTML = openTrades.length
-    ? openTrades
+  $("purpleTradesBody").innerHTML = lifecycleTrades.length
+    ? lifecycleTrades
     .map(
       (trade) => `
         <tr>
@@ -1780,15 +1877,18 @@ function renderPurpleAlerts(data = null) {
           <td>${escapeHtml(trade.symbol || "-")}</td>
           <td>${escapeHtml(purpleProfileLabel(trade.purple_timeframe))}</td>
           <td>${escapeHtml(trade.entry_kind || "-")}<div class="cell-note">${escapeHtml(trade.entry_timeframe || "-")}</div></td>
+          <td><span class="${trade.status === "open" ? "points-warn" : "points-positive"}">${escapeHtml(trade.status || "-")}</span></td>
           <td>${fmtDateTime(trade.opened_at)}</td>
-          <td>${escapeHtml(openDuration(trade.opened_at))}</td>
+          <td>${fmtDateTime(trade.closed_at)}</td>
+          <td>${escapeHtml(durationBetween(trade.opened_at, trade.closed_at))}</td>
           <td>${fmt(trade.entry_price)}</td>
+          <td>${fmt(trade.exit_price)}</td>
           <td>${escapeHtml(trade.exit_timeframe || "-")}</td>
         </tr>
       `,
     )
     .join("")
-    : emptyTableRow(8, "No open trade IDs match these filters.");
+    : emptyTableRow(11, "No trade lifecycle records match these filters.");
   document.querySelectorAll("#purpleEntryAlertsBody .linkBtn, #purpleExitAlertsBody .linkBtn").forEach((button) => {
     button.addEventListener("click", () => {
       $("symbolInput").value = button.dataset.symbol;
@@ -1829,7 +1929,7 @@ function renderPurpleAlertTableRows(rows, emptyMessage, rowClass) {
           <td><button class="linkBtn symbol-chip" data-symbol="${escapeHtml(alert.symbol || "")}">${escapeHtml(alert.symbol || "-")}</button></td>
           <td>${escapeHtml(purpleProfileLabel(alert.purple_timeframe))}</td>
           <td>${escapeHtml(alert.entry_kind || "-")}</td>
-          <td>${escapeHtml(alert.status || "-")}</td>
+          <td>${escapeHtml(alert.trade_status || alert.status || "-")}</td>
           <td>${fmt(alert.price)} / ${fmt(alert.yellow_line)}</td>
           <td>${escapeHtml(alert.message || "-")}</td>
         </tr>
@@ -1858,14 +1958,21 @@ function telegramText(status) {
 }
 
 function openDuration(openedAt) {
+  return durationBetween(openedAt, null);
+}
+
+function durationBetween(openedAt, closedAt = null) {
   if (!openedAt) return "-";
   const opened = new Date(openedAt);
-  if (Number.isNaN(opened.getTime())) return "-";
-  const minutes = Math.max(0, Math.floor((Date.now() - opened.getTime()) / 60000));
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
+  const ended = closedAt ? new Date(closedAt) : new Date();
+  if (Number.isNaN(opened.getTime()) || Number.isNaN(ended.getTime())) return "-";
+  const minutes = Math.max(0, Math.floor((ended.getTime() - opened.getTime()) / 60000));
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
   const rest = minutes % 60;
-  return `${hours}h ${rest}m`;
+  if (days) return `${days}d ${hours}h ${rest}m`;
+  if (hours) return `${hours}h ${rest}m`;
+  return `${rest}m`;
 }
 
 async function loadStrategies() {
@@ -3334,17 +3441,34 @@ $("purpleCopyBtn").addEventListener("click", copyPurpleSymbols);
 $("purpleDownloadBtn").addEventListener("click", downloadPurpleCsv);
 $("purpleStep1ProfileFilter").addEventListener("change", () => { state.purplePages.step1 = 1; renderPurpleStep1Results(); });
 $("purpleStep1EntryFilter").addEventListener("change", () => { state.purplePages.step1 = 1; renderPurpleStep1Results(); });
+$("purpleStep1StatusFilter").addEventListener("change", () => { state.purplePages.step1 = 1; renderPurpleStep1Results(); });
 $("purpleStep1DistanceFilter").addEventListener("change", () => { state.purplePages.step1 = 1; renderPurpleStep1Results(); });
+$("purpleStep1Sort").addEventListener("change", () => { state.purplePages.step1 = 1; renderPurpleStep1Results(); });
 $("purpleCandidateProfileFilter").addEventListener("change", () => { state.purplePages.candidates = 1; renderPurpleResults(); });
 $("purpleCandidateEntryFilter").addEventListener("change", () => { state.purplePages.candidates = 1; renderPurpleResults(); });
 $("purpleCandidateDistanceFilter").addEventListener("change", () => { state.purplePages.candidates = 1; renderPurpleResults(); });
+$("purpleCandidateSort").addEventListener("change", () => { state.purplePages.candidates = 1; renderPurpleResults(); });
 [
   ["purpleEntryAlertProfileFilter", "entry"],
   ["purpleEntryAlertKindFilter", "entry"],
+  ["purpleEntryAlertStatusFilter", "entry"],
+  ["purpleEntryAlertSymbolFilter", "entry"],
+  ["purpleEntryAlertFromFilter", "entry"],
+  ["purpleEntryAlertToFilter", "entry"],
+  ["purpleEntryAlertSort", "entry"],
   ["purpleExitAlertProfileFilter", "exit"],
   ["purpleExitAlertKindFilter", "exit"],
+  ["purpleExitAlertSymbolFilter", "exit"],
+  ["purpleExitAlertFromFilter", "exit"],
+  ["purpleExitAlertToFilter", "exit"],
+  ["purpleExitAlertSort", "exit"],
   ["purpleTradeProfileFilter", "trades"],
   ["purpleTradeEntryFilter", "trades"],
+  ["purpleTradeStatusFilter", "trades"],
+  ["purpleTradeSymbolFilter", "trades"],
+  ["purpleTradeFromFilter", "trades"],
+  ["purpleTradeToFilter", "trades"],
+  ["purpleTradeSort", "trades"],
 ].forEach(([id, pageKey]) => $(id).addEventListener("change", () => {
   state.purplePages[pageKey] = 1;
   loadPurpleAlerts();

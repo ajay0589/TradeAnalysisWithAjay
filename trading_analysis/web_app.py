@@ -160,6 +160,23 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         exit_kind=params.get("exit_kind", [None])[0] or None,
                         trade_profile=params.get("trade_profile", [None])[0] or None,
                         trade_kind=params.get("trade_kind", [None])[0] or None,
+                        entry_status=params.get("entry_status", [None])[0] or None,
+                        entry_symbol=params.get("entry_symbol", [None])[0] or None,
+                        entry_from_date=params.get("entry_from", [None])[0] or None,
+                        entry_to_date=params.get("entry_to", [None])[0] or None,
+                        entry_sort=params.get("entry_sort", ["created_at"])[0],
+                        entry_order=params.get("entry_order", ["desc"])[0],
+                        exit_symbol=params.get("exit_symbol", [None])[0] or None,
+                        exit_from_date=params.get("exit_from", [None])[0] or None,
+                        exit_to_date=params.get("exit_to", [None])[0] or None,
+                        exit_sort=params.get("exit_sort", ["created_at"])[0],
+                        exit_order=params.get("exit_order", ["desc"])[0],
+                        trade_status=params.get("trade_status", ["open"])[0] or None,
+                        trade_symbol=params.get("trade_symbol", [None])[0] or None,
+                        trade_from_date=params.get("trade_from", [None])[0] or None,
+                        trade_to_date=params.get("trade_to", [None])[0] or None,
+                        trade_sort=params.get("trade_sort", ["opened_at"])[0],
+                        trade_order=params.get("trade_order", ["desc"])[0],
                     )
                 )
             elif parsed.path == "/api/krishna-setup-backtest":

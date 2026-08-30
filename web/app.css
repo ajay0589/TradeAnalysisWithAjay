@@ -920,15 +920,20 @@ tr:last-child td {
   text-transform: uppercase;
 }
 
-.table-filter select {
+.table-filter select,
+.table-filter input {
   width: auto;
   min-width: 145px;
   min-height: 32px;
-  padding: 5px 30px 5px 9px;
+  padding: 5px 9px;
   color: var(--ink);
   font-size: 13px;
   font-weight: 500;
   text-transform: none;
+}
+
+.table-filter select {
+  padding-right: 30px;
 }
 
 .warning-hint {

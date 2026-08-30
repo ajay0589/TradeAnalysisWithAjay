@@ -208,6 +208,69 @@ class NiftyAutoScanTests(unittest.TestCase):
             self.assertEqual(len(final_open_page), 4)
             self.assertTrue(all(row["entry_kind"] == "final" for row in final_open_page))
 
+    def test_krishna_purple_trade_lifecycle_supports_status_date_symbol_and_sorting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = KrishnaPurpleAlertRepository(Path(tmp) / "purple-lifecycle.db")
+            abc = repo.open_entry_alert(
+                {
+                    "symbol": "ABC",
+                    "purple_timeframe": "week",
+                    "score": 85,
+                    "confidence": "high",
+                    "profile": {"exit_timeframe": "30minute"},
+                    "reasons": ["Synthetic lifecycle setup."],
+                    "warnings": [],
+                },
+                {
+                    "timeframe": "30minute",
+                    "status": "entry_candidate",
+                    "close": 110,
+                    "yellow_line": 105,
+                    "reasons": ["Synthetic entry confirmation."],
+                    "warnings": [],
+                },
+                "early",
+            )
+            repo.open_entry_alert(
+                {
+                    "symbol": "XYZ",
+                    "purple_timeframe": "month",
+                    "score": 75,
+                    "confidence": "medium",
+                    "profile": {"exit_timeframe": "120minute"},
+                    "reasons": ["Synthetic lifecycle setup."],
+                    "warnings": [],
+                },
+                {
+                    "timeframe": "day",
+                    "status": "entry_candidate",
+                    "close": 210,
+                    "yellow_line": 205,
+                    "reasons": ["Synthetic entry confirmation."],
+                    "warnings": [],
+                },
+                "final",
+            )
+            closed = repo.close_trade_alert(
+                abc["trade"],
+                {"timeframe": "30minute", "status": "exit_triggered", "close": 102, "yellow_line": 104},
+            )
+            lifecycle_date = abc["trade"]["opened_at"][:10]
+
+            trades = repo.list_trades(sort_by="symbol", sort_direction="asc")
+            closed_trades = repo.list_trades(status="closed", symbol="ABC")
+            closed_entries = repo.list_recent_alerts(alert_type="entry", trade_status="closed", symbol="ABC")
+
+            self.assertEqual([row["symbol"] for row in trades], ["ABC", "XYZ"])
+            self.assertEqual(repo.count_trades(status="open"), 1)
+            self.assertEqual(repo.count_trades(status="closed"), 1)
+            self.assertEqual(repo.count_trades(from_date=lifecycle_date, to_date=lifecycle_date), 2)
+            self.assertEqual(closed_trades[0]["closed_at"], closed["trade"]["closed_at"])
+            self.assertEqual(closed_entries[0]["trade_status"], "closed")
+            self.assertEqual(closed_entries[0]["trade_opened_at"], abc["trade"]["opened_at"])
+            self.assertEqual(closed_entries[0]["trade_closed_at"], closed["trade"]["closed_at"])
+            json.dumps({"trades": trades, "entry_alerts": closed_entries})
+
     def test_context_snapshot_and_candidates_save_load(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = NiftyContextRepository(Path(tmp) / "context.db")

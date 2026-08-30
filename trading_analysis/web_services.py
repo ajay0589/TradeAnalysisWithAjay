@@ -1492,6 +1492,23 @@ class AnalysisService:
         exit_kind: str | None = None,
         trade_profile: str | None = None,
         trade_kind: str | None = None,
+        entry_status: str | None = None,
+        entry_symbol: str | None = None,
+        entry_from_date: str | None = None,
+        entry_to_date: str | None = None,
+        entry_sort: str = "created_at",
+        entry_order: str = "desc",
+        exit_symbol: str | None = None,
+        exit_from_date: str | None = None,
+        exit_to_date: str | None = None,
+        exit_sort: str = "created_at",
+        exit_order: str = "desc",
+        trade_status: str | None = "open",
+        trade_symbol: str | None = None,
+        trade_from_date: str | None = None,
+        trade_to_date: str | None = None,
+        trade_sort: str = "opened_at",
+        trade_order: str = "desc",
     ) -> dict[str, Any]:
         repository = KrishnaPurpleAlertRepository()
         notifier = TelegramNotifier.from_env()
@@ -1499,9 +1516,20 @@ class AnalysisService:
         entry_page = max(1, int(entry_page))
         exit_page = max(1, int(exit_page))
         trade_page = max(1, int(trade_page))
-        entry_total = repository.count_alerts("entry", entry_profile, entry_kind)
-        exit_total = repository.count_alerts("exit", exit_profile, exit_kind)
-        trade_total = repository.count_open_trades(trade_profile, trade_kind)
+        entry_total = repository.count_alerts(
+            "entry", entry_profile, entry_kind, entry_status, entry_symbol, entry_from_date, entry_to_date
+        )
+        exit_total = repository.count_alerts(
+            "exit", exit_profile, exit_kind, None, exit_symbol, exit_from_date, exit_to_date
+        )
+        trade_total = repository.count_trades(
+            status=trade_status,
+            purple_timeframe=trade_profile,
+            entry_kind=trade_kind,
+            symbol=trade_symbol,
+            from_date=trade_from_date,
+            to_date=trade_to_date,
+        )
         entry_page = min(entry_page, max(1, (entry_total + page_size - 1) // page_size))
         exit_page = min(exit_page, max(1, (exit_total + page_size - 1) // page_size))
         trade_page = min(trade_page, max(1, (trade_total + page_size - 1) // page_size))
@@ -1511,6 +1539,12 @@ class AnalysisService:
             alert_type="entry",
             purple_timeframe=entry_profile,
             entry_kind=entry_kind,
+            trade_status=entry_status,
+            symbol=entry_symbol,
+            from_date=entry_from_date,
+            to_date=entry_to_date,
+            sort_by=entry_sort,
+            sort_direction=entry_order,
         )
         exit_alerts = repository.list_recent_alerts(
             limit=page_size,
@@ -1518,12 +1552,23 @@ class AnalysisService:
             alert_type="exit",
             purple_timeframe=exit_profile,
             entry_kind=exit_kind,
+            symbol=exit_symbol,
+            from_date=exit_from_date,
+            to_date=exit_to_date,
+            sort_by=exit_sort,
+            sort_direction=exit_order,
         )
-        open_trades = repository.list_open_trades(
+        trades = repository.list_trades(
             limit=page_size,
             offset=(trade_page - 1) * page_size,
+            status=trade_status,
             purple_timeframe=trade_profile,
             entry_kind=trade_kind,
+            symbol=trade_symbol,
+            from_date=trade_from_date,
+            to_date=trade_to_date,
+            sort_by=trade_sort,
+            sort_direction=trade_order,
         )
         return {
             "type": "krishna_purple_touch_alerts",
@@ -1538,13 +1583,18 @@ class AnalysisService:
             "recent_alerts": repository.list_recent_alerts(limit=limit),
             "entry_alerts": entry_alerts,
             "exit_alerts": exit_alerts,
-            "open_trades": open_trades,
+            "trades": trades,
+            "open_trades": trades if trade_status in {None, "open"} else [],
             "alert_counts": repository.counts(),
             "recent_alert_limit": limit,
             "pagination": {
                 "entry": _page_info(entry_page, page_size, entry_total, len(entry_alerts)),
                 "exit": _page_info(exit_page, page_size, exit_total, len(exit_alerts)),
-                "trades": _page_info(trade_page, page_size, trade_total, len(open_trades)),
+                "trades": _page_info(trade_page, page_size, trade_total, len(trades)),
+            },
+            "retention": {
+                "automatic_purge": False,
+                "policy": "Purple Touch entry, exit, and trade lifecycle history is retained locally for audit and review.",
             },
         }
 

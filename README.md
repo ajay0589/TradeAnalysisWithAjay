@@ -198,6 +198,8 @@ Use this same URL going forward. The script stops any older UI process already l
 
 The visual workflow, confirmed rules, timeframe matrix, entry/exit lifecycle, UI count reconciliation, and Krishna review checklist are documented in [Purple Touch Implementation Guide](docs/Purple_Touch_Implementation_Guide_v1_2.pdf).
 
+Purple Touch entry alerts and trade lifecycle records are retained in local SQLite storage for audit and setup-quality review. The UI provides profile, entry type, lifecycle status, symbol, date, and sorting controls; it does not automatically purge open or closed Purple Touch trades.
+
 Regenerate the PDF after material rule changes:
 
 ```powershell

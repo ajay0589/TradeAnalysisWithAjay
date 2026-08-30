@@ -671,14 +671,41 @@ class KrishnaPurpleAlertRepository:
         purple_timeframe: str | None = None,
         entry_kind: str | None = None,
     ) -> list[dict[str, Any]]:
-        where, params = _purple_history_filters(
+        return self.list_trades(
+            limit=limit,
+            offset=offset,
             status="open",
             purple_timeframe=purple_timeframe,
             entry_kind=entry_kind,
         )
+
+    def list_trades(
+        self,
+        limit: int = 200,
+        offset: int = 0,
+        status: str | None = None,
+        purple_timeframe: str | None = None,
+        entry_kind: str | None = None,
+        symbol: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        sort_by: str = "opened_at",
+        sort_direction: str = "desc",
+    ) -> list[dict[str, Any]]:
+        where, params = _purple_history_filters(
+            status=status if status in {"open", "closed"} else None,
+            purple_timeframe=purple_timeframe,
+            entry_kind=entry_kind,
+            symbol=symbol,
+            from_date=from_date,
+            to_date=to_date,
+            timestamp_column="opened_at",
+            table_alias="t",
+        )
+        order_by = _purple_history_order("trade", sort_by, sort_direction)
         with _connection(self.db_path) as conn:
             rows = conn.execute(
-                f"SELECT * FROM krishna_purple_trades {where} ORDER BY opened_at DESC, id DESC LIMIT ? OFFSET ?",
+                f"SELECT t.* FROM krishna_purple_trades t {where} ORDER BY {order_by} LIMIT ? OFFSET ?",
                 (*params, max(1, int(limit)), max(0, int(offset))),
             ).fetchall()
         return [_purple_trade_row(row) for row in rows]
@@ -688,13 +715,35 @@ class KrishnaPurpleAlertRepository:
         purple_timeframe: str | None = None,
         entry_kind: str | None = None,
     ) -> int:
-        where, params = _purple_history_filters(
+        return self.count_trades(
             status="open",
             purple_timeframe=purple_timeframe,
             entry_kind=entry_kind,
         )
+
+    def count_trades(
+        self,
+        status: str | None = None,
+        purple_timeframe: str | None = None,
+        entry_kind: str | None = None,
+        symbol: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
+    ) -> int:
+        where, params = _purple_history_filters(
+            status=status if status in {"open", "closed"} else None,
+            purple_timeframe=purple_timeframe,
+            entry_kind=entry_kind,
+            symbol=symbol,
+            from_date=from_date,
+            to_date=to_date,
+            timestamp_column="opened_at",
+            table_alias="t",
+        )
         with _connection(self.db_path) as conn:
-            row = conn.execute(f"SELECT COUNT(*) AS count FROM krishna_purple_trades {where}", params).fetchone()
+            row = conn.execute(
+                f"SELECT COUNT(*) AS count FROM krishna_purple_trades t {where}", params
+            ).fetchone()
         return int(row["count"] if row else 0)
 
     def list_recent_alerts(
@@ -704,15 +753,36 @@ class KrishnaPurpleAlertRepository:
         alert_type: str | None = None,
         purple_timeframe: str | None = None,
         entry_kind: str | None = None,
+        trade_status: str | None = None,
+        symbol: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        sort_by: str = "created_at",
+        sort_direction: str = "desc",
     ) -> list[dict[str, Any]]:
         where, params = _purple_history_filters(
             alert_type=alert_type,
             purple_timeframe=purple_timeframe,
             entry_kind=entry_kind,
+            symbol=symbol,
+            from_date=from_date,
+            to_date=to_date,
+            timestamp_column="created_at",
+            table_alias="a",
+            trade_status=trade_status,
         )
+        order_by = _purple_history_order("alert", sort_by, sort_direction)
         with _connection(self.db_path) as conn:
             rows = conn.execute(
-                f"SELECT * FROM krishna_purple_alerts {where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+                f"""
+                SELECT a.*, t.status AS trade_status, t.opened_at AS trade_opened_at,
+                       t.closed_at AS trade_closed_at
+                FROM krishna_purple_alerts a
+                LEFT JOIN krishna_purple_trades t ON t.trade_id = a.trade_id
+                {where}
+                ORDER BY {order_by}
+                LIMIT ? OFFSET ?
+                """,
                 (*params, max(1, int(limit)), max(0, int(offset))),
             ).fetchall()
         return [_purple_alert_row(row) for row in rows]
@@ -722,14 +792,32 @@ class KrishnaPurpleAlertRepository:
         alert_type: str | None = None,
         purple_timeframe: str | None = None,
         entry_kind: str | None = None,
+        trade_status: str | None = None,
+        symbol: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
     ) -> int:
         where, params = _purple_history_filters(
             alert_type=alert_type,
             purple_timeframe=purple_timeframe,
             entry_kind=entry_kind,
+            symbol=symbol,
+            from_date=from_date,
+            to_date=to_date,
+            timestamp_column="created_at",
+            table_alias="a",
+            trade_status=trade_status,
         )
         with _connection(self.db_path) as conn:
-            row = conn.execute(f"SELECT COUNT(*) AS count FROM krishna_purple_alerts {where}", params).fetchone()
+            row = conn.execute(
+                f"""
+                SELECT COUNT(*) AS count
+                FROM krishna_purple_alerts a
+                LEFT JOIN krishna_purple_trades t ON t.trade_id = a.trade_id
+                {where}
+                """,
+                params,
+            ).fetchone()
         return int(row["count"] if row else 0)
 
     def counts(self) -> dict[str, Any]:
@@ -1437,26 +1525,82 @@ def _purple_history_filters(
     alert_type: str | None = None,
     purple_timeframe: str | None = None,
     entry_kind: str | None = None,
+    symbol: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    timestamp_column: str | None = None,
+    table_alias: str | None = None,
+    trade_status: str | None = None,
 ) -> tuple[str, tuple[Any, ...]]:
     clauses: list[str] = []
     params: list[Any] = []
+    prefix = f"{table_alias}." if table_alias else ""
     if status:
-        clauses.append("status = ?")
+        clauses.append(f"{prefix}status = ?")
         params.append(status)
     if alert_type in {"entry", "exit"}:
-        clauses.append("alert_type = ?")
+        clauses.append(f"{prefix}alert_type = ?")
         params.append(alert_type)
     if purple_timeframe in {"month", "week", "day"}:
-        clauses.append("purple_timeframe = ?")
+        clauses.append(f"{prefix}purple_timeframe = ?")
         params.append(purple_timeframe)
     if entry_kind in {"early", "final"}:
-        clauses.append("entry_kind = ?")
+        clauses.append(f"{prefix}entry_kind = ?")
         params.append(entry_kind)
+    if symbol and symbol.strip():
+        clauses.append(f"{prefix}symbol LIKE ?")
+        params.append(f"%{symbol.strip().upper()}%")
+    if timestamp_column and from_date:
+        clauses.append(f"substr({prefix}{timestamp_column}, 1, 10) >= ?")
+        params.append(_history_date(from_date))
+    if timestamp_column and to_date:
+        clauses.append(f"substr({prefix}{timestamp_column}, 1, 10) <= ?")
+        params.append(_history_date(to_date))
+    if trade_status in {"open", "closed"}:
+        clauses.append("t.status = ?")
+        params.append(trade_status)
     return (f"WHERE {' AND '.join(clauses)}" if clauses else "", tuple(params))
 
 
+def _purple_history_order(kind: str, sort_by: str | None, sort_direction: str | None) -> str:
+    direction = "ASC" if str(sort_direction or "").lower() == "asc" else "DESC"
+    if kind == "alert":
+        columns = {
+            "created_at": "a.created_at",
+            "symbol": "a.symbol",
+            "profile": "a.purple_timeframe",
+            "entry_kind": "a.entry_kind",
+            "status": "t.status",
+            "score": "a.score",
+        }
+        column = columns.get(str(sort_by or "created_at"), "a.created_at")
+        return f"{column} {direction}, a.id DESC"
+    columns = {
+        "opened_at": "t.opened_at",
+        "closed_at": "t.closed_at",
+        "symbol": "t.symbol",
+        "profile": "t.purple_timeframe",
+        "entry_kind": "t.entry_kind",
+        "status": "t.status",
+        "holding_duration": (
+            "(julianday(CASE WHEN t.status = 'open' THEN CURRENT_TIMESTAMP "
+            "ELSE COALESCE(t.closed_at, t.last_checked_at) END) - julianday(t.opened_at))"
+        ),
+        "score": "t.score",
+    }
+    column = columns.get(str(sort_by or "opened_at"), "t.opened_at")
+    return f"{column} {direction}, t.id DESC"
+
+
+def _history_date(value: str) -> str:
+    try:
+        return date.fromisoformat(str(value).strip()[:10]).isoformat()
+    except ValueError as exc:
+        raise ValueError(f"Invalid history date '{value}'; expected YYYY-MM-DD.") from exc
+
+
 def _purple_alert_row(row: sqlite3.Row) -> dict[str, Any]:
-    return {
+    result = {
         "id": row["id"],
         "trade_id": row["trade_id"],
         "created_at": row["created_at"],
@@ -1475,6 +1619,11 @@ def _purple_alert_row(row: sqlite3.Row) -> dict[str, Any]:
         "warnings": _loads(row["warnings_json"], []),
         "metadata": _loads(row["metadata_json"], {}),
     }
+    if "trade_status" in row.keys():
+        result["trade_status"] = row["trade_status"]
+        result["trade_opened_at"] = row["trade_opened_at"]
+        result["trade_closed_at"] = row["trade_closed_at"]
+    return result
 
 
 def _purple_trade_row(row: sqlite3.Row) -> dict[str, Any]:
