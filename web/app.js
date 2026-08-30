@@ -14,6 +14,12 @@ const state = {
   purpleAutoTimers: {},
   purplePendingProfiles: [],
   purpleNextRunAt: {},
+  purpleProfileRuns: {
+    month: { status: "idle", detail: "Waiting for a scan.", progress: 0, startedAt: null, endedAt: null },
+    week: { status: "idle", detail: "Waiting for a scan.", progress: 0, startedAt: null, endedAt: null },
+    day: { status: "idle", detail: "Waiting for a scan.", progress: 0, startedAt: null, endedAt: null },
+  },
+  purpleActiveProfile: null,
   purpleMonitorRunning: false,
   purpleScanInFlight: false,
   purpleCancelRequested: false,
@@ -64,6 +70,7 @@ const BULK_TIMEFRAME_LABELS = {
   week: "Weekly",
   day: "Day",
   "60minute": "1 hour",
+  "120minute": "2 hours",
   "30minute": "30 min",
   "15minute": "15 min",
   "10minute": "10 min",
@@ -77,7 +84,7 @@ const BULK_DERIVED_MIN_DAYS = {
 const PURPLE_PROFILES = {
   month: { label: "Monthly", early: "120minute", final: "day", exit: "120minute", days: 3000 },
   week: { label: "Weekly", early: "30minute", final: "120minute", exit: "30minute", days: 730 },
-  day: { label: "Daily", early: "10minute", final: "10minute", exit: "10minute", days: 365 },
+  day: { label: "Daily", early: "10minute", final: "30minute", exit: "10minute", days: 365 },
 };
 
 const PURPLE_PAGE_SIZE = 25;
@@ -1046,14 +1053,14 @@ async function refreshPurpleTimeframes(timeframes, days) {
   });
   state.purpleRefreshJobId = job.job_id;
   state.purpleCancelRequested = false;
-  renderPurpleRefreshJob(job);
+  renderPurpleRefreshJob(job, state.purpleActiveProfile || "all");
   await waitForPurpleRefreshJob(job.job_id);
 }
 
 async function waitForPurpleRefreshJob(jobId) {
   while (true) {
     const job = await api(`/api/job?job_id=${encodeURIComponent(jobId)}`);
-    renderPurpleRefreshJob(job);
+    renderPurpleRefreshJob(job, state.purpleActiveProfile || "all");
     if (!["queued", "running", "stopping"].includes(job.status)) {
       if (job.status === "cancelled") {
         const error = new Error("Candle refresh cancelled. Purple Touch analysis was not started.");
@@ -1069,13 +1076,24 @@ async function waitForPurpleRefreshJob(jobId) {
   }
 }
 
-function renderPurpleRefreshJob(job) {
+function renderPurpleRefreshJob(job, purpleTimeframe = "all") {
   const total = job.total || 0;
   const completed = job.completed || 0;
   const percent = total ? Math.round((completed / total) * 100) : 0;
+  const refreshStatus = ["queued", "running", "stopping"].includes(job.status)
+    ? "refreshing"
+    : job.status === "completed"
+      ? "refresh complete"
+      : job.status;
+  const overallProgress = job.status === "completed" ? 75 : Math.round(percent * 0.75);
   $("purpleProgressMeta").textContent = `refresh ${job.status} / ${completed}/${total}`;
   $("purpleProgressStatus").textContent = `Refreshing purple-touch candles: ${job.current || "starting"} | success ${job.successes || 0} | failures ${job.failures || 0}`;
-  $("purpleProgressBar").style.width = `${percent}%`;
+  setPurpleProfileProgress(
+    purpleTimeframe,
+    refreshStatus,
+    `Candles ${completed}/${total}; success ${job.successes || 0}, failures ${job.failures || 0}.`,
+    overallProgress,
+  );
   const cancellable = ["queued", "running", "stopping"].includes(job.status);
   $("purpleCancelScanBtn").disabled = !cancellable || state.purpleCancelRequested;
 }
@@ -1086,9 +1104,10 @@ async function cancelPurpleCurrentScan() {
   $("purpleCancelScanBtn").disabled = true;
   $("purpleProgressMeta").textContent = "cancelling";
   $("purpleProgressStatus").textContent = "Cancellation requested. Waiting for the current Zerodha request to finish...";
+  setPurpleProfileProgress(state.purpleActiveProfile || "all", "cancelling", "Waiting for the current candle request to finish...", 95);
   try {
     const job = await postApi("/api/job/stop", { job_id: state.purpleRefreshJobId });
-    renderPurpleRefreshJob(job);
+    renderPurpleRefreshJob(job, state.purpleActiveProfile || "all");
   } catch (error) {
     state.purpleCancelRequested = false;
     $("purpleCancelScanBtn").disabled = false;
@@ -1096,19 +1115,65 @@ async function cancelPurpleCurrentScan() {
   }
 }
 
-function setPurpleProgress(status, detail) {
-  const percent = status === "completed" ? "100%" : status === "failed" ? "100%" : "55%";
+function setPurpleProgress(status, detail, purpleTimeframe = "all", progress = null) {
+  const percent = progress ?? (status === "completed" || status === "failed" || status === "cancelled" ? 100 : 55);
   $("purpleProgressMeta").textContent = status;
   $("purpleProgressStatus").textContent = detail;
-  $("purpleProgressBar").style.width = percent;
-  $("purpleProgressBar").classList.toggle("active", status === "running");
+  setPurpleProfileProgress(purpleTimeframe, status, detail, percent);
+}
+
+function purpleProfileKeys(purpleTimeframe) {
+  return purpleTimeframe === "all" ? Object.keys(PURPLE_PROFILES) : [purpleTimeframe].filter((key) => PURPLE_PROFILES[key]);
+}
+
+function setPurpleProfileProgress(purpleTimeframe, status, detail, progress) {
+  const now = new Date().toISOString();
+  purpleProfileKeys(purpleTimeframe).forEach((profileKey) => {
+    const run = state.purpleProfileRuns[profileKey];
+    if (["running", "refreshing"].includes(status) && !run.startedAt) run.startedAt = now;
+    if (["completed", "failed", "cancelled"].includes(status)) run.endedAt = now;
+    run.status = status;
+    run.detail = detail;
+    run.progress = Math.max(0, Math.min(100, Number(progress || 0)));
+  });
+  renderPurpleProfileProgress();
+}
+
+function beginPurpleProfileRun(purpleTimeframe, detail) {
+  const now = new Date().toISOString();
+  purpleProfileKeys(purpleTimeframe).forEach((profileKey) => {
+    state.purpleProfileRuns[profileKey] = {
+      status: "running",
+      detail,
+      progress: 8,
+      startedAt: now,
+      endedAt: null,
+    };
+  });
+  renderPurpleProfileProgress();
+}
+
+function renderPurpleProfileProgress() {
+  const prefix = { month: "Month", week: "Week", day: "Day" };
+  Object.keys(PURPLE_PROFILES).forEach((profileKey) => {
+    const run = state.purpleProfileRuns[profileKey];
+    const id = `purple${prefix[profileKey]}`;
+    $(`${id}ProgressMeta`).textContent = run.status;
+    $(`${id}ProgressStatus`).textContent = run.detail;
+    $(`${id}ProgressBar`).style.width = `${run.progress}%`;
+    $(`${id}ProgressBar`).classList.toggle("active", ["running", "refreshing", "analysis running", "queued"].includes(run.status));
+    $(`${id}LastStarted`).textContent = fmtDateTime(run.startedAt);
+    $(`${id}LastEnded`).textContent = fmtDateTime(run.endedAt);
+    const next = state.purpleNextRunAt[profileKey];
+    $(`${id}NextRun`).textContent = next ? fmtDateTime(new Date(next).toISOString()) : "Not scheduled";
+  });
 }
 
 function renderPurpleRules(data) {
   const profiles = data.profiles || [
     { label: "Monthly", early_timeframe: "120minute", final_timeframe: "day", exit_timeframe: "120minute" },
     { label: "Weekly", early_timeframe: "30minute", final_timeframe: "120minute", exit_timeframe: "30minute" },
-    { label: "Daily", early_timeframe: "10minute", final_timeframe: "10minute", exit_timeframe: "10minute" },
+    { label: "Daily", early_timeframe: "10minute", final_timeframe: "30minute", exit_timeframe: "10minute" },
   ];
   $("purpleRuleCards").innerHTML = profiles
     .map((profile) => [
@@ -1121,7 +1186,7 @@ function renderPurpleRules(data) {
   const understood = sample.understood_rules || [
     "Monthly: early entry 2H, final entry 1D.",
     "Weekly: early entry 30m, final entry 2H.",
-    "Daily: use only 10m for early/final/exit tracking.",
+    "Daily: early entry 10m, final entry 30m, exit 10m.",
     "Purple-touch filter requires close above black EMA89.",
     "Blue Chande Kroll must be above purple EMA9 and price must approach purple from blue across the latest 2-3 higher-timeframe candles.",
     "Monthly touch confirms on derived 5-month open or close above blue; Weekly confirms on Monthly open or close; Daily confirms on Weekly open or close.",
@@ -1400,11 +1465,13 @@ async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "all" } = {}
     return;
   }
   state.purpleScanInFlight = true;
+  state.purpleActiveProfile = purpleTimeframe;
   state.purpleRefreshJobId = null;
   state.purpleCancelRequested = false;
   $("purpleLiveScanBtn").disabled = true;
   $("purpleCancelScanBtn").disabled = !$("purpleRefreshToggle").checked;
   const scanLabel = purpleTimeframe === "all" ? "Monthly, Weekly, and Daily" : PURPLE_PROFILES[purpleTimeframe]?.label || purpleTimeframe;
+  beginPurpleProfileRun(purpleTimeframe, `Starting ${scanLabel} candle refresh and analysis.`);
   updatePurpleMonitorUi(state.purpleMonitorRunning ? `Scanning ${scanLabel} now...` : `Running ${scanLabel} scan...`);
   if (!quiet) {
     setNotes(`Running Krishna purple-touch live alert scan for ${scanLabel}...`);
@@ -1418,9 +1485,10 @@ async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "all" } = {}
     setPurpleProgress(
       "running",
       `Candle refresh complete. Analyzing ${scanLabel} setup rules, entry confirmations, and open-trade exits...`,
+      purpleTimeframe,
+      85,
     );
     $("purpleProgressMeta").textContent = "analysis running";
-    $("purpleProgressBar").style.width = "85%";
     const data = await postApi("/api/krishna-purple-touch-live-scan", {
       purple_timeframe: purpleTimeframe,
       limit: "all",
@@ -1442,6 +1510,8 @@ async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "all" } = {}
     setPurpleProgress(
       "completed",
       `${scanLabel} analysis complete: ${step1Rows.length} touch/near-touch row(s), ${rows.length} strict candidate(s), ${newAlerts} new alert(s).`,
+      purpleTimeframe,
+      100,
     );
     $("purpleAlertMeta").textContent = data.alert_creation_skipped
       ? "analysis complete / live alerts paused"
@@ -1451,10 +1521,11 @@ async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "all" } = {}
     }
   } catch (error) {
     $("purpleAlertMeta").textContent = error.cancelled ? "cancelled" : "failed";
-    setPurpleProgress(error.cancelled ? "cancelled" : "failed", error.message);
+    setPurpleProgress(error.cancelled ? "cancelled" : "failed", error.message, purpleTimeframe, 100);
     setNotes([error.message], !error.cancelled);
   } finally {
     state.purpleScanInFlight = false;
+    state.purpleActiveProfile = null;
     state.purpleRefreshJobId = null;
     state.purpleCancelRequested = false;
     $("purpleLiveScanBtn").disabled = false;
@@ -1482,6 +1553,7 @@ function queuePurpleProfile(purpleTimeframe) {
     state.purplePendingProfiles = ["all"];
   } else if (!state.purplePendingProfiles.includes("all") && !state.purplePendingProfiles.includes(purpleTimeframe)) {
     state.purplePendingProfiles.push(purpleTimeframe);
+    setPurpleProfileProgress(purpleTimeframe, "queued", "Scheduled scan is queued behind the active profile.", 5);
   }
   if (!state.purpleScanInFlight) runNextQueuedPurpleProfile();
 }
@@ -1528,7 +1600,7 @@ function scanSummaryFromLiveScan(data, rows, step1Rows = []) {
     latest_candles_pulled: $("purpleRefreshToggle").checked,
     points: [
       `Scanner evaluated ${profileList(data)} purple-touch profile${(data.profiles || []).length === 1 ? "" : "s"}.`,
-      `Step 1 found ${step1Matched || step1Rows.length} higher-timeframe EMA9 touch/near-touch row(s) within 1.00%; rows are ordered from range distance 0.00% upward.`,
+      `Step 1 found ${step1Matched || step1Rows.length} higher-timeframe EMA9 touch/near-touch row(s) within 3.00%; rows are ordered from range distance 0.00% upward.`,
       `Latest Scan Candidates shows ${rows.length} row(s) after mandatory EMA89, EMA26, blue/purple direction, 2-3 candle approach, and higher-confirmation checks.`,
       `${earlyReady} strict candidate row(s) have early entry ready; ${finalReady} have final entry ready. Candidate rows are not the same as newly created alerts.`,
       data.market_hours === false && !data.forced
@@ -1568,16 +1640,20 @@ function startPurpleAutoMonitor() {
   stopPurpleAutoMonitor();
   state.purpleMonitorRunning = true;
   state.purplePendingProfiles = [];
+  Object.keys(PURPLE_PROFILES).forEach((profileKey) => {
+    state.purpleNextRunAt[profileKey] = Date.now() + purpleIntervalSeconds(profileKey) * 1000;
+  });
+  renderPurpleProfileProgress();
   updatePurpleMonitorUi("Initial combined scan is starting...");
   $("purpleAlertMeta").textContent = "monitoring with profile schedules";
   runPurpleLiveScan({ quiet: true, purpleTimeframe: "all" });
   Object.keys(PURPLE_PROFILES).forEach((profileKey) => {
     const seconds = purpleIntervalSeconds(profileKey);
-    state.purpleNextRunAt[profileKey] = Date.now() + seconds * 1000;
     state.purpleAutoTimers[profileKey] = window.setInterval(() => {
       state.purpleNextRunAt[profileKey] = Date.now() + seconds * 1000;
       queuePurpleProfile(profileKey);
       updatePurpleMonitorUi();
+      renderPurpleProfileProgress();
     }, seconds * 1000);
   });
 }
@@ -1589,6 +1665,7 @@ function stopPurpleAutoMonitor() {
   state.purplePendingProfiles = [];
   state.purpleMonitorRunning = false;
   $("purpleAlertMeta").textContent = "stopped";
+  renderPurpleProfileProgress();
   updatePurpleMonitorUi();
 }
 
@@ -1610,7 +1687,7 @@ function updatePurpleMonitorUi(detail) {
 
 function purpleIntervalSeconds(profileKey) {
   const id = { month: "purpleMonthIntervalSeconds", week: "purpleWeekIntervalSeconds", day: "purpleDayIntervalSeconds" }[profileKey];
-  return Number($(id)?.value || { month: 1800, week: 600, day: 300 }[profileKey]);
+  return Number($(id)?.value || { month: 7200, week: 1800, day: 180 }[profileKey]);
 }
 
 function purpleScheduleText() {
@@ -3324,6 +3401,7 @@ document.querySelectorAll("[data-tab-target]").forEach((button) => {
 enhanceCollapsibleSections();
 updatePurpleDefaults();
 updatePurpleMonitorUi();
+renderPurpleProfileProgress();
 loadPurpleAlerts();
 
 Promise.all([loadZerodhaLoginUrl(), checkZerodhaStatus(), loadSymbols(), loadStrategies(), loadNiftyExpiries(), loadSectorStatus(), loadFiiDii(false)])

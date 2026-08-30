@@ -526,6 +526,62 @@ label {
   width: 55%;
 }
 
+.profile-progress-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.profile-progress-card {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+
+.profile-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.profile-progress-head span,
+.profile-progress-detail,
+.profile-progress-times dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.profile-progress-detail {
+  min-height: 30px;
+  overflow-wrap: anywhere;
+}
+
+.profile-progress-times {
+  display: grid;
+  gap: 5px;
+  margin: 10px 0 0;
+}
+
+.profile-progress-times div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.profile-progress-times dt,
+.profile-progress-times dd {
+  margin: 0;
+}
+
+.profile-progress-times dd {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .mini-list {
   margin-top: 8px;
   max-height: 90px;
@@ -1011,7 +1067,8 @@ tr:last-child td {
   .ops-grid,
   .score-strip,
   .analysis-banner,
-  .summary-grid {
+  .summary-grid,
+  .profile-progress-grid {
     grid-template-columns: 1fr;
   }
 

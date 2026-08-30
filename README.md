@@ -196,7 +196,7 @@ Use this same URL going forward. The script stops any older UI process already l
 
 ### Purple Touch implementation guide
 
-The visual workflow, confirmed rules, timeframe matrix, entry/exit lifecycle, UI count reconciliation, and Krishna review checklist are documented in [Purple Touch Implementation Guide](docs/Purple_Touch_Implementation_Guide.pdf).
+The visual workflow, confirmed rules, timeframe matrix, entry/exit lifecycle, UI count reconciliation, and Krishna review checklist are documented in [Purple Touch Implementation Guide](docs/Purple_Touch_Implementation_Guide_v1_2.pdf).
 
 Regenerate the PDF after material rule changes:
 

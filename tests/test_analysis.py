@@ -935,13 +935,15 @@ class AnalysisTests(unittest.TestCase):
 
         self.assertEqual((monthly.early_timeframe, monthly.final_timeframe, monthly.exit_timeframe), ("120minute", "day", "120minute"))
         self.assertEqual((weekly.early_timeframe, weekly.final_timeframe, weekly.exit_timeframe), ("30minute", "120minute", "30minute"))
-        self.assertEqual((daily.early_timeframe, daily.final_timeframe, daily.exit_timeframe), ("10minute", "10minute", "10minute"))
+        self.assertEqual((daily.early_timeframe, daily.final_timeframe, daily.exit_timeframe), ("10minute", "30minute", "10minute"))
         self.assertEqual(monthly.confirmation_timeframe, "5month")
         self.assertTrue(monthly.confirmation_open_or_close)
         self.assertEqual(weekly.confirmation_timeframe, "month")
         self.assertTrue(weekly.confirmation_open_or_close)
         self.assertEqual(daily.confirmation_timeframe, "week")
         self.assertTrue(daily.confirmation_open_or_close)
+        self.assertEqual(KrishnaPurpleTouchConfig().step1_touch_tolerance_percent, 3.0)
+        self.assertEqual(KrishnaPurpleTouchConfig().purple_touch_tolerance_percent, 3.0)
 
     def test_krishna_purple_touch_detects_reviewable_candidate(self) -> None:
         closes = [100 + (index * 0.8) for index in range(95)] + [176, 172, 170, 169, 168]
@@ -982,7 +984,7 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(match.higher_confirmation["status"], "pass")
         self.assertEqual(match.purple_range_distance_percent, 0.0)
 
-    def test_krishna_purple_touch_accepts_near_touch_within_one_percent(self) -> None:
+    def test_krishna_purple_touch_accepts_near_touch_within_three_percent(self) -> None:
         closes = [100 + (index * 0.8) for index in range(95)] + [176, 172, 170, 169, 168]
         touch = self._scanner_candles(closes)
 
@@ -990,7 +992,7 @@ class AnalysisTests(unittest.TestCase):
 
         self.assertIsNotNone(step1)
         self.assertGreater(step1.purple_range_distance_percent, 0.0)
-        self.assertLessEqual(step1.purple_range_distance_percent, 1.0)
+        self.assertLessEqual(step1.purple_range_distance_percent, 3.0)
 
     def test_krishna_purple_touch_rejects_distance_beyond_configured_maximum(self) -> None:
         closes = [100 + (index * 0.8) for index in range(95)] + [176, 172, 170, 169, 168]

@@ -68,8 +68,8 @@ class KrishnaEntryTrigger:
 class KrishnaPurpleTouchConfig:
     min_candles: int = 52
     step1_min_candles: int = 9
-    step1_touch_tolerance_percent: float = 1.0
-    purple_touch_tolerance_percent: float = 1.0
+    step1_touch_tolerance_percent: float = 3.0
+    purple_touch_tolerance_percent: float = 3.0
     approach_lookback_candles: int = 3
     approach_tolerance_percent: float = 3.0
 
@@ -181,7 +181,7 @@ PURPLE_TOUCH_PROFILES: dict[str, KrishnaPurpleProfile] = {
         "month", "Monthly", True,
     ),
     "day": KrishnaPurpleProfile(
-        "day", "Daily purple touch", "10minute", "10minute", "10minute", 365,
+        "day", "Daily purple touch", "10minute", "30minute", "10minute", 365,
         "week", "Weekly", True,
     ),
 }

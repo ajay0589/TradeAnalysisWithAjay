@@ -966,25 +966,25 @@
                     <span>Monthly scan</span>
                     <select id="purpleMonthIntervalSeconds">
                       <option value="900">Every 15 min</option>
-                      <option value="1800" selected>Every 30 min</option>
+                      <option value="1800">Every 30 min</option>
                       <option value="3600">Every 1 hour</option>
-                      <option value="7200">Every 2 hours</option>
+                      <option value="7200" selected>Every 2 hours</option>
                     </select>
                   </label>
                   <label for="purpleWeekIntervalSeconds">
                     <span>Weekly scan</span>
                     <select id="purpleWeekIntervalSeconds">
                       <option value="300">Every 5 min</option>
-                      <option value="600" selected>Every 10 min</option>
+                      <option value="600">Every 10 min</option>
                       <option value="900">Every 15 min</option>
-                      <option value="1800">Every 30 min</option>
+                      <option value="1800" selected>Every 30 min</option>
                     </select>
                   </label>
                   <label for="purpleDayIntervalSeconds">
                     <span>Daily scan</span>
                     <select id="purpleDayIntervalSeconds">
-                      <option value="180">Every 3 min</option>
-                      <option value="300" selected>Every 5 min</option>
+                      <option value="180" selected>Every 3 min</option>
+                      <option value="300">Every 5 min</option>
                       <option value="600">Every 10 min</option>
                     </select>
                   </label>
@@ -1046,12 +1046,12 @@
                     </thead>
                     <tbody>
                       <tr><td>Force cached-data run</td><td>Off / On</td><td>Off still analyzes cached candles after hours. On also permits creating test alerts and trade IDs outside market hours.</td><td>Keep Off for normal use.</td></tr>
-                      <tr><td>Step 1 touch rows</td><td>Count of stock-profile rows; range distance 0.00% to 1.00%</td><td>The latest Monthly, Weekly, or Daily candle touches purple EMA9 or comes within 1.00% of it. Rows are ordered from the closest distance upward.</td><td>First filter only; not an entry alert.</td></tr>
+                      <tr><td>Step 1 touch rows</td><td>Count of stock-profile rows; range distance 0.00% to 3.00%</td><td>The latest Monthly, Weekly, or Daily candle touches purple EMA9 or comes within 3.00% of it. Rows are ordered from the closest distance upward.</td><td>First filter only; not an entry alert.</td></tr>
                       <tr><td>Higher-TF filters passed</td><td>Count within Step 1</td><td>Touch rows with close above EMA26 and EMA89 and without a downtrend structure blocker.</td><td>Still requires early/final entry confirmation.</td></tr>
-                      <tr><td>Latest Scan Candidates</td><td>Touch within 1.00% plus mandatory filters</td><td>Starts from the same purple distance zone, then applies EMA89, EMA26, blue/purple direction, price approach, and higher confirmation.</td><td>Entry alerts are created only when early or final entry is also ready.</td></tr>
+                      <tr><td>Latest Scan Candidates</td><td>Touch within 3.00% plus mandatory filters</td><td>Starts from the same purple distance zone, then applies EMA89, EMA26, blue/purple direction, price approach, and higher confirmation.</td><td>Entry alerts are created only when early or final entry is also ready.</td></tr>
                       <tr><td>Scan</td><td>Monthly / Weekly / Daily</td><td>The higher timeframe on which the purple EMA9 touch was detected.</td><td>Determines the early, final, and exit timeframes.</td></tr>
                       <tr><td>Close / Range</td><td>Close; candle high and low</td><td>The latest higher-timeframe candle used for the touch check.</td><td>Its range is compared with purple EMA9.</td></tr>
-                      <tr><td>Purple EMA9</td><td>Price, close distance, range distance</td><td>Close distance measures how far the current close is from EMA9. Range distance is 0.00% for an exact range touch and positive when the nearest candle edge is outside EMA9.</td><td>Range distance must be at most 1.00%. Use the 0.00%, 0.20%, 0.50%, and 1.00% filters to inspect progressively wider shortlists.</td></tr>
+                      <tr><td>Purple EMA9</td><td>Price, close distance, range distance</td><td>Close distance measures how far the current close is from EMA9. Range distance is 0.00% for an exact range touch and positive when the nearest candle edge is outside EMA9.</td><td>Range distance must be at most 3.00%. Use the 0.00%, 0.20%, 0.50%, 1.00%, 1.50%, 2.00%, and 3.00% filters to inspect progressively wider shortlists.</td></tr>
                       <tr><td>Black EMA89</td><td>Pass / Block / Unknown</td><td>Pass means close is above EMA89. Block means close is below it. Unknown means fewer than 89 candles are available.</td><td>Mandatory higher-timeframe trend filter.</td></tr>
                       <tr><td>EMA26</td><td>Pass / Block / Unknown</td><td>Light-green EMA26 relationship for close and purple EMA9.</td><td>Close below EMA26 blocks strict qualification.</td></tr>
                       <tr><td>Blue / Purple Direction</td><td>Pass / Block plus approach</td><td>Blue Chande Kroll must be above purple EMA9, and price must move from the blue area toward purple across the latest 2-3 higher-timeframe candles.</td><td>Mandatory on the touch timeframe; blue above purple is also mandatory on the entry timeframe.</td></tr>
@@ -1074,10 +1074,39 @@
                   <span id="purpleProgressMeta">Idle</span>
                 </div>
                 <div class="ops-body">
-                  <div class="progress-shell">
-                    <div id="purpleProgressBar" class="progress-bar"></div>
-                  </div>
                   <div id="purpleProgressStatus" class="mini-status">Run the scanner or start the market monitor to refresh candles, scan F&O stocks, and create alerts.</div>
+                  <div class="profile-progress-grid">
+                    <article class="profile-progress-card">
+                      <div class="profile-progress-head"><strong>Monthly</strong><span id="purpleMonthProgressMeta">Idle</span></div>
+                      <div class="progress-shell"><div id="purpleMonthProgressBar" class="progress-bar"></div></div>
+                      <div id="purpleMonthProgressStatus" class="profile-progress-detail">Waiting for a scan.</div>
+                      <dl class="profile-progress-times">
+                        <div><dt>Last started</dt><dd id="purpleMonthLastStarted">-</dd></div>
+                        <div><dt>Last ended</dt><dd id="purpleMonthLastEnded">-</dd></div>
+                        <div><dt>Next trigger</dt><dd id="purpleMonthNextRun">Not scheduled</dd></div>
+                      </dl>
+                    </article>
+                    <article class="profile-progress-card">
+                      <div class="profile-progress-head"><strong>Weekly</strong><span id="purpleWeekProgressMeta">Idle</span></div>
+                      <div class="progress-shell"><div id="purpleWeekProgressBar" class="progress-bar"></div></div>
+                      <div id="purpleWeekProgressStatus" class="profile-progress-detail">Waiting for a scan.</div>
+                      <dl class="profile-progress-times">
+                        <div><dt>Last started</dt><dd id="purpleWeekLastStarted">-</dd></div>
+                        <div><dt>Last ended</dt><dd id="purpleWeekLastEnded">-</dd></div>
+                        <div><dt>Next trigger</dt><dd id="purpleWeekNextRun">Not scheduled</dd></div>
+                      </dl>
+                    </article>
+                    <article class="profile-progress-card">
+                      <div class="profile-progress-head"><strong>Daily</strong><span id="purpleDayProgressMeta">Idle</span></div>
+                      <div class="progress-shell"><div id="purpleDayProgressBar" class="progress-bar"></div></div>
+                      <div id="purpleDayProgressStatus" class="profile-progress-detail">Waiting for a scan.</div>
+                      <dl class="profile-progress-times">
+                        <div><dt>Last started</dt><dd id="purpleDayLastStarted">-</dd></div>
+                        <div><dt>Last ended</dt><dd id="purpleDayLastEnded">-</dd></div>
+                        <div><dt>Next trigger</dt><dd id="purpleDayNextRun">Not scheduled</dd></div>
+                      </dl>
+                    </article>
+                  </div>
                   <div id="purpleSummaryCards" class="compact-metrics"></div>
                   <div id="purpleSummaryPoints" class="mini-list"></div>
                 </div>
@@ -1089,7 +1118,7 @@
                   <span id="purpleStep1Meta"></span>
                 </div>
                 <div class="ops-body">
-                  <p class="helper-text">First filter only: the higher-timeframe candle touches purple EMA9 or comes within 1.00%. Rows are ranked closest first. Entry and exit checks show why a row did or did not become an alert candidate.</p>
+                  <p class="helper-text">First filter only: the higher-timeframe candle touches purple EMA9 or comes within 3.00%. Rows are ranked closest first. Entry and exit checks show why a row did or did not become an alert candidate.</p>
                 </div>
                 <div class="table-actions">
                   <label class="table-filter" for="purpleStep1ProfileFilter">
@@ -1112,10 +1141,13 @@
                   <label class="table-filter" for="purpleStep1DistanceFilter">
                     <span>Range distance</span>
                     <select id="purpleStep1DistanceFilter">
-                      <option value="1">Within 1.00%</option>
                       <option value="0">Exact 0.00%</option>
                       <option value="0.2">Within 0.20%</option>
                       <option value="0.5">Within 0.50%</option>
+                      <option value="1">Within 1.00%</option>
+                      <option value="1.5">Within 1.50%</option>
+                      <option value="2">Within 2.00%</option>
+                      <option value="3" selected>Within 3.00%</option>
                     </select>
                   </label>
                 </div>
@@ -1176,10 +1208,13 @@
                   <label class="table-filter" for="purpleCandidateDistanceFilter">
                     <span>Range distance</span>
                     <select id="purpleCandidateDistanceFilter">
-                      <option value="1">Within 1.00%</option>
                       <option value="0">Exact 0.00%</option>
                       <option value="0.2">Within 0.20%</option>
                       <option value="0.5">Within 0.50%</option>
+                      <option value="1">Within 1.00%</option>
+                      <option value="1.5">Within 1.50%</option>
+                      <option value="2">Within 2.00%</option>
+                      <option value="3" selected>Within 3.00%</option>
                     </select>
                   </label>
                   <button id="purpleCopyBtn" type="button">Copy symbols</button>
