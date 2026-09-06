@@ -202,7 +202,7 @@ The current Weekly-only execution rules, valid/invalid candle diagrams, exact bo
 
 Purple Touch live scanning and monitoring are temporarily restricted to the Weekly profile while its results are validated. Each run refreshes Weekly touch candles, Monthly confirmation candles, 30-minute early/exit candles, and 2-hour final-entry candles. Existing Monthly and Daily history is preserved, but those profiles are not newly scanned or exit-monitored while paused.
 
-Purple Touch entry alerts and trade lifecycle records are retained in local SQLite storage for audit and setup-quality review. The UI provides profile, entry type, lifecycle status, symbol, date, and sorting controls; it does not automatically purge open or closed Purple Touch trades.
+Purple Touch entry alerts and trade lifecycle records are retained in local SQLite storage for audit and setup-quality review. The UI combines each created entry signal and its lifecycle into one `Trades Triggered: Open & Closed` table with profile, entry type, status, symbol, date, and sorting controls; it does not automatically purge open or closed Purple Touch trades.
 
 Purple Touch lifecycle precedence:
 

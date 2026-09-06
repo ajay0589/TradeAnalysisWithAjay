@@ -3,10 +3,14 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from trading_analysis.analysis.market_structure import MarketStructure
 from trading_analysis.analysis.technical import atr, ema, rsi
 from trading_analysis.models import Candle
+
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 @dataclass(frozen=True)
@@ -99,6 +103,8 @@ class KrishnaPurpleTouchMatch:
     confidence: str
     close: float
     purple_ema9: float | None
+    touch_price: float | None
+    touch_timestamp: str | None
     light_green_level: float | None
     brown_vwma20: float | None
     yellow_line: float | None
@@ -139,6 +145,8 @@ class KrishnaPurpleStep1Candidate:
     candle_high: float
     candle_low: float
     purple_ema9: float | None
+    touch_price: float | None
+    touch_timestamp: str | None
     purple_touch: bool
     purple_touch_distance_percent: float | None
     purple_range_distance_percent: float | None
@@ -346,7 +354,7 @@ def scan_krishna_entry_trigger(
             symbol=symbol.upper(),
             timeframe=timeframe,
             status="wait",
-            trigger_date=latest.timestamp.isoformat(),
+            trigger_date=_ist_iso(latest.timestamp),
             close=close,
             yellow_line=yellow_line,
             vwma20=vwma20,
@@ -381,7 +389,7 @@ def scan_krishna_entry_trigger(
         symbol=symbol.upper(),
         timeframe=timeframe,
         status=status,
-        trigger_date=latest.timestamp.isoformat(),
+        trigger_date=_ist_iso(latest.timestamp),
         close=close,
         yellow_line=yellow_line,
         vwma20=vwma20,
@@ -546,6 +554,8 @@ def scan_krishna_purple_touch_setup(
         confidence=_confidence(score, warnings),
         close=latest.close,
         purple_ema9=ema9,
+        touch_price=ema9,
+        touch_timestamp=_ist_iso(latest.timestamp),
         light_green_level=light_green,
         brown_vwma20=brown,
         yellow_line=yellow,
@@ -722,6 +732,8 @@ def scan_krishna_purple_step1_candidate(
         candle_high=latest.high,
         candle_low=latest.low,
         purple_ema9=ema9,
+        touch_price=ema9,
+        touch_timestamp=_ist_iso(latest.timestamp),
         purple_touch=purple_touch,
         purple_touch_distance_percent=distance,
         purple_range_distance_percent=range_distance,
@@ -767,7 +779,7 @@ def scan_krishna_purple_exit_status(symbol: str, candles: list[Candle] | None, t
             "symbol": symbol.upper(),
             "timeframe": timeframe,
             "status": "insufficient",
-            "trigger_date": candles[-1].timestamp.isoformat(),
+            "trigger_date": _ist_iso(candles[-1].timestamp),
             "reasons": [],
             "warnings": [f"Needs at least 30 {timeframe} candles to check the exit condition."],
         }
@@ -779,7 +791,7 @@ def scan_krishna_purple_exit_status(symbol: str, candles: list[Candle] | None, t
             "symbol": symbol.upper(),
             "timeframe": timeframe,
             "status": "unknown",
-            "trigger_date": latest.timestamp.isoformat(),
+            "trigger_date": _ist_iso(latest.timestamp),
             "close": latest.close,
             "yellow_line": None,
             "reasons": [],
@@ -790,7 +802,7 @@ def scan_krishna_purple_exit_status(symbol: str, candles: list[Candle] | None, t
             "symbol": symbol.upper(),
             "timeframe": timeframe,
             "status": "exit_triggered",
-            "trigger_date": latest.timestamp.isoformat(),
+            "trigger_date": _ist_iso(latest.timestamp),
             "close": latest.close,
             "yellow_line": yellow,
             "reasons": [f"{timeframe_label_text(timeframe)} candle closed below yellow Chande Kroll line."],
@@ -800,7 +812,7 @@ def scan_krishna_purple_exit_status(symbol: str, candles: list[Candle] | None, t
         "symbol": symbol.upper(),
         "timeframe": timeframe,
         "status": "open",
-        "trigger_date": latest.timestamp.isoformat(),
+        "trigger_date": _ist_iso(latest.timestamp),
         "close": latest.close,
         "yellow_line": yellow,
         "reasons": [f"{timeframe_label_text(timeframe)} candle remains above yellow Chande Kroll line."],
@@ -937,7 +949,7 @@ def _purple_entry_snapshot(
             "timeframe": timeframe,
             "entry_kind": entry_kind,
             "status": "insufficient",
-            "trigger_date": candles[-1].timestamp.isoformat(),
+            "trigger_date": _ist_iso(candles[-1].timestamp),
             "warnings": [f"Needs at least 30 {timeframe} candles for {entry_kind} entry status."],
             "reasons": [],
         }
@@ -1031,7 +1043,7 @@ def _purple_entry_snapshot(
         "timeframe": timeframe,
         "entry_kind": entry_kind,
         "status": status,
-        "trigger_date": latest.timestamp.isoformat(),
+        "trigger_date": _ist_iso(latest.timestamp),
         "close": latest.close,
         "yellow_line": yellow,
         "brown_vwma20": brown,
@@ -1042,15 +1054,15 @@ def _purple_entry_snapshot(
         "close_above_blue": close_above_blue,
         "blue_above_purple": blue_above_purple,
         "rsi_divergence": divergence,
-        "touch_timestamp": candle1.timestamp.isoformat() if candle1 is not None else None,
+        "touch_timestamp": _ist_iso(candle1.timestamp) if candle1 is not None else None,
         "bars_since_touch": bars_since_touch,
         "candle1_low": candle1.low if candle1 is not None else None,
-        "candle2_timestamp": candle2.timestamp.isoformat() if candle2 is not None else None,
+        "candle2_timestamp": _ist_iso(candle2.timestamp) if candle2 is not None else None,
         "candle2_low": candle2.low if candle2 is not None else None,
         "reference_lows_ready": reference_lows_ready,
         "invalidation_level": invalidation_level,
         "setup_discarded": setup_discarded,
-        "invalidation_timestamp": invalidation_candle.timestamp.isoformat() if invalidation_candle else None,
+        "invalidation_timestamp": _ist_iso(invalidation_candle.timestamp) if invalidation_candle else None,
         "entry_price_reference": latest.close if entry_rules_pass else None,
         "exit_rule": f"Exit/review if {timeframe} candle closes below yellow Chande Kroll line.",
         "reasons": reasons,
@@ -1121,7 +1133,7 @@ def _purple_higher_confirmation(
         "label": profile.confirmation_label,
         "status": "pass" if passed else "block",
         "rule": rule,
-        "timestamp": latest.timestamp.isoformat(),
+        "timestamp": _ist_iso(latest.timestamp),
         "open": latest.open,
         "close": latest.close,
         "blue_line": blue,
@@ -1181,6 +1193,11 @@ def _relation(left: float | None, right: float | None) -> str:
     if left < right:
         return "below"
     return "at"
+
+
+def _ist_iso(value: datetime) -> str:
+    localized = value.replace(tzinfo=IST) if value.tzinfo is None else value.astimezone(IST)
+    return localized.isoformat()
 
 
 def _purple_touch_distance_percent(candle: Candle, ema9: float) -> float | None:

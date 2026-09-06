@@ -984,6 +984,7 @@
                   <button id="purpleAutoStartBtn" type="button">Start market monitor</button>
                   <button id="purpleAutoStopBtn" type="button">Stop</button>
                 </div>
+                <div class="field-hint">On an NSE trading day, start at 9:15-9:20 AM IST and leave it running through the session. Keep this tab open and the laptop awake. Stop after 3:30 PM IST once any active scan finishes. Exchange holidays are not detected automatically.</div>
               </div>
             </aside>
 
@@ -1032,7 +1033,7 @@
                       <tr><td>Weekly Setups Passing All Filters</td><td>Physical touch plus all mandatory setup filters</td><td>Applies EMA89, EMA26, Weekly blue/purple direction, price approach, Monthly confirmation, and structure checks.</td><td>"No all-filter setup" means at least one required check failed or lacked data. The stock may remain visible in Step 1 with its blocker, but it cannot create an entry signal in that scan.</td></tr>
                       <tr><td>Scan</td><td>Weekly</td><td>The purple EMA9 touch is detected on the latest Weekly candle.</td><td>Uses Monthly confirmation, 30-minute early/exit, and 2-hour final entry.</td></tr>
                       <tr><td>Close / Range</td><td>Close; candle high and low</td><td>The latest higher-timeframe candle used for the touch check.</td><td>Its range is compared with purple EMA9.</td></tr>
-                      <tr><td>Purple EMA9</td><td>Price and close distance</td><td>The wick/range must physically contain EMA9. Close distance measures how far the close is above EMA9.</td><td>Close must be from 0.00% to 3.00% above purple. Entirely-above near touches and all below-purple closes are invalid.</td></tr>
+                      <tr><td>Purple Touch Price / Time</td><td>EMA9 price, Weekly candle timestamp, and close distance</td><td>The wick/range must physically contain EMA9. The timestamp identifies the Weekly candle in which the touch occurred; all displayed times use IST.</td><td>Close must be from 0.00% to 3.00% above purple. Entirely-above near touches and all below-purple closes are invalid.</td></tr>
                       <tr><td>Black EMA89</td><td>Pass / Block / Unknown</td><td>Pass means close is above EMA89. Block means close is below it. Unknown means fewer than 89 candles are available.</td><td>Mandatory higher-timeframe trend filter.</td></tr>
                       <tr><td>EMA26</td><td>Pass / Block / Unknown</td><td>Light-green EMA26 relationship for close and purple EMA9.</td><td>Close below EMA26 blocks strict qualification.</td></tr>
                       <tr><td>Blue / Purple Direction</td><td>Pass / Block plus approach</td><td>On the Weekly setup timeframe, blue Chande Kroll must be above purple EMA9 and price must move from the blue area toward purple across the latest 2-3 Weekly candles.</td><td>Mandatory for the all-filter Weekly setup. Ignored on the 30-minute and 2-hour entry timeframes.</td></tr>
@@ -1041,9 +1042,8 @@
                       <tr><td>Early Entry</td><td>entry_candidate / wait / discarded / missing</td><td>The 30-minute close must be strictly above yellow. Blue/purple and yellow/brown are ignored for Early. Candle 1 and Candle 2 can each qualify immediately.</td><td>From Candle 3 onward, the touch expires only when price breaks the lower of Candle 1 and Candle 2 lows. No fixed time expiry.</td></tr>
                       <tr><td>Final Entry</td><td>entry_candidate / wait / discarded / missing</td><td>The 2-hour close must be strictly above yellow and yellow must be strictly above brown VWMA20. Blue/purple is ignored. Candle 1 and Candle 2 can each qualify immediately.</td><td>From Candle 3 onward, the touch expires only when price breaks the lower of Candle 1 and Candle 2 lows. No fixed time expiry.</td></tr>
                       <tr><td>Status / Blockers</td><td>qualified / step1_only</td><td>Qualified passed higher-timeframe filters. Step1-only shows the exact blocker.</td><td>Alerts require a strict setup plus entry confirmation.</td></tr>
-                      <tr><td>Entry Signals Created</td><td>Early / Final</td><td>An event log showing when the live scanner actually created a new entry signal and unique trade ID. It is history, not the current shortlist.</td><td>Use the newest timestamp and trade ID to identify signals created during the current live run.</td></tr>
                       <tr><td>Exit Alerts</td><td>Closed trade events</td><td>Created when the configured exit-timeframe candle closes below yellow.</td><td>Closes the matching trade ID.</td></tr>
-                      <tr><td>Entry Trades: Open &amp; Closed</td><td>Open / Closed / All</td><td>One state row per trade ID. Open means its entry signal exists and no exit has fired; Closed links the later exit timestamp and holding duration.</td><td>During live scanning, track newly created trade IDs here until the matching 30-minute exit closes them.</td></tr>
+                      <tr><td>Trades Triggered: Open &amp; Closed</td><td>Open / Closed / All</td><td>One row is created for every entry signal. Open means no exit has fired; Closed links the later exit timestamp and holding duration.</td><td>This single section replaces the redundant Entry Signals table. The immutable signal event remains stored internally for duplicate prevention, Telegram audit, and troubleshooting.</td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -1136,7 +1136,7 @@
                         <th>Symbol</th>
                         <th>Scan</th>
                         <th>Close / Range</th>
-                        <th>Purple EMA9</th>
+                        <th>Purple Touch Price / Time</th>
                         <th>Black EMA89</th>
                         <th>EMA26</th>
                         <th>Blue / Purple Direction</th>
@@ -1242,88 +1242,10 @@
                   <span id="purpleAlertMeta">Idle</span>
                 </div>
                 <div class="ops-body">
-                  <p class="helper-text">While the market monitor is running, track new entry and exit counts for this scan, Telegram delivery, the newest entry-signal timestamp, the new trade ID under Open entries, and the later 30-minute exit that closes the same ID.</p>
+                  <p class="helper-text">While the market monitor is running, track new entry and exit counts, Telegram delivery, the newest trade under Trades Triggered, and the later 30-minute exit that closes the same ID.</p>
                   <div id="purpleAlertTallyCards" class="compact-metrics"></div>
                   <div id="purpleAlertSummary" class="mini-list"></div>
                   <div id="purpleAlertTallyPoints" class="mini-list"></div>
-                </div>
-              </section>
-
-              <section class="table-panel">
-                <div class="panel-head">
-                  <h2>Entry Signals Created</h2>
-                  <span id="purpleEntryAlertMeta">0 alert(s)</span>
-                </div>
-                <div class="ops-body">
-                  <p class="helper-text">This is the permanent event log of entry signals actually created by the live scanner. For the current run, check the newest timestamp, symbol, Early/Final type, price, and trade ID. Candidate rows do not appear here until market/Force and duplicate checks also pass.</p>
-                </div>
-                <div class="table-actions">
-                  <label class="table-filter" for="purpleEntryAlertProfileFilter">
-                    <span>Scan</span>
-                    <select id="purpleEntryAlertProfileFilter">
-                      <option value="week" selected>Weekly</option>
-                    </select>
-                  </label>
-                  <label class="table-filter" for="purpleEntryAlertKindFilter">
-                    <span>Entry</span>
-                    <select id="purpleEntryAlertKindFilter">
-                      <option value="all">Early and final</option>
-                      <option value="early">Early entry</option>
-                      <option value="final">Final entry</option>
-                    </select>
-                  </label>
-                  <label class="table-filter" for="purpleEntryAlertStatusFilter">
-                    <span>Trade status</span>
-                    <select id="purpleEntryAlertStatusFilter">
-                      <option value="all">Open and closed</option>
-                      <option value="open">Open</option>
-                      <option value="closed">Closed</option>
-                    </select>
-                  </label>
-                  <label class="table-filter" for="purpleEntryAlertSymbolFilter">
-                    <span>Symbol</span>
-                    <input id="purpleEntryAlertSymbolFilter" placeholder="All symbols" />
-                  </label>
-                  <label class="table-filter" for="purpleEntryAlertFromFilter">
-                    <span>From</span>
-                    <input id="purpleEntryAlertFromFilter" type="date" />
-                  </label>
-                  <label class="table-filter" for="purpleEntryAlertToFilter">
-                    <span>To</span>
-                    <input id="purpleEntryAlertToFilter" type="date" />
-                  </label>
-                  <label class="table-filter" for="purpleEntryAlertSort">
-                    <span>Sort by</span>
-                    <select id="purpleEntryAlertSort">
-                      <option value="created_at:desc">Newest first</option>
-                      <option value="created_at:asc">Oldest first</option>
-                      <option value="symbol:asc">Symbol: A to Z</option>
-                      <option value="profile:asc">Profile</option>
-                      <option value="score:desc">Score: highest first</option>
-                    </select>
-                  </label>
-                </div>
-                <div class="wide-table">
-                  <table class="krishna-table">
-                    <thead>
-                      <tr>
-                        <th>Trade ID</th>
-                        <th>Time</th>
-                        <th>Symbol</th>
-                        <th>Scan</th>
-                        <th>Entry</th>
-                        <th>Status</th>
-                        <th>Price / Yellow</th>
-                        <th>Message</th>
-                      </tr>
-                    </thead>
-                    <tbody id="purpleEntryAlertsBody"></tbody>
-                  </table>
-                </div>
-                <div class="table-pagination">
-                  <button id="purpleEntryPrev" type="button">Previous</button>
-                  <span id="purpleEntryPageLabel">Page 1 of 1</span>
-                  <button id="purpleEntryNext" type="button">Next</button>
                 </div>
               </section>
 
@@ -1398,11 +1320,11 @@
 
               <section class="table-panel">
                 <div class="panel-head">
-                  <h2>Entry Trades: Open &amp; Closed</h2>
+                  <h2>Trades Triggered: Open &amp; Closed</h2>
                   <span id="purpleOpenTradeMeta">0 trade(s)</span>
                 </div>
                 <div class="ops-body">
-                  <p class="helper-text">Use this as the working list after an entry signal. Open rows are still being checked for a 30-minute close below yellow; Closed rows show the matching exit time, exit price, and total holding duration for the same trade ID.</p>
+                  <p class="helper-text">Every created entry signal appears once here. Open rows are still being checked for a 30-minute close below yellow; Closed rows show the matching exit time, exit price, and total holding duration. Signal events remain stored internally for duplicate prevention and Telegram audit.</p>
                 </div>
                 <div class="table-actions">
                   <label class="table-filter" for="purpleTradeProfileFilter">

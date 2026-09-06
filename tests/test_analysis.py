@@ -998,6 +998,8 @@ class AnalysisTests(unittest.TestCase):
         step1 = scan_krishna_purple_step1_candidate("ABC", touch, purple_timeframe="week")
 
         self.assertIsNotNone(step1)
+        self.assertEqual(step1.touch_price, step1.purple_ema9)
+        self.assertTrue(step1.touch_timestamp.endswith("+05:30"))
         self.assertEqual(step1.purple_range_distance_percent, 0.0)
         self.assertGreater(step1.purple_touch_distance_percent, 0.0)
         self.assertLessEqual(step1.purple_touch_distance_percent, 3.0)
@@ -1204,7 +1206,7 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(entry["status"], "discarded")
         self.assertTrue(entry["setup_discarded"])
         self.assertEqual(entry["invalidation_level"], 99.5)
-        self.assertEqual(entry["invalidation_timestamp"], candles[2].timestamp.isoformat())
+        self.assertEqual(entry["invalidation_timestamp"], f"{candles[2].timestamp.isoformat()}+05:30")
 
     def test_five_month_confirmation_uses_stable_calendar_buckets(self) -> None:
         monthly = [

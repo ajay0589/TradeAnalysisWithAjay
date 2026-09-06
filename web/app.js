@@ -24,7 +24,7 @@ const state = {
   purpleMonitorRunning: false,
   purpleScanInFlight: false,
   purpleCancelRequested: false,
-  purplePages: { step1: 1, candidates: 1, entry: 1, exit: 1, trades: 1 },
+  purplePages: { step1: 1, candidates: 1, exit: 1, trades: 1 },
   lastBacktest: null,
   strategies: [],
   lastGenericBacktest: null,
@@ -1325,7 +1325,9 @@ function renderPurpleStep1Results(rows = null) {
             <div class="cell-note">H ${fmt(row.candle_high)} / L ${fmt(row.candle_low)}</div>
           </td>
           <td>
-            ${fmt(row.purple_ema9)}
+            ${fmt(row.touch_price ?? row.purple_ema9)}
+            <div class="cell-note">purple EMA9 touch price</div>
+            <div class="cell-note">${fmtDateTime(row.touch_timestamp)}</div>
             <div class="cell-note">close distance ${fmt(row.purple_touch_distance_percent)}%</div>
             <div class="cell-note">physical wick/range touch</div>
           </td>
@@ -1673,20 +1675,11 @@ async function loadPurpleAlerts() {
     const params = new URLSearchParams({
       limit: "50",
       page_size: String(PURPLE_PAGE_SIZE),
-      entry_page: String(state.purplePages.entry),
       exit_page: String(state.purplePages.exit),
       trade_page: String(state.purplePages.trades),
     });
-    addPurpleAlertFilterParams(params, "entry", "purpleEntryAlertProfileFilter", "purpleEntryAlertKindFilter");
     addPurpleAlertFilterParams(params, "exit", "purpleExitAlertProfileFilter", "purpleExitAlertKindFilter");
     addPurpleAlertFilterParams(params, "trade", "purpleTradeProfileFilter", "purpleTradeEntryFilter");
-    addPurpleHistoryFilterParams(params, "entry", {
-      statusId: "purpleEntryAlertStatusFilter",
-      symbolId: "purpleEntryAlertSymbolFilter",
-      fromId: "purpleEntryAlertFromFilter",
-      toId: "purpleEntryAlertToFilter",
-      sortId: "purpleEntryAlertSort",
-    });
     addPurpleHistoryFilterParams(params, "exit", {
       symbolId: "purpleExitAlertSymbolFilter",
       fromId: "purpleExitAlertFromFilter",
@@ -1811,23 +1804,17 @@ function renderPurpleAlerts(data = null) {
   const totalExitCount = Number(counts.exit_alerts ?? recentExitCount);
   const totalOpenCount = Number(counts.open_trades ?? trades.length);
   const totalClosedCount = Number(counts.closed_trades ?? totalExitCount);
-  const entryAlerts = Array.isArray(data.entry_alerts)
-    ? data.entry_alerts
-    : filterPurpleAlertRows(alerts.filter((alert) => alert.alert_type === "entry"), "purpleEntryAlertProfileFilter", "purpleEntryAlertKindFilter");
   const exitAlerts = Array.isArray(data.exit_alerts)
     ? data.exit_alerts
     : filterPurpleAlertRows(alerts.filter((alert) => alert.alert_type === "exit"), "purpleExitAlertProfileFilter", "purpleExitAlertKindFilter");
   const lifecycleTrades = pagination.trades
     ? trades
     : filterPurpleAlertRows(trades, "purpleTradeProfileFilter", "purpleTradeEntryFilter");
-  const entryFilteredTotal = Number(pagination.entry?.total ?? totalEntryCount);
   const exitFilteredTotal = Number(pagination.exit?.total ?? totalExitCount);
   const tradeFilteredTotal = Number(pagination.trades?.total ?? totalOpenCount);
-  $("purpleEntryAlertMeta").textContent = `${entryAlerts.length} shown / ${entryFilteredTotal} filtered / ${totalEntryCount} historical entry event(s)`;
   $("purpleExitAlertMeta").textContent = `${exitAlerts.length} shown / ${exitFilteredTotal} filtered / ${totalExitCount} total exit alert(s)`;
   const totalLifecycleCount = totalOpenCount + totalClosedCount;
   $("purpleOpenTradeMeta").textContent = `${lifecycleTrades.length} shown / ${tradeFilteredTotal} filtered / ${totalLifecycleCount} total trade(s)`;
-  updatePurpleServerPager("entry", pagination.entry, entryAlerts.length);
   updatePurpleServerPager("exit", pagination.exit, exitAlerts.length);
   updatePurpleServerPager("trades", pagination.trades, lifecycleTrades.length);
   $("purpleAlertTallyCards").innerHTML = [
@@ -1863,7 +1850,6 @@ function renderPurpleAlerts(data = null) {
   ]
     .map((point) => `<div>${escapeHtml(point)}</div>`)
     .join("");
-  $("purpleEntryAlertsBody").innerHTML = renderPurpleAlertTableRows(entryAlerts, "No entry alerts match these filters.", "alert-entry-row");
   $("purpleExitAlertsBody").innerHTML = renderPurpleAlertTableRows(exitAlerts, "No exit alerts match these filters.", "alert-exit-row");
   $("purpleTradesBody").innerHTML = lifecycleTrades.length
     ? lifecycleTrades
@@ -1886,7 +1872,7 @@ function renderPurpleAlerts(data = null) {
     )
     .join("")
     : emptyTableRow(11, "No open or closed entry trades match these filters.");
-  document.querySelectorAll("#purpleEntryAlertsBody .linkBtn, #purpleExitAlertsBody .linkBtn").forEach((button) => {
+  document.querySelectorAll("#purpleExitAlertsBody .linkBtn").forEach((button) => {
     button.addEventListener("click", () => {
       $("symbolInput").value = button.dataset.symbol;
       activateTab("analyze");
@@ -1906,7 +1892,7 @@ function filterPurpleAlertRows(rows, profileFilterId, entryFilterId) {
 }
 
 function updatePurpleServerPager(pageKey, pageInfo, shown) {
-  const prefix = { entry: "purpleEntry", exit: "purpleExit", trades: "purpleTrade" }[pageKey];
+  const prefix = { exit: "purpleExit", trades: "purpleTrade" }[pageKey];
   if (!prefix) return;
   const page = Number(pageInfo?.page || state.purplePages[pageKey] || 1);
   const pages = Number(pageInfo?.pages || 1);
@@ -1960,8 +1946,8 @@ function openDuration(openedAt) {
 
 function durationBetween(openedAt, closedAt = null) {
   if (!openedAt) return "-";
-  const opened = new Date(openedAt);
-  const ended = closedAt ? new Date(closedAt) : new Date();
+  const opened = parseDateTime(openedAt);
+  const ended = closedAt ? parseDateTime(closedAt) : new Date();
   if (Number.isNaN(opened.getTime()) || Number.isNaN(ended.getTime())) return "-";
   const minutes = Math.max(0, Math.floor((ended.getTime() - opened.getTime()) / 60000));
   const days = Math.floor(minutes / 1440);
@@ -3536,16 +3522,28 @@ function pointsClass(value) {
 
 function fmtDateTime(value) {
   if (!value) return "-";
-  const date = new Date(value);
+  const date = parseDateTime(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString("en-IN", {
+  return `${date.toLocaleString("en-IN", {
     year: "numeric",
     month: "short",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-  });
+    timeZone: "Asia/Kolkata",
+  })} IST`;
+}
+
+function parseDateTime(value) {
+  const raw = String(value).trim();
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw);
+  const normalized = hasTimezone
+    ? raw
+    : /^\d{4}-\d{2}-\d{2}$/.test(raw)
+      ? `${raw}T00:00:00+05:30`
+      : `${raw.replace(" ", "T")}+05:30`;
+  return new Date(normalized);
 }
 
 function enhanceCollapsibleSections() {
@@ -3607,13 +3605,6 @@ $("purpleCandidateEntryFilter").addEventListener("change", () => { state.purpleP
 $("purpleCandidateDistanceFilter").addEventListener("change", () => { state.purplePages.candidates = 1; renderPurpleResults(); });
 $("purpleCandidateSort").addEventListener("change", () => { state.purplePages.candidates = 1; renderPurpleResults(); });
 [
-  ["purpleEntryAlertProfileFilter", "entry"],
-  ["purpleEntryAlertKindFilter", "entry"],
-  ["purpleEntryAlertStatusFilter", "entry"],
-  ["purpleEntryAlertSymbolFilter", "entry"],
-  ["purpleEntryAlertFromFilter", "entry"],
-  ["purpleEntryAlertToFilter", "entry"],
-  ["purpleEntryAlertSort", "entry"],
   ["purpleExitAlertProfileFilter", "exit"],
   ["purpleExitAlertKindFilter", "exit"],
   ["purpleExitAlertSymbolFilter", "exit"],
@@ -3635,8 +3626,6 @@ $("purpleStep1Prev").addEventListener("click", () => { state.purplePages.step1 -
 $("purpleStep1Next").addEventListener("click", () => { state.purplePages.step1 += 1; renderPurpleStep1Results(); });
 $("purpleCandidatePrev").addEventListener("click", () => { state.purplePages.candidates -= 1; renderPurpleResults(); });
 $("purpleCandidateNext").addEventListener("click", () => { state.purplePages.candidates += 1; renderPurpleResults(); });
-$("purpleEntryPrev").addEventListener("click", () => { state.purplePages.entry -= 1; loadPurpleAlerts(); });
-$("purpleEntryNext").addEventListener("click", () => { state.purplePages.entry += 1; loadPurpleAlerts(); });
 $("purpleExitPrev").addEventListener("click", () => { state.purplePages.exit -= 1; loadPurpleAlerts(); });
 $("purpleExitNext").addEventListener("click", () => { state.purplePages.exit += 1; loadPurpleAlerts(); });
 $("purpleTradePrev").addEventListener("click", () => { state.purplePages.trades -= 1; loadPurpleAlerts(); });

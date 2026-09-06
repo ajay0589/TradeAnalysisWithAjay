@@ -385,7 +385,7 @@ def build_story() -> list[object]:
         Spacer(1, 6 * mm),
         callout(
             "Counts do not tally stage-for-stage",
-            "Step 1 is the widest shortlist. Weekly Setups Passing All Filters is a stricter subset. Entry Signals Created contains deduplicated historical events, not the current setup count. Exit Alerts apply only to open Weekly trade IDs.",
+            "Step 1 is the widest shortlist. Weekly Setups Passing All Filters is a stricter subset. Trades Triggered contains one open/closed row for each created entry signal. Exit Alerts apply only to open Weekly trade IDs.",
             AMBER_BG,
             AMBER,
         ),
@@ -724,8 +724,8 @@ def build_story() -> list[object]:
     ])
 
     story.extend([
-        heading("10", "From entry candidate to Entry Signal Created"),
-        p("A technical entry candidate becomes a stored signal only after the operational gates pass. This is why a setup can show entry_candidate while the Entry Signals Created count does not increase."),
+        heading("10", "From entry candidate to a triggered trade"),
+        p("A technical entry candidate becomes a stored signal and trade row only after the operational gates pass. This is why a setup can show entry_candidate while the Trades Triggered count does not increase."),
         horizontal_flow([
             ("Setup row", "All mandatory filters pass", PURPLE),
             ("Entry ready", "Early or Final snapshot passes", BLUE),
@@ -758,21 +758,22 @@ def build_story() -> list[object]:
             ["UI section", "What to watch", "What it tells a nontechnical user"],
             [
                 ["Scan Progress & Data Used", "Status, candles refreshed, failures, last start, last end, next trigger", "Whether the Weekly scan is running, completed, delayed, or missing candle data."],
-                ["Step 1: Purple EMA9 Touch", "Symbol, close distance, touch result, blocker", "Which Weekly candles physically touched purple and closed no more than 3.00% above it."],
+                ["Step 1: Purple EMA9 Touch", "Symbol, touch price/time in IST, close distance, blocker", "Which Weekly candles physically touched purple and closed no more than 3.00% above it."],
                 ["Weekly Setups Passing All Filters", "Monthly confirmation, Weekly direction/trend, Early and Final status", "Which Step 1 rows passed every mandatory setup filter and are waiting for, or already meet, an entry condition."],
                 ["Live Scan Alert Summary", "Signals created/skipped, Telegram sent/failed, reason", "Whether a technically ready entry was allowed through market-hours, duplicate, persistence, and Telegram gates."],
-                ["Entry Signals Created", "Newest event time, symbol, Early/Final, profile, trade ID", "An immutable history of entry signals actually created. It does not list every current setup or every scan result."],
-                ["Entry Trades: Open & Closed", "Trade ID, open/closed status, entry time, exit time, time open", "The stateful trade record. An open row is still watched for exit; a closed row keeps the completed duration and linked timestamps."],
+                ["Trades Triggered: Open & Closed", "Trade ID, Early/Final, entry time, open/closed status, exit time, duration", "One row for every created entry signal. An open row is watched for exit; a closed row keeps the linked exit and duration."],
                 ["Exit Alerts", "Exit time, symbol, trade ID, 30-minute close and yellow", "Proof that an open Weekly trade received its strict close-below-yellow exit signal."],
             ],
             [50, 66, 58],
         ),
         Spacer(1, 6 * mm),
-        callout("Entry Signals Created", "This is a historical event log. Each row answers: when was the signal created, was it Early or Final, which Weekly setup produced it, and which trade ID was opened? Old rows correctly remain even when the current scan no longer shows that setup.", BLUE_BG, BLUE),
+        callout("Why there is one trade section", "Every created entry signal immediately creates one trade ID, so separate entry-signal and trade tables repeated the same event. Trades Triggered is now the single user-facing view. The immutable signal event remains stored internally for duplicate prevention, Telegram audit, and troubleshooting.", BLUE_BG, BLUE),
         Spacer(1, 5 * mm),
-        callout("Entry Trades: Open & Closed", "This is the trade lifecycle view in plain language. Open means the exit scanner is still monitoring that trade ID. Closed means an Exit Alert was linked to it; entry time, exit time, and time open show the complete duration. It is not a broker position or an automatic order.", GREEN_BG, GREEN),
+        callout("Trades Triggered: Open & Closed", "Open means the exit scanner is still monitoring that trade ID. Closed means an Exit Alert was linked to it; entry time, exit time, and time open show the complete duration. It is not a broker position or an automatic order. All displayed timestamps are IST.", GREEN_BG, GREEN),
         Spacer(1, 5 * mm),
         callout("Live review habit", "For an unexpected result, first note the scan end timestamp, then capture the same symbol's Step 1 row, all-filter setup row, Live Scan Alert Summary, and matching trade ID. Compare charts only at that same timestamp.", AMBER_BG, AMBER),
+        Spacer(1, 5 * mm),
+        callout("Daily monitor operation", "On an NSE trading day, click Start market monitor at 9:15-9:20 AM IST. Keep the browser tab open and the laptop awake through the session. After 3:30 PM IST, wait for any active scan to finish and click Stop. The application currently recognizes weekdays but does not automatically exclude NSE holidays.", PURPLE_BG, PURPLE_DARK),
         PageBreak(),
     ])
 
@@ -845,9 +846,8 @@ def build_story() -> list[object]:
             [
                 ["Step 1", "Current physical Weekly touch audit row", "Analyzed Weekly symbols"],
                 ["Weekly Setups Passing All Filters", "Current setup passed every mandatory gate; entry may wait", "Current Step 1 rows"],
-                ["Entry Signals Created", "Deduplicated historical entry event with trade ID", "Not a direct subset of current setups"],
-                ["Entry Trades: Open & Closed", "Current state and duration for each created trade ID", "Historical Entry Signals"],
-                ["Exit Alerts", "Historical close event for a matching open trade ID", "Historical Entry Signals"],
+                ["Trades Triggered: Open & Closed", "Created entry event plus current state and duration for its trade ID", "Not a direct subset of current setups"],
+                ["Exit Alerts", "Historical close event for a matching open trade ID", "Triggered trades"],
             ],
             [56, 76, 42],
         ),
