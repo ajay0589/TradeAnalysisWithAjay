@@ -940,15 +940,13 @@
             <aside class="sidebar">
               <div class="panel">
                 <label>Purple Touch Scanner</label>
-                <div class="field-hint">Scans Monthly, Weekly, and Daily purple-touch profiles across F&O stocks during NSE market hours and sends Telegram alerts.</div>
+                <div class="field-hint">Weekly-only validation mode: scans Weekly purple-touch setups across F&amp;O stocks during NSE market hours and sends Telegram alerts. Monthly and Daily scans are paused.</div>
                 <div id="purpleMonitorStatus" class="monitor-status stopped">
                   <strong>Scanner stopped</strong>
                   <span>No recurring scan is running.</span>
                 </div>
                 <select id="purpleTimeframe" hidden>
                   <option value="week" selected>Weekly</option>
-                  <option value="month">Monthly</option>
-                  <option value="day">Daily</option>
                 </select>
                 <input id="purpleDays" type="hidden" value="3000" />
                 <input id="purpleLimit" type="hidden" value="all" />
@@ -962,15 +960,6 @@
                 </label>
                 <label>Monitor intervals</label>
                 <div class="monitor-interval-grid">
-                  <label for="purpleMonthIntervalSeconds">
-                    <span>Monthly scan</span>
-                    <select id="purpleMonthIntervalSeconds">
-                      <option value="900">Every 15 min</option>
-                      <option value="1800">Every 30 min</option>
-                      <option value="3600">Every 1 hour</option>
-                      <option value="7200" selected>Every 2 hours</option>
-                    </select>
-                  </label>
                   <label for="purpleWeekIntervalSeconds">
                     <span>Weekly scan</span>
                     <select id="purpleWeekIntervalSeconds">
@@ -980,16 +969,8 @@
                       <option value="1800" selected>Every 30 min</option>
                     </select>
                   </label>
-                  <label for="purpleDayIntervalSeconds">
-                    <span>Daily scan</span>
-                    <select id="purpleDayIntervalSeconds">
-                      <option value="180" selected>Every 3 min</option>
-                      <option value="300">Every 5 min</option>
-                      <option value="600">Every 10 min</option>
-                    </select>
-                  </label>
                 </div>
-                <div class="field-hint">Each profile becomes due independently. Due scans are queued so candle refresh, entry checks, and exit checks do not overlap.</div>
+                <div class="field-hint">The Weekly monitor refreshes Weekly, Monthly-confirmation, 30-minute, and 2-hour candles. A due scan is queued if another Weekly scan is still running.</div>
                 <label class="check-row">
                   <input id="purpleForceToggle" type="checkbox" />
                   Force cached-data run outside market hours
@@ -1009,8 +990,8 @@
             <section class="content">
               <section class="activity-hero">
                 <div>
-                  <h2>Purple Touch Scanner</h2>
-                  <p>One workflow: scan F&O stocks across Monthly, Weekly, and Daily profiles, create entry/exit alerts, and track open trade IDs.</p>
+                  <h2>Weekly Purple Touch Scanner</h2>
+                  <p>Validation mode for Weekly touch, Monthly confirmation, 30-minute early/exit, and 2-hour final-entry rules. Monthly and Daily profiles are paused.</p>
                 </div>
                 <span id="purpleMeta"></span>
               </section>
@@ -1032,7 +1013,7 @@
                   <span>Expand for column values and meanings</span>
                 </div>
                 <div class="ops-body">
-                  <p class="helper-text">A row represents one stock and one scan profile. The same stock can therefore appear separately under Monthly, Weekly, and Daily.</p>
+                  <p class="helper-text">A row represents one stock under the Weekly purple-touch profile. Existing Monthly and Daily history remains stored but is not scanned in this validation mode.</p>
                 </div>
                 <div class="wide-table">
                   <table class="krishna-table meaning-table">
@@ -1046,23 +1027,23 @@
                     </thead>
                     <tbody>
                       <tr><td>Force cached-data run</td><td>Off / On</td><td>Off still analyzes cached candles after hours. On also permits creating test alerts and trade IDs outside market hours.</td><td>Keep Off for normal use.</td></tr>
-                      <tr><td>Step 1 touch rows</td><td>Count of stock-profile rows; range distance 0.00% to 3.00%</td><td>The latest Monthly, Weekly, or Daily candle touches purple EMA9 or comes within 3.00% of it. Rows are ordered from the closest distance upward.</td><td>First filter only; not an entry alert.</td></tr>
-                      <tr><td>Higher-TF filters passed</td><td>Count within Step 1</td><td>Touch rows with close above EMA26 and EMA89 and without a downtrend structure blocker.</td><td>Still requires early/final entry confirmation.</td></tr>
-                      <tr><td>Latest Scan Candidates</td><td>Touch within 3.00% plus mandatory filters</td><td>Starts from the same purple distance zone, then applies EMA89, EMA26, blue/purple direction, price approach, and higher confirmation.</td><td>Entry alerts are created only when early or final entry is also ready.</td></tr>
-                      <tr><td>Scan</td><td>Monthly / Weekly / Daily</td><td>The higher timeframe on which the purple EMA9 touch was detected.</td><td>Determines the early, final, and exit timeframes.</td></tr>
+                      <tr><td>Step 1 touch rows</td><td>Count of Weekly stock rows; close distance 0.00% to 3.00%</td><td>The latest Weekly wick/range physically touches purple EMA9 and the candle closes on or no more than 3.00% above purple. Rows are ordered by close distance.</td><td>First filter only; not an entry signal.</td></tr>
+                      <tr><td>Higher-TF filters passed</td><td>Count within Step 1</td><td>Touch rows that also pass Weekly EMA89/EMA26, Weekly blue/purple direction and approach, Monthly confirmation, and structure checks.</td><td>Still requires an early or final entry-timeframe close.</td></tr>
+                      <tr><td>Weekly Setups Passing All Filters</td><td>Physical touch plus all mandatory setup filters</td><td>Applies EMA89, EMA26, Weekly blue/purple direction, price approach, Monthly confirmation, and structure checks.</td><td>"No all-filter setup" means at least one required check failed or lacked data. The stock may remain visible in Step 1 with its blocker, but it cannot create an entry signal in that scan.</td></tr>
+                      <tr><td>Scan</td><td>Weekly</td><td>The purple EMA9 touch is detected on the latest Weekly candle.</td><td>Uses Monthly confirmation, 30-minute early/exit, and 2-hour final entry.</td></tr>
                       <tr><td>Close / Range</td><td>Close; candle high and low</td><td>The latest higher-timeframe candle used for the touch check.</td><td>Its range is compared with purple EMA9.</td></tr>
-                      <tr><td>Purple EMA9</td><td>Price, close distance, range distance</td><td>Close distance measures how far the current close is from EMA9. Range distance is 0.00% for an exact range touch and positive when the nearest candle edge is outside EMA9.</td><td>Range distance must be at most 3.00%. Use the 0.00%, 0.20%, 0.50%, 1.00%, 1.50%, 2.00%, and 3.00% filters to inspect progressively wider shortlists.</td></tr>
+                      <tr><td>Purple EMA9</td><td>Price and close distance</td><td>The wick/range must physically contain EMA9. Close distance measures how far the close is above EMA9.</td><td>Close must be from 0.00% to 3.00% above purple. Entirely-above near touches and all below-purple closes are invalid.</td></tr>
                       <tr><td>Black EMA89</td><td>Pass / Block / Unknown</td><td>Pass means close is above EMA89. Block means close is below it. Unknown means fewer than 89 candles are available.</td><td>Mandatory higher-timeframe trend filter.</td></tr>
                       <tr><td>EMA26</td><td>Pass / Block / Unknown</td><td>Light-green EMA26 relationship for close and purple EMA9.</td><td>Close below EMA26 blocks strict qualification.</td></tr>
-                      <tr><td>Blue / Purple Direction</td><td>Pass / Block plus approach</td><td>Blue Chande Kroll must be above purple EMA9, and price must move from the blue area toward purple across the latest 2-3 higher-timeframe candles.</td><td>Mandatory on the touch timeframe; blue above purple is also mandatory on the entry timeframe.</td></tr>
-                      <tr><td>Higher Confirmation</td><td>5-month / Monthly / Weekly</td><td>Monthly touch: derived 5-month open or close above blue. Weekly touch: Monthly open or close above blue. Daily touch: Weekly open or close above blue.</td><td>Mandatory higher-timeframe confirmation.</td></tr>
+                      <tr><td>Blue / Purple Direction</td><td>Pass / Block plus approach</td><td>On the Weekly setup timeframe, blue Chande Kroll must be above purple EMA9 and price must move from the blue area toward purple across the latest 2-3 Weekly candles.</td><td>Mandatory for the all-filter Weekly setup. Ignored on the 30-minute and 2-hour entry timeframes.</td></tr>
+                      <tr><td>Higher Confirmation</td><td>Monthly</td><td>For a Weekly touch, the latest Monthly candle open or close must be strictly above its blue Chande Kroll line.</td><td>Mandatory higher-timeframe confirmation.</td></tr>
                       <tr><td>Yellow / Brown</td><td>Chande Kroll / VWMA20 values</td><td>Shows the yellow Chande Kroll line and brown VWMA20.</td><td>Final entry requires yellow above brown.</td></tr>
-                      <tr><td>Early Entry</td><td>entry_candidate / wait / discarded / missing</td><td>Close above yellow and blue above purple on the early timeframe. Yellow above brown is optional. The mapped touch bar is Candle 1 and Candle 2 must close first.</td><td>From Candle 3 onward, discarded only when price breaks the lower of Candle 1 and Candle 2 lows. No fixed time expiry.</td></tr>
-                      <tr><td>Final Entry</td><td>entry_candidate / wait / discarded / missing</td><td>Close above yellow, blue above purple, and yellow above brown on the final timeframe. The mapped touch bar is Candle 1 and Candle 2 must close first.</td><td>From Candle 3 onward, discarded only when price breaks the lower of Candle 1 and Candle 2 lows. No fixed time expiry.</td></tr>
+                      <tr><td>Early Entry</td><td>entry_candidate / wait / discarded / missing</td><td>The 30-minute close must be strictly above yellow. Blue/purple and yellow/brown are ignored for Early. Candle 1 and Candle 2 can each qualify immediately.</td><td>From Candle 3 onward, the touch expires only when price breaks the lower of Candle 1 and Candle 2 lows. No fixed time expiry.</td></tr>
+                      <tr><td>Final Entry</td><td>entry_candidate / wait / discarded / missing</td><td>The 2-hour close must be strictly above yellow and yellow must be strictly above brown VWMA20. Blue/purple is ignored. Candle 1 and Candle 2 can each qualify immediately.</td><td>From Candle 3 onward, the touch expires only when price breaks the lower of Candle 1 and Candle 2 lows. No fixed time expiry.</td></tr>
                       <tr><td>Status / Blockers</td><td>qualified / step1_only</td><td>Qualified passed higher-timeframe filters. Step1-only shows the exact blocker.</td><td>Alerts require a strict setup plus entry confirmation.</td></tr>
-                      <tr><td>Entry Alert History</td><td>Early / Final</td><td>Historical entry events. Every entry event creates one unique trade ID.</td><td>Trade remains open until its exit condition triggers.</td></tr>
+                      <tr><td>Entry Signals Created</td><td>Early / Final</td><td>An event log showing when the live scanner actually created a new entry signal and unique trade ID. It is history, not the current shortlist.</td><td>Use the newest timestamp and trade ID to identify signals created during the current live run.</td></tr>
                       <tr><td>Exit Alerts</td><td>Closed trade events</td><td>Created when the configured exit-timeframe candle closes below yellow.</td><td>Closes the matching trade ID.</td></tr>
-                      <tr><td>Trade Lifecycle</td><td>Open / Closed / All</td><td>Links each entry timestamp to its exit timestamp using the same trade ID and calculates the holding duration.</td><td>History is retained locally; use status, symbol, date, profile, entry-type, and sort controls instead of deleting records.</td></tr>
+                      <tr><td>Entry Trades: Open &amp; Closed</td><td>Open / Closed / All</td><td>One state row per trade ID. Open means its entry signal exists and no exit has fired; Closed links the later exit timestamp and holding duration.</td><td>During live scanning, track newly created trade IDs here until the matching 30-minute exit closes them.</td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -1077,16 +1058,6 @@
                   <div id="purpleProgressStatus" class="mini-status">Run the scanner or start the market monitor to refresh candles, scan F&O stocks, and create alerts.</div>
                   <div class="profile-progress-grid">
                     <article class="profile-progress-card">
-                      <div class="profile-progress-head"><strong>Monthly</strong><span id="purpleMonthProgressMeta">Idle</span></div>
-                      <div class="progress-shell"><div id="purpleMonthProgressBar" class="progress-bar"></div></div>
-                      <div id="purpleMonthProgressStatus" class="profile-progress-detail">Waiting for a scan.</div>
-                      <dl class="profile-progress-times">
-                        <div><dt>Last started</dt><dd id="purpleMonthLastStarted">-</dd></div>
-                        <div><dt>Last ended</dt><dd id="purpleMonthLastEnded">-</dd></div>
-                        <div><dt>Next trigger</dt><dd id="purpleMonthNextRun">Not scheduled</dd></div>
-                      </dl>
-                    </article>
-                    <article class="profile-progress-card">
                       <div class="profile-progress-head"><strong>Weekly</strong><span id="purpleWeekProgressMeta">Idle</span></div>
                       <div class="progress-shell"><div id="purpleWeekProgressBar" class="progress-bar"></div></div>
                       <div id="purpleWeekProgressStatus" class="profile-progress-detail">Waiting for a scan.</div>
@@ -1094,16 +1065,6 @@
                         <div><dt>Last started</dt><dd id="purpleWeekLastStarted">-</dd></div>
                         <div><dt>Last ended</dt><dd id="purpleWeekLastEnded">-</dd></div>
                         <div><dt>Next trigger</dt><dd id="purpleWeekNextRun">Not scheduled</dd></div>
-                      </dl>
-                    </article>
-                    <article class="profile-progress-card">
-                      <div class="profile-progress-head"><strong>Daily</strong><span id="purpleDayProgressMeta">Idle</span></div>
-                      <div class="progress-shell"><div id="purpleDayProgressBar" class="progress-bar"></div></div>
-                      <div id="purpleDayProgressStatus" class="profile-progress-detail">Waiting for a scan.</div>
-                      <dl class="profile-progress-times">
-                        <div><dt>Last started</dt><dd id="purpleDayLastStarted">-</dd></div>
-                        <div><dt>Last ended</dt><dd id="purpleDayLastEnded">-</dd></div>
-                        <div><dt>Next trigger</dt><dd id="purpleDayNextRun">Not scheduled</dd></div>
                       </dl>
                     </article>
                   </div>
@@ -1118,16 +1079,13 @@
                   <span id="purpleStep1Meta"></span>
                 </div>
                 <div class="ops-body">
-                  <p class="helper-text">First filter only: the higher-timeframe candle touches purple EMA9 or comes within 3.00%. Rows are ranked closest first. Entry and exit checks show why a row did or did not become an alert candidate.</p>
+                  <p class="helper-text">First filter only: the latest Weekly wick/range must physically touch purple EMA9 and close from 0.00% to 3.00% above it. Entirely-above near touches and below-purple closes are excluded.</p>
                 </div>
                 <div class="table-actions">
                   <label class="table-filter" for="purpleStep1ProfileFilter">
                     <span>Scan</span>
                     <select id="purpleStep1ProfileFilter">
-                      <option value="all">All scans</option>
-                      <option value="month">Monthly</option>
-                      <option value="week">Weekly</option>
-                      <option value="day">Daily</option>
+                      <option value="week" selected>Weekly</option>
                     </select>
                   </label>
                   <label class="table-filter" for="purpleStep1EntryFilter">
@@ -1149,7 +1107,7 @@
                     </select>
                   </label>
                   <label class="table-filter" for="purpleStep1DistanceFilter">
-                    <span>Range distance</span>
+                    <span>Close above purple</span>
                     <select id="purpleStep1DistanceFilter">
                       <option value="0">Exact 0.00%</option>
                       <option value="0.2">Within 0.20%</option>
@@ -1165,7 +1123,7 @@
                     <select id="purpleStep1Sort">
                       <option value="distance_asc">Distance: nearest first</option>
                       <option value="distance_desc">Distance: farthest first</option>
-                      <option value="profile_asc">Profile: Monthly to Daily</option>
+                      <option value="profile_asc">Profile: Weekly</option>
                       <option value="symbol_asc">Symbol: A to Z</option>
                       <option value="status_asc">Setup status</option>
                     </select>
@@ -1201,20 +1159,17 @@
 
               <section class="table-panel">
                 <div class="panel-head">
-                  <h2>Latest Scan Candidates</h2>
+                  <h2>Weekly Setups Passing All Filters</h2>
                   <span id="purpleResultMeta"></span>
                 </div>
                 <div class="ops-body">
-                  <p class="helper-text">These rows passed the full Purple Touch setup and are eligible for entry/exit alert tracking.</p>
+                  <p class="helper-text">These rows passed every mandatory Weekly and Monthly setup filter. Early or Final may still be waiting. No row here means at least one mandatory filter failed or lacked data; review its blocker in Step 1.</p>
                 </div>
                 <div class="table-actions">
                   <label class="table-filter" for="purpleCandidateProfileFilter">
                     <span>Scan</span>
                     <select id="purpleCandidateProfileFilter">
-                      <option value="all">All scans</option>
-                      <option value="month">Monthly</option>
-                      <option value="week">Weekly</option>
-                      <option value="day">Daily</option>
+                      <option value="week" selected>Weekly</option>
                     </select>
                   </label>
                   <label class="table-filter" for="purpleCandidateEntryFilter">
@@ -1228,7 +1183,7 @@
                     </select>
                   </label>
                   <label class="table-filter" for="purpleCandidateDistanceFilter">
-                    <span>Range distance</span>
+                    <span>Close above purple</span>
                     <select id="purpleCandidateDistanceFilter">
                       <option value="0">Exact 0.00%</option>
                       <option value="0.2">Within 0.20%</option>
@@ -1245,7 +1200,7 @@
                       <option value="score_desc">Score: highest first</option>
                       <option value="distance_asc">Distance: nearest first</option>
                       <option value="distance_desc">Distance: farthest first</option>
-                      <option value="profile_asc">Profile: Monthly to Daily</option>
+                      <option value="profile_asc">Profile: Weekly</option>
                       <option value="symbol_asc">Symbol: A to Z</option>
                     </select>
                   </label>
@@ -1283,10 +1238,11 @@
 
               <section class="table-panel alert-delivery-panel">
                 <div class="panel-head">
-                  <h2>Alert Delivery Status</h2>
+                  <h2>Live Scan Alert Summary</h2>
                   <span id="purpleAlertMeta">Idle</span>
                 </div>
                 <div class="ops-body">
+                  <p class="helper-text">While the market monitor is running, track new entry and exit counts for this scan, Telegram delivery, the newest entry-signal timestamp, the new trade ID under Open entries, and the later 30-minute exit that closes the same ID.</p>
                   <div id="purpleAlertTallyCards" class="compact-metrics"></div>
                   <div id="purpleAlertSummary" class="mini-list"></div>
                   <div id="purpleAlertTallyPoints" class="mini-list"></div>
@@ -1295,20 +1251,17 @@
 
               <section class="table-panel">
                 <div class="panel-head">
-                  <h2>Entry Alert History</h2>
+                  <h2>Entry Signals Created</h2>
                   <span id="purpleEntryAlertMeta">0 alert(s)</span>
                 </div>
                 <div class="ops-body">
-                  <p class="helper-text">Historical entry events are retained locally for audit and review. A new trade ID is created when a strict Monthly, Weekly, or Daily setup meets its early or final entry confirmation during market hours.</p>
+                  <p class="helper-text">This is the permanent event log of entry signals actually created by the live scanner. For the current run, check the newest timestamp, symbol, Early/Final type, price, and trade ID. Candidate rows do not appear here until market/Force and duplicate checks also pass.</p>
                 </div>
                 <div class="table-actions">
                   <label class="table-filter" for="purpleEntryAlertProfileFilter">
                     <span>Scan</span>
                     <select id="purpleEntryAlertProfileFilter">
-                      <option value="all">All scans</option>
-                      <option value="month">Monthly</option>
-                      <option value="week">Weekly</option>
-                      <option value="day">Daily</option>
+                      <option value="week" selected>Weekly</option>
                     </select>
                   </label>
                   <label class="table-filter" for="purpleEntryAlertKindFilter">
@@ -1386,10 +1339,7 @@
                   <label class="table-filter" for="purpleExitAlertProfileFilter">
                     <span>Scan</span>
                     <select id="purpleExitAlertProfileFilter">
-                      <option value="all">All scans</option>
-                      <option value="month">Monthly</option>
-                      <option value="week">Weekly</option>
-                      <option value="day">Daily</option>
+                      <option value="week" selected>Weekly</option>
                     </select>
                   </label>
                   <label class="table-filter" for="purpleExitAlertKindFilter">
@@ -1448,20 +1398,17 @@
 
               <section class="table-panel">
                 <div class="panel-head">
-                  <h2>Trade Lifecycle</h2>
+                  <h2>Entry Trades: Open &amp; Closed</h2>
                   <span id="purpleOpenTradeMeta">0 trade(s)</span>
                 </div>
                 <div class="ops-body">
-                  <p class="helper-text">Entry and exit timestamps are retained locally. Open duration uses the current time; closed duration is the difference between entry and exit timestamps. History is not automatically deleted.</p>
+                  <p class="helper-text">Use this as the working list after an entry signal. Open rows are still being checked for a 30-minute close below yellow; Closed rows show the matching exit time, exit price, and total holding duration for the same trade ID.</p>
                 </div>
                 <div class="table-actions">
                   <label class="table-filter" for="purpleTradeProfileFilter">
                     <span>Scan</span>
                     <select id="purpleTradeProfileFilter">
-                      <option value="all">All scans</option>
-                      <option value="month">Monthly</option>
-                      <option value="week">Weekly</option>
-                      <option value="day">Daily</option>
+                      <option value="week" selected>Weekly</option>
                     </select>
                   </label>
                   <label class="table-filter" for="purpleTradeEntryFilter">
@@ -1537,11 +1484,9 @@
                 </div>
                 <div class="ops-body">
                   <div class="purple-backtest-controls">
-                    <div class="control-group profile-picker" title="Profiles are evaluated independently using their configured touch, confirmation, early, final, and exit timeframes.">
-                      <span class="control-label">Profiles</span>
-                      <label><input id="purpleBtMonth" type="checkbox" checked /> Monthly</label>
-                      <label><input id="purpleBtWeek" type="checkbox" checked /> Weekly</label>
-                      <label><input id="purpleBtDay" type="checkbox" checked /> Daily</label>
+                    <div class="control-group profile-picker" title="Backtesting is temporarily restricted to the Weekly profile during validation.">
+                      <span class="control-label">Profile</span>
+                      <label><input id="purpleBtWeek" type="checkbox" checked disabled /> Weekly only</label>
                     </div>
                     <label class="control-group" for="purpleBtFrom" title="First date on which a new historical signal may be generated. Earlier candles are retained only as indicator warm-up data.">
                       <span class="control-label">From</span>
@@ -1567,7 +1512,7 @@
                         <option value="final">Final only</option>
                       </select>
                     </label>
-                    <label class="control-group" for="purpleBtDistance" title="Maximum higher-timeframe candle distance from purple EMA9. Smaller values test stricter touch definitions.">
+                    <label class="control-group" for="purpleBtDistance" title="Maximum close above purple after the candle physically touches purple EMA9. Smaller values test stricter bullish closes.">
                       <span class="control-label">Touch distance</span>
                       <select id="purpleBtDistance">
                         <option value="0">Exact 0.00%</option>

@@ -198,12 +198,16 @@ Use this same URL going forward. The script stops any older UI process already l
 
 The visual workflow, confirmed rules, timeframe matrix, entry/exit lifecycle, UI count reconciliation, and Krishna review checklist are documented in [Purple Touch Implementation Guide](docs/Purple_Touch_Implementation_Guide_v1_2.pdf).
 
+The current Weekly-only execution rules, valid/invalid candle diagrams, exact boundaries, live monitoring guide, alert gates, and audit worksheet are documented in [Weekly Purple Touch Validation Guide v1.1](docs/Weekly_Purple_Touch_Validation_Guide_v1_1.pdf). The [previous v1.0 guide](docs/Weekly_Purple_Touch_Validation_Guide_v1_0.pdf) is retained for comparison.
+
+Purple Touch live scanning and monitoring are temporarily restricted to the Weekly profile while its results are validated. Each run refreshes Weekly touch candles, Monthly confirmation candles, 30-minute early/exit candles, and 2-hour final-entry candles. Existing Monthly and Daily history is preserved, but those profiles are not newly scanned or exit-monitored while paused.
+
 Purple Touch entry alerts and trade lifecycle records are retained in local SQLite storage for audit and setup-quality review. The UI provides profile, entry type, lifecycle status, symbol, date, and sorting controls; it does not automatically purge open or closed Purple Touch trades.
 
 Purple Touch lifecycle precedence:
 
-- Monthly, Weekly, and Daily are independent setup profiles.
-- A symbol can have one early and one final lifecycle row per profile, for a theoretical maximum of six open trade IDs across all three profiles.
+- Weekly is the only active live profile during validation.
+- A symbol can have one Weekly early and one Weekly final lifecycle row open at the same time.
 - An early entry may be followed by a final entry for the same mapped Purple Touch setup.
 - Once final entry has been recorded, a later early entry from that same mapped touch candle is suppressed, even if the final lifecycle row has subsequently closed.
 - A newly mapped Purple Touch candle starts a new setup lifecycle.
@@ -222,6 +226,7 @@ Regenerate the PDF after material rule changes:
 ```powershell
 python -m pip install reportlab
 python scripts\generate_purple_touch_guide.py
+python scripts\generate_weekly_purple_touch_validation_guide.py
 ```
 
 The dashboard supports:

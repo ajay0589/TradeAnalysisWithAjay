@@ -138,7 +138,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 params = parse_qs(parsed.query)
                 self._send_json(
                     self.service.scan_krishna_purple_touch(
-                        purple_timeframe=params.get("purple_timeframe", ["week"])[0],
+                        purple_timeframe="week",
                         days=_optional_int(params.get("days", [None])[0]),
                         from_date=params.get("from_date", [None])[0] or None,
                         to_date=params.get("to_date", [None])[0] or None,
@@ -347,7 +347,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 payload = self._read_json()
                 self._send_json(
                     self.service.scan_krishna_purple_touch_alerts(
-                        purple_timeframe=str(payload.get("purple_timeframe") or "all"),
+                        purple_timeframe=str(payload.get("purple_timeframe") or "week"),
                         days=_optional_int(payload.get("days")),
                         from_date=payload.get("from_date") or None,
                         to_date=payload.get("to_date") or None,
@@ -358,6 +358,8 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 )
             elif parsed.path == "/api/krishna-purple-touch-backtest":
                 payload = self._read_json()
+                backtest_params = dict(payload.get("params") or {})
+                backtest_params["profiles"] = ["week"]
                 raw_symbols = payload.get("symbols")
                 if isinstance(raw_symbols, str):
                     symbols = _split_symbols(raw_symbols)
@@ -368,7 +370,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(
                     self.service.backtest_krishna_purple_touch(
                         symbols=symbols,
-                        params=payload.get("params") or {},
+                        params=backtest_params,
                         limit_symbols=_optional_limit(str(payload.get("limit_symbols") or "20")),
                     )
                 )

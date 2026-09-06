@@ -83,10 +83,12 @@ const BULK_DERIVED_MIN_DAYS = {
 };
 
 const PURPLE_PROFILES = {
-  month: { label: "Monthly", early: "120minute", final: "day", exit: "120minute", days: 3000 },
-  week: { label: "Weekly", early: "30minute", final: "120minute", exit: "30minute", days: 730 },
-  day: { label: "Daily", early: "10minute", final: "30minute", exit: "10minute", days: 365 },
+  month: { label: "Monthly", confirmation: "5month", early: "120minute", final: "day", exit: "120minute", days: 3000 },
+  week: { label: "Weekly", confirmation: "month", early: "30minute", final: "120minute", exit: "30minute", days: 730 },
+  day: { label: "Daily", confirmation: "week", early: "10minute", final: "30minute", exit: "10minute", days: 365 },
 };
+
+const PURPLE_ACTIVE_PROFILE_KEYS = ["week"];
 
 const PURPLE_PROFILE_ANALYSIS_DETAILS = {
   month: "Analyzing Monthly touch, derived 5-month confirmation, 2-hour early/exit, and Daily final-entry rules.",
@@ -988,12 +990,14 @@ function purpleProfile() {
 
 function updatePurpleDefaults() {
   renderPurpleRules({
-    profiles: Object.entries(PURPLE_PROFILES).map(([key, profile]) => ({
+    profiles: PURPLE_ACTIVE_PROFILE_KEYS.map((key) => ({
+      ...PURPLE_PROFILES[key],
       purple_timeframe: key,
-      label: profile.label,
-      early_timeframe: profile.early,
-      final_timeframe: profile.final,
-      exit_timeframe: profile.exit,
+      label: PURPLE_PROFILES[key].label,
+      confirmation_timeframe: PURPLE_PROFILES[key].confirmation,
+      early_timeframe: PURPLE_PROFILES[key].early,
+      final_timeframe: PURPLE_PROFILES[key].final,
+      exit_timeframe: PURPLE_PROFILES[key].exit,
     })),
   });
 }
@@ -1037,18 +1041,18 @@ async function runPurpleScan() {
 async function refreshCandlesForPurple() {
   const selected = $("purpleTimeframe").value;
   const profile = purpleProfile();
-  const timeframes = Array.from(new Set([selected, profile.early, profile.final, profile.exit]));
+  const timeframes = Array.from(new Set([selected, profile.confirmation, profile.early, profile.final, profile.exit]));
   await refreshPurpleTimeframes(timeframes, Number($("purpleDays").value || profile.days));
 }
 
 async function refreshCandlesForAllPurpleProfiles() {
-  await refreshPurpleTimeframes(["month", "week", "day", "120minute", "30minute", "10minute"], 3000);
+  await refreshCandlesForPurpleProfile("week");
 }
 
 async function refreshCandlesForPurpleProfile(profileKey) {
   const profile = PURPLE_PROFILES[profileKey];
   if (!profile) return refreshCandlesForAllPurpleProfiles();
-  const timeframes = Array.from(new Set([profileKey, profile.early, profile.final, profile.exit]));
+  const timeframes = Array.from(new Set([profileKey, profile.confirmation, profile.early, profile.final, profile.exit]));
   await refreshPurpleTimeframes(timeframes, profile.days);
 }
 
@@ -1130,7 +1134,9 @@ function setPurpleProgress(status, detail, purpleTimeframe = "all", progress = n
 }
 
 function purpleProfileKeys(purpleTimeframe) {
-  return purpleTimeframe === "all" ? Object.keys(PURPLE_PROFILES) : [purpleTimeframe].filter((key) => PURPLE_PROFILES[key]);
+  return purpleTimeframe === "all"
+    ? [...PURPLE_ACTIVE_PROFILE_KEYS]
+    : [purpleTimeframe].filter((key) => PURPLE_ACTIVE_PROFILE_KEYS.includes(key));
 }
 
 function setPurpleProfileProgress(purpleTimeframe, status, detail, progress) {
@@ -1162,7 +1168,7 @@ function beginPurpleProfileRun(purpleTimeframe, detail) {
 
 function renderPurpleProfileProgress() {
   const prefix = { month: "Month", week: "Week", day: "Day" };
-  Object.keys(PURPLE_PROFILES).forEach((profileKey) => {
+  PURPLE_ACTIVE_PROFILE_KEYS.forEach((profileKey) => {
     const run = state.purpleProfileRuns[profileKey];
     const id = `purple${prefix[profileKey]}`;
     $(`${id}ProgressMeta`).textContent = run.status;
@@ -1178,9 +1184,7 @@ function renderPurpleProfileProgress() {
 
 function renderPurpleRules(data) {
   const profiles = data.profiles || [
-    { label: "Monthly", early_timeframe: "120minute", final_timeframe: "day", exit_timeframe: "120minute" },
     { label: "Weekly", early_timeframe: "30minute", final_timeframe: "120minute", exit_timeframe: "30minute" },
-    { label: "Daily", early_timeframe: "10minute", final_timeframe: "30minute", exit_timeframe: "10minute" },
   ];
   $("purpleRuleCards").innerHTML = profiles
     .map((profile) => [
@@ -1191,14 +1195,12 @@ function renderPurpleRules(data) {
     .join("");
   const sample = ((data.results || [])[0] || (combinePurpleScanResults(data)[0] || {}));
   const understood = sample.understood_rules || [
-    "Monthly: early entry 2H, final entry 1D.",
     "Weekly: early entry 30m, final entry 2H.",
-    "Daily: early entry 10m, final entry 30m, exit 10m.",
+    "Weekly confirmation: latest Monthly candle open or close must be above its blue Chande Kroll line.",
     "Purple-touch filter requires close above black EMA89.",
     "Blue Chande Kroll must be above purple EMA9 and price must approach purple from blue across the latest 2-3 higher-timeframe candles.",
-    "Monthly touch confirms on derived 5-month open or close above blue; Weekly confirms on Monthly open or close; Daily confirms on Weekly open or close.",
-    "The mapped purple-touch bar is Candle 1. Wait for Candle 2 to close before allowing entry confirmation.",
-    "From Candle 3 onward, discard the setup only if price breaks the lower of Candle 1 and Candle 2 lows. There is no fixed candle-count expiry.",
+    "The mapped purple-touch bar is Candle 1. Candle 1 and Candle 2 can each create an entry signal when their entry rules pass.",
+    "From Candle 3 onward, the touch remains valid until price breaks the lower of Candle 1 and Candle 2 lows. There is no fixed candle-count expiry.",
     "Entry condition: selected entry timeframe candle closes above yellow Chande Kroll.",
     "Final entry additionally requires yellow Chande Kroll above brown VWMA20.",
     "Exit/review condition: exit timeframe candle closes below yellow Chande Kroll.",
@@ -1258,7 +1260,7 @@ function renderPurpleResults(rows = null) {
           <td><button class="linkBtn symbol-chip" data-symbol="${escapeHtml(row.symbol)}">${escapeHtml(row.symbol)}</button></td>
           <td>${fmtInt(row.score)}<div class="cell-note">${escapeHtml(row.confidence || "-")}</div></td>
           <td>${escapeHtml(row.purple_timeframe_label || row.purple_timeframe || "-")}</td>
-          <td>${fmt(row.close)} / ${fmt(row.purple_ema9)}<div class="cell-note">range distance ${fmt(row.purple_range_distance_percent)}%</div></td>
+          <td>${fmt(row.close)} / ${fmt(row.purple_ema9)}<div class="cell-note">close above purple ${fmt(row.purple_touch_distance_percent)}%</div></td>
           <td>${purpleDirectionCell(row)}</td>
           <td>${higherConfirmationCell(row.higher_confirmation)}</td>
           <td>${fmt(row.yellow_line)} / ${fmt(row.brown_vwma20)}<div class="cell-note">final needs yellow above brown</div></td>
@@ -1278,7 +1280,7 @@ function renderPurpleResults(rows = null) {
       `;
     })
     .join("")
-    : emptyTableRow(13, "No strict candidates match these filters.");
+    : emptyTableRow(13, "No Weekly setup passes all mandatory filters for this selection.");
 
   document.querySelectorAll("#purpleBody .linkBtn").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1325,7 +1327,7 @@ function renderPurpleStep1Results(rows = null) {
           <td>
             ${fmt(row.purple_ema9)}
             <div class="cell-note">close distance ${fmt(row.purple_touch_distance_percent)}%</div>
-            <div class="cell-note">range distance ${fmt(row.purple_range_distance_percent)}%</div>
+            <div class="cell-note">physical wick/range touch</div>
           </td>
           <td>
             ${passFailCell(row.above_black_line, "above black EMA89")}
@@ -1403,7 +1405,7 @@ function filterPurpleCandidateRows(
     if (profile !== "all" && row.purple_timeframe !== profile) return false;
     if (setupStatus !== "all" && row.full_setup_status !== setupStatus) return false;
     if (maximumDistance !== null) {
-      const distance = Number(row.purple_range_distance_percent);
+      const distance = Number(row.purple_touch_distance_percent);
       if (!Number.isFinite(distance) || distance > maximumDistance + 1e-9) return false;
     }
     if (entryKind === "all") return true;
@@ -1423,7 +1425,7 @@ function sortPurpleRows(rows, sortValue) {
   const sorted = [...rows];
   const profileOrder = (row) => PURPLE_PROFILE_ORDER[row.purple_timeframe] ?? 99;
   const distance = (row) => {
-    const value = Number(row.purple_range_distance_percent);
+    const value = Number(row.purple_touch_distance_percent);
     return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
   };
   const comparators = {
@@ -1467,10 +1469,10 @@ function entryCell(entry) {
     <span class="${cls}">${escapeHtml(status)}</span>
     <div class="cell-note">C ${fmt(entry.close)} / Y ${fmt(entry.yellow_line)}</div>
     <div class="cell-note">Brown ${fmt(entry.brown_vwma20)} / RSI ${fmt(entry.rsi14)}</div>
-    <div class="cell-note">Blue ${entry.blue_above_purple === true ? "above" : entry.blue_above_purple === false ? "not above" : "unknown"} purple</div>
+    <div class="cell-note">Blue/purple ${entry.blue_above_purple === true ? "above" : entry.blue_above_purple === false ? "not above" : "unknown"} (context only)</div>
     <div class="cell-note">${entry.bars_since_touch == null ? "touch not mapped" : `${entry.bars_since_touch} bar(s) after Candle 1`}</div>
     <div class="cell-note">C1 low ${fmt(entry.candle1_low)} / C2 low ${fmt(entry.candle2_low)}</div>
-    <div class="cell-note">${entry.setup_discarded ? `discarded at ${fmt(entry.invalidation_level)}` : entry.reference_lows_ready ? `active; break level ${fmt(entry.invalidation_level)}` : "waiting for Candle 2"}</div>
+    <div class="cell-note">${entry.setup_discarded ? `touch expired at ${fmt(entry.invalidation_level)}` : entry.reference_lows_ready ? `touch active; break level ${fmt(entry.invalidation_level)}` : "C1 eligible; C2 low pending"}</div>
     <div class="cell-note">${entry.rsi_divergence ? "RSI divergence" : "no RSI divergence"}</div>
   `;
 }
@@ -1492,7 +1494,7 @@ function downloadPurpleCsv() {
     { label: "Close", value: (row) => row.close },
     { label: "Purple EMA9", value: (row) => row.purple_ema9 },
     { label: "Purple Close Distance %", value: (row) => row.purple_touch_distance_percent },
-    { label: "Purple Range Distance %", value: (row) => row.purple_range_distance_percent },
+    { label: "Physical Touch Range Distance %", value: (row) => row.purple_range_distance_percent },
     { label: "Blue CK", value: (row) => row.blue_line },
     { label: "Blue Above Purple", value: (row) => row.blue_above_purple },
     { label: "Approach From Blue", value: (row) => row.approach_from_blue },
@@ -1516,7 +1518,8 @@ function downloadPurpleCsv() {
   ]);
 }
 
-async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "all" } = {}) {
+async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "week" } = {}) {
+  purpleTimeframe = "week";
   if (state.purpleScanInFlight) {
     queuePurpleProfile(purpleTimeframe);
     return;
@@ -1527,7 +1530,7 @@ async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "all" } = {}
   state.purpleCancelRequested = false;
   $("purpleLiveScanBtn").disabled = true;
   $("purpleCancelScanBtn").disabled = !$("purpleRefreshToggle").checked;
-  const scanLabel = purpleTimeframe === "all" ? "Monthly, Weekly, and Daily" : PURPLE_PROFILES[purpleTimeframe]?.label || purpleTimeframe;
+  const scanLabel = "Weekly";
   beginPurpleProfileRun(purpleTimeframe, `Starting ${scanLabel} candle refresh and analysis.`);
   updatePurpleMonitorUi(state.purpleMonitorRunning ? `Scanning ${scanLabel} now...` : `Running ${scanLabel} scan...`);
   if (!quiet) {
@@ -1535,21 +1538,14 @@ async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "all" } = {}
     $("purpleAlertMeta").textContent = "running";
   }
   try {
-    if ($("purpleRefreshToggle").checked) {
-      if (purpleTimeframe === "all") await refreshCandlesForAllPurpleProfiles();
-      else await refreshCandlesForPurpleProfile(purpleTimeframe);
-    }
+    if ($("purpleRefreshToggle").checked) await refreshCandlesForPurpleProfile("week");
     setPurpleProgress(
       "running",
       `Candle refresh complete. Analyzing ${scanLabel} setup rules, entry confirmations, and open-trade exits...`,
       purpleTimeframe,
       85,
     );
-    if (purpleTimeframe === "all") {
-      Object.keys(PURPLE_PROFILES).forEach((profileKey) => {
-        setPurpleProfileProgress(profileKey, "running", PURPLE_PROFILE_ANALYSIS_DETAILS[profileKey], 85);
-      });
-    }
+    setPurpleProfileProgress("week", "running", PURPLE_PROFILE_ANALYSIS_DETAILS.week, 85);
     $("purpleProgressMeta").textContent = "analysis running";
     const data = await postApi("/api/krishna-purple-touch-live-scan", {
       purple_timeframe: purpleTimeframe,
@@ -1571,7 +1567,7 @@ async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "all" } = {}
     const newAlerts = Number(data.entry_alerts_created || 0) + Number(data.exit_alerts_created || 0);
     setPurpleProgress(
       "completed",
-      `${scanLabel} analysis complete: ${step1Rows.length} touch/near-touch row(s), ${rows.length} strict candidate(s), ${newAlerts} new alert(s).`,
+      `${scanLabel} analysis complete: ${step1Rows.length} physical touch row(s), ${rows.length} all-filter setup(s), ${newAlerts} new alert(s).`,
       purpleTimeframe,
       100,
     );
@@ -1603,19 +1599,18 @@ function mergePurpleProfileRows(existing, incoming, purpleTimeframe) {
     .sort((left, right) => {
       const profileDifference = (PURPLE_PROFILE_ORDER[left.purple_timeframe] ?? 99) - (PURPLE_PROFILE_ORDER[right.purple_timeframe] ?? 99);
       if (profileDifference) return profileDifference;
-      const distanceDifference = Number(left.purple_range_distance_percent || 0) - Number(right.purple_range_distance_percent || 0);
+      const distanceDifference = Number(left.purple_touch_distance_percent || 0) - Number(right.purple_touch_distance_percent || 0);
       if (distanceDifference) return distanceDifference;
       return String(left.symbol || "").localeCompare(String(right.symbol || ""));
     });
 }
 
 function queuePurpleProfile(purpleTimeframe) {
-  if (!state.purpleMonitorRunning && purpleTimeframe !== "all") return;
-  if (purpleTimeframe === "all") {
-    state.purplePendingProfiles = ["all"];
-  } else if (!state.purplePendingProfiles.includes("all") && !state.purplePendingProfiles.includes(purpleTimeframe)) {
+  purpleTimeframe = "week";
+  if (!state.purpleMonitorRunning) return;
+  if (!state.purplePendingProfiles.includes(purpleTimeframe)) {
     state.purplePendingProfiles.push(purpleTimeframe);
-    setPurpleProfileProgress(purpleTimeframe, "queued", "Scheduled scan is queued behind the active profile.", 5);
+    setPurpleProfileProgress(purpleTimeframe, "queued", "Scheduled Weekly scan is queued behind the active scan.", 5);
   }
   if (!state.purpleScanInFlight) runNextQueuedPurpleProfile();
 }
@@ -1662,9 +1657,9 @@ function scanSummaryFromLiveScan(data, rows, step1Rows = []) {
     latest_candles_pulled: $("purpleRefreshToggle").checked,
     points: [
       `Scanner evaluated ${profileList(data)} purple-touch profile${(data.profiles || []).length === 1 ? "" : "s"}.`,
-      `Step 1 found ${step1Matched || step1Rows.length} higher-timeframe EMA9 touch/near-touch row(s) within 3.00%; rows are ordered from range distance 0.00% upward.`,
-      `Latest Scan Candidates shows ${rows.length} row(s) after mandatory EMA89, EMA26, blue/purple direction, 2-3 candle approach, and higher-confirmation checks.`,
-      `${earlyReady} strict candidate row(s) have early entry ready; ${finalReady} have final entry ready. Candidate rows are not the same as newly created alerts.`,
+      `Step 1 found ${step1Matched || step1Rows.length} physical Weekly EMA9 touch row(s) whose close is 0.00% to 3.00% above purple; rows are ordered by close distance.`,
+      `Weekly Setups Passing All Filters shows ${rows.length} row(s) after mandatory EMA89, EMA26, Weekly blue/purple direction, 2-3 candle approach, and Monthly confirmation checks.`,
+      `${earlyReady} all-filter setup row(s) have Early ready; ${finalReady} have Final ready. Setup rows are not the same as newly created entry signals.`,
       data.market_hours === false && !data.forced
         ? "Market is closed and Force is off: analysis was refreshed, but entry/exit events, trade IDs, and Telegram alerts were intentionally not created."
         : "Market-hours scanner created entry/exit alerts only for fresh matching opportunities.",
@@ -1736,14 +1731,14 @@ function startPurpleAutoMonitor() {
   stopPurpleAutoMonitor();
   state.purpleMonitorRunning = true;
   state.purplePendingProfiles = [];
-  Object.keys(PURPLE_PROFILES).forEach((profileKey) => {
+  PURPLE_ACTIVE_PROFILE_KEYS.forEach((profileKey) => {
     state.purpleNextRunAt[profileKey] = Date.now() + purpleIntervalSeconds(profileKey) * 1000;
   });
   renderPurpleProfileProgress();
-  updatePurpleMonitorUi("Initial combined scan is starting...");
-  $("purpleAlertMeta").textContent = "monitoring with profile schedules";
-  runPurpleLiveScan({ quiet: true, purpleTimeframe: "all" });
-  Object.keys(PURPLE_PROFILES).forEach((profileKey) => {
+  updatePurpleMonitorUi("Initial Weekly scan is starting...");
+  $("purpleAlertMeta").textContent = "monitoring Weekly schedule";
+  runPurpleLiveScan({ quiet: true, purpleTimeframe: "week" });
+  PURPLE_ACTIVE_PROFILE_KEYS.forEach((profileKey) => {
     const seconds = purpleIntervalSeconds(profileKey);
     state.purpleAutoTimers[profileKey] = window.setInterval(() => {
       state.purpleNextRunAt[profileKey] = Date.now() + seconds * 1000;
@@ -1776,7 +1771,7 @@ function updatePurpleMonitorUi(detail) {
   status.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(text)}</span>`;
   $("purpleAutoStartBtn").disabled = running;
   $("purpleAutoStopBtn").disabled = !running;
-  ["purpleMonthIntervalSeconds", "purpleWeekIntervalSeconds", "purpleDayIntervalSeconds"].forEach((id) => {
+  ["purpleWeekIntervalSeconds"].forEach((id) => {
     $(id).disabled = running;
   });
 }
@@ -1787,7 +1782,8 @@ function purpleIntervalSeconds(profileKey) {
 }
 
 function purpleScheduleText() {
-  const schedules = Object.entries(PURPLE_PROFILES).map(([profileKey, profile]) => {
+  const schedules = PURPLE_ACTIVE_PROFILE_KEYS.map((profileKey) => {
+    const profile = PURPLE_PROFILES[profileKey];
     const seconds = purpleIntervalSeconds(profileKey);
     const minutes = seconds / 60;
     const interval = minutes >= 60 ? `${minutes / 60}h` : `${minutes}m`;
@@ -1835,10 +1831,10 @@ function renderPurpleAlerts(data = null) {
   updatePurpleServerPager("exit", pagination.exit, exitAlerts.length);
   updatePurpleServerPager("trades", pagination.trades, lifecycleTrades.length);
   $("purpleAlertTallyCards").innerHTML = [
-    ["Historical entries", totalEntryCount],
-    ["Open trade IDs", totalOpenCount],
-    ["Closed trade IDs", totalClosedCount],
-    ["All-time exits", totalExitCount],
+    ["Entry signals created", totalEntryCount],
+    ["Open entries", totalOpenCount],
+    ["Closed entries", totalClosedCount],
+    ["Exit signals created", totalExitCount],
   ]
     .map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${fmtInt(value)}</strong></div>`)
     .join("");
@@ -1850,7 +1846,7 @@ function renderPurpleAlerts(data = null) {
       : "",
     `Entry alerts created this run: ${fmtMetric(data.entry_alerts_created || 0)}`,
     `Exit alerts created this run: ${fmtMetric(data.exit_alerts_created || 0)}`,
-    `Trade lifecycle rows loaded on this page: ${fmtMetric(lifecycleTrades.length)} of ${fmtMetric(tradeFilteredTotal)} filtered (${fmtMetric(totalOpenCount)} open, ${fmtMetric(totalClosedCount)} closed).`,
+    `Entry trade rows loaded on this page: ${fmtMetric(lifecycleTrades.length)} of ${fmtMetric(tradeFilteredTotal)} filtered (${fmtMetric(totalOpenCount)} open, ${fmtMetric(totalClosedCount)} closed).`,
     `Web UI alert history loaded: latest ${alerts.length} event(s) of ${fmtMetric(totalEntryCount + totalExitCount)} total`,
     data.retention?.automatic_purge === false ? "Purple Touch history retention: no automatic purge; use date/status filters to review retained records." : "",
     `Telegram: ${telegramText(data.telegram)}`,
@@ -1889,7 +1885,7 @@ function renderPurpleAlerts(data = null) {
       `,
     )
     .join("")
-    : emptyTableRow(11, "No trade lifecycle records match these filters.");
+    : emptyTableRow(11, "No open or closed entry trades match these filters.");
   document.querySelectorAll("#purpleEntryAlertsBody .linkBtn, #purpleExitAlertsBody .linkBtn").forEach((button) => {
     button.addEventListener("click", () => {
       $("symbolInput").value = button.dataset.symbol;
@@ -1988,11 +1984,7 @@ function setPurpleBacktestDefaults() {
 }
 
 async function runPurpleBacktest() {
-  const profiles = [
-    ["month", "purpleBtMonth"],
-    ["week", "purpleBtWeek"],
-    ["day", "purpleBtDay"],
-  ].filter(([, id]) => $(id).checked).map(([profile]) => profile);
+  const profiles = ["week"];
   if (!profiles.length) {
     setNotes("Select at least one Purple Touch profile.", true);
     return;

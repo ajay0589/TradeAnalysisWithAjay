@@ -210,10 +210,10 @@ def _backtest_symbol_profile(
             continue
         purple_ema9 = ema([candle.close for candle in touch_candles], 9)
         latest_touch = touch_candles[-1]
-        tolerance = config.touch_tolerance_percent / 100
+        maximum_close = purple_ema9 * (1 + config.touch_tolerance_percent / 100) if purple_ema9 is not None else None
         if purple_ema9 is None or not (
-            latest_touch.low <= purple_ema9 * (1 + tolerance)
-            and latest_touch.high >= purple_ema9 * (1 - tolerance)
+            latest_touch.low <= purple_ema9 <= latest_touch.high
+            and purple_ema9 <= latest_touch.close <= maximum_close
         ):
             continue
         confirmation = _confirmation_as_of(daily_as_of, profile.confirmation_timeframe)[-160:]
@@ -397,7 +397,7 @@ def _signal_row(symbol: str, profile_key: str, entry_kind: str, event_time: date
         "entry_timeframe": entry.get("timeframe"),
         "score": match.score,
         "confidence": match.confidence,
-        "touch_distance_percent": match.purple_range_distance_percent,
+        "touch_distance_percent": match.purple_touch_distance_percent,
         "invalidation_level": entry.get("invalidation_level"),
         "reasons": list(match.reasons) + list(entry.get("reasons") or []),
         "warnings": list(match.warnings) + list(entry.get("warnings") or []),

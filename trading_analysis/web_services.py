@@ -1201,7 +1201,7 @@ class AnalysisService:
         def rank(row: dict[str, Any]) -> tuple[float, int, int, int, str]:
             early_ready = 1 if (row.get("early_entry") or {}).get("status") == "entry_candidate" else 0
             final_ready = 1 if (row.get("final_entry") or {}).get("status") == "entry_candidate" else 0
-            distance = float(row.get("purple_range_distance_percent") or 0)
+            distance = float(row.get("purple_touch_distance_percent") or 0)
             return (distance, -final_ready, -early_ready, -int(row.get("score") or 0), str(row.get("symbol") or ""))
 
         rows = sorted(rows, key=rank)
@@ -1235,8 +1235,8 @@ class AnalysisService:
                     + " above its blue Chande Kroll line.",
                     "Mandatory filters: close above black EMA89, blue Chande Kroll above purple EMA9, and price approaching purple from blue across the latest 2-3 touch-timeframe candles.",
                     "Final entry needs yellow Chande Kroll above brown VWMA20; early entry treats that relationship as context only.",
-                    "Purple-touch qualification accepts a candle-range distance up to 3.00%; rows are ranked from closest to farthest.",
-                    "Entry lifecycle: mapped purple touch is Candle 1, wait for Candle 2 to close, then discard from Candle 3 onward only if price breaks the lower of Candle 1 and Candle 2 lows.",
+                    "Purple-touch qualification requires a physical wick/range touch and a close from 0.00% to 3.00% above purple EMA9; rows are ranked by close distance.",
+                    "Entry lifecycle: mapped purple touch is Candle 1; Candle 1 and Candle 2 can qualify immediately, and from Candle 3 onward the touch expires only if price breaks the lower of Candle 1 and Candle 2 lows.",
                     "There is no fixed 10-candle expiry.",
                     "Light green is EMA26. Ichimoku, VWAP, and Donchian Channel 20 are ignored for this setup.",
                     "RSI bullish divergence is optional context only.",
@@ -1301,7 +1301,7 @@ class AnalysisService:
             full = 1 if row.get("full_setup_status") == "qualified" else 0
             early_ready = 1 if (row.get("early_entry") or {}).get("status") == "entry_candidate" else 0
             final_ready = 1 if (row.get("final_entry") or {}).get("status") == "entry_candidate" else 0
-            distance = float(row.get("purple_range_distance_percent") or 0)
+            distance = float(row.get("purple_touch_distance_percent") or 0)
             return (distance, -full, -final_ready, -early_ready, -int(row.get("score") or 0), str(row.get("symbol") or ""))
 
         rows = sorted(rows, key=rank)
@@ -1326,8 +1326,8 @@ class AnalysisService:
                 "shown_symbols": len(limited_rows),
                 "error_count": len(errors),
                 "points": [
-                    f"Step 1 shortlist uses {profile.label}: the latest candle range must touch purple EMA9 or come within 3.00% of it.",
-                    "Rows are ranked by purple range distance from 0.00% upward; UI filters expose exact, 0.20%, 0.50%, 1.00%, 1.50%, 2.00%, and 3.00% bands.",
+                    f"Step 1 shortlist uses {profile.label}: the latest candle wick/range must physically touch purple EMA9 and close no more than 3.00% above it.",
+                    "Rows are ranked by close distance above purple from 0.00% upward; UI filters expose exact, 0.20%, 0.50%, 1.00%, 1.50%, 2.00%, and 3.00% bands.",
                     "This stage intentionally does not require black EMA89, EMA26, or entry-trigger confirmation.",
                     f"Rows audit the {profile.confirmation_label} blue-line confirmation plus blue-above-purple and blue-to-purple approach checks.",
                     "Rows show which mandatory setup checks pass and which blockers prevent a strict entry candidate.",
@@ -1338,7 +1338,7 @@ class AnalysisService:
 
     def scan_krishna_purple_touch_alerts(
         self,
-        purple_timeframe: str = "all",
+        purple_timeframe: str = "week",
         days: int | None = None,
         from_date: str | None = None,
         to_date: str | None = None,
@@ -1363,7 +1363,11 @@ class AnalysisService:
         existing_entries: list[dict[str, Any]] = []
         closed_trades: list[dict[str, Any]] = []
         errors: list[dict[str, str]] = []
-        profiles = _purple_profiles(purple_timeframe)
+        # Purple Touch live monitoring is intentionally restricted to Weekly while
+        # its rules and alerts are being validated. Monthly and Daily data/history
+        # remain intact so those profiles can be re-enabled later.
+        requested_profile = str(purple_timeframe or "week")
+        profiles = _purple_profiles("week")
 
         for profile in profiles:
             step1_scan = self.scan_krishna_purple_touch_step1(
@@ -1434,7 +1438,9 @@ class AnalysisService:
             "type": "krishna_purple_touch_live_alert_scan",
             "profile": scans[0].get("profile") if len(scans) == 1 else None,
             "profiles": [profile.to_dict() for profile in profiles],
-            "purple_timeframe": profiles[0].purple_timeframe if len(profiles) == 1 else "all",
+            "purple_timeframe": "week",
+            "requested_purple_timeframe": requested_profile,
+            "weekly_only": True,
             "market_hours": market_open,
             "forced": force,
             "skipped": False,
@@ -1459,14 +1465,15 @@ class AnalysisService:
             "errors": errors[:20],
             "summary": {
                 "points": [
-                    "Live alert scan checks Monthly, Weekly, and Daily purple-touch profiles together.",
+                    "Live alert scan is temporarily restricted to the Weekly purple-touch profile while its rules are validated.",
+                    "Weekly uses Weekly touch candles, Monthly confirmation, 30-minute early/exit candles, and 2-hour final-entry candles.",
                     "Entry alerts get a trade ID and remain open until the configured exit timeframe closes below yellow.",
-                    "Each stock/profile can hold one early and one final trade; final confirmation suppresses any later early entry.",
-                    "Because Monthly, Weekly, and Daily are independent, one stock can have at most six open trade IDs: early plus final in each of three profiles.",
-                    "An early trade may remain open while the same stock/profile continues toward final confirmation.",
+                    "Each stock can hold one Weekly early trade and one Weekly final trade; final confirmation suppresses any later early entry for the same setup.",
+                    "An early Weekly trade may remain open while the same setup continues toward final confirmation.",
                     "A closed final trade also suppresses a later early alert from the same mapped Purple Touch candle; a new touch candle starts a new setup lifecycle.",
                     "Duplicate entry alerts are suppressed for the same symbol, profile, entry kind, and mapped Purple Touch candle.",
-                    "Cached candles are analyzed even outside market hours so Step 1 and strict candidates remain visible.",
+                    "Existing Monthly and Daily history is preserved, but those profiles are not scanned or exit-monitored while paused.",
+                    "Cached candles are analyzed even outside market hours so Step 1 and all-filter setups remain visible.",
                     "Fresh entry/exit alerts and Telegram delivery are gated to NSE market hours unless force is enabled for testing.",
                     "This is read-only alert tracking for manual review, not order placement.",
                 ],
@@ -1583,7 +1590,8 @@ class AnalysisService:
         )
         return {
             "type": "krishna_purple_touch_alerts",
-            "profiles": _purple_profile_dicts("all"),
+            "profiles": _purple_profile_dicts("week"),
+            "weekly_only": True,
             "market_hours": is_market_hours(),
             "telegram": {
                 "configured": notifier.configured(),

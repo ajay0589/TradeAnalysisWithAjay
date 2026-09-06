@@ -50,6 +50,7 @@ def _match(early_status: str = "entry_candidate", final_status: str = "entry_can
     return SimpleNamespace(
         score=85,
         confidence="high",
+        purple_touch_distance_percent=0.0,
         purple_range_distance_percent=0.0,
         reasons=["Purple EMA9 setup qualified."],
         warnings=[],
@@ -231,7 +232,11 @@ class KrishnaPurpleBacktestTests(unittest.TestCase):
                 f"http://127.0.0.1:{server.server_address[1]}/api/krishna-purple-touch-backtest",
                 data=json.dumps({
                     "symbols": ["ABC"],
-                    "params": {"from_date": "2026-07-01", "to_date": "2026-07-31"},
+                    "params": {
+                        "from_date": "2026-07-01",
+                        "to_date": "2026-07-31",
+                        "profiles": ["month", "week", "day"],
+                    },
                     "limit_symbols": 1,
                 }).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
@@ -242,6 +247,7 @@ class KrishnaPurpleBacktestTests(unittest.TestCase):
 
             self.assertEqual(payload["type"], "krishna_purple_touch_backtest")
             self.assertEqual(payload["symbols"], ["ABC"])
+            self.assertEqual(payload["config"]["profiles"], ["week"])
         finally:
             server.shutdown()
             server.server_close()

@@ -427,14 +427,13 @@ def scan_krishna_purple_touch_setup(
     open_questions: list[str] = []
     score = 35
 
-    tolerance = config.purple_touch_tolerance_percent / 100
-    purple_touch = latest.low <= ema9 * (1 + tolerance) and latest.high >= ema9 * (1 - tolerance)
+    purple_touch = _is_bullish_purple_touch(latest, ema9, config.purple_touch_tolerance_percent)
     if not purple_touch:
         return None
     close_distance = _purple_close_distance_percent(latest, ema9)
     range_distance = _purple_touch_distance_percent(latest, ema9)
     score += 20
-    reasons.append(_purple_touch_reason(range_distance, config.purple_touch_tolerance_percent))
+    reasons.append(_purple_touch_reason(close_distance, config.purple_touch_tolerance_percent))
 
     blue = levels["ck_blue_line"]
     blue_above_purple = blue > ema9 if blue is not None else None
@@ -528,11 +527,11 @@ def scan_krishna_purple_touch_setup(
         f"Final entry timeframe: {profile.final_timeframe}; candle close above yellow Chande Kroll line.",
         f"Exit for both entry styles: {profile.exit_timeframe} candle close below yellow Chande Kroll line.",
         "Black EMA89 filter is mandatory.",
-        "Blue Chande Kroll must be above purple EMA9 on both the touch and entry timeframes.",
+        "Blue Chande Kroll must be above purple EMA9 on the Weekly touch timeframe; entry timeframes ignore this relationship.",
         f"Price must approach purple from the blue-line area within the latest {config.approach_lookback_candles} touch-timeframe candles.",
         higher_confirmation["rule"],
-        "The mapped touch bar is Candle 1; Candle 2 must close before entry confirmation becomes active.",
-        "From Candle 3 onward, the setup is discarded only if a candle breaks the lower of Candle 1 and Candle 2 lows; there is no fixed candle-count expiry.",
+        "The mapped touch bar is Candle 1. Candle 1 and Candle 2 may each qualify for entry immediately when their entry rules pass.",
+        "From Candle 3 onward, the touch setup expires only if a candle breaks the lower of Candle 1 and Candle 2 lows; there is no fixed candle-count expiry.",
         "Light green is EMA26; Ichimoku, VWAP, and Donchian Channel 20 are ignored for this setup.",
         "Final entry requires yellow Chande Kroll above brown VWMA20.",
         "RSI bullish divergence is optional and only improves quality when present.",
@@ -596,8 +595,7 @@ def scan_krishna_purple_step1_candidate(
     if ema9 is None:
         return None
 
-    tolerance = config.step1_touch_tolerance_percent / 100
-    purple_touch = latest.low <= ema9 * (1 + tolerance) and latest.high >= ema9 * (1 - tolerance)
+    purple_touch = _is_bullish_purple_touch(latest, ema9, config.step1_touch_tolerance_percent)
     if not purple_touch:
         return None
 
@@ -632,7 +630,7 @@ def scan_krishna_purple_step1_candidate(
         symbol, final_candles, profile.final_timeframe, "final", **entry_context
     )
 
-    reasons = [_purple_touch_reason(range_distance, config.step1_touch_tolerance_percent, prefix="Step 1 passed: ")]
+    reasons = [_purple_touch_reason(distance, config.step1_touch_tolerance_percent, prefix="Step 1 passed: ")]
     warnings: list[str] = []
     blockers: list[str] = []
     score = 35
@@ -973,11 +971,11 @@ def _purple_entry_snapshot(
         reasons.append("Close is above the blue Chande Kroll line; Krishna marked this as rare/stronger.")
     blue_above_purple = blue > entry_ema9 if blue is not None and entry_ema9 is not None else None
     if blue_above_purple is True:
-        reasons.append("Blue Chande Kroll is above purple EMA9 on the entry timeframe.")
+        reasons.append("Blue Chande Kroll is above purple EMA9 on the entry timeframe; shown as context only.")
     elif blue_above_purple is False:
-        warnings.append("Blue Chande Kroll is not above purple EMA9 on the entry timeframe.")
+        reasons.append("Blue Chande Kroll is not above purple EMA9 on the entry timeframe; this does not block entry.")
     else:
-        warnings.append("Blue/purple relationship is unavailable on the entry timeframe.")
+        reasons.append("Blue/purple relationship is unavailable on the entry timeframe; this does not block entry.")
 
     touch_index = _mapped_touch_index(
         candles,
@@ -1006,20 +1004,19 @@ def _purple_entry_snapshot(
     if touch_index is None:
         warnings.append("The higher-timeframe purple touch could not be mapped to this entry timeframe.")
     elif candle2 is None:
-        warnings.append("Candle 1 is the purple-touch candle; waiting for Candle 2 to close before entry confirmation.")
+        reasons.append("Candle 1 is eligible for entry immediately; Candle 2 is not yet available for the later invalidation reference.")
     elif setup_discarded:
         warnings.append(
-            "Setup discarded from Candle 3 onward because price broke the lower of Candle 1 and Candle 2 lows."
+            "Purple-touch validity ended from Candle 3 onward because price broke the lower of Candle 1 and Candle 2 lows."
         )
     else:
         reasons.append(
-            "Candle 2 has closed and no later candle has broken the lower of Candle 1 and Candle 2 lows; setup remains active."
+            "Candle 1 and Candle 2 are eligible entry candles; no later candle has broken their lower low, so the touch remains valid."
         )
 
     entry_rules_pass = (
         close_above_yellow
-        and blue_above_purple is True
-        and reference_lows_ready
+        and touch_index is not None
         and not setup_discarded
         and (entry_kind != "final" or yellow_above_brown is True)
     )
@@ -1158,12 +1155,11 @@ def _mapped_touch_index(
     purple_ema9: float,
     tolerance_percent: float,
 ) -> int | None:
-    tolerance = tolerance_percent / 100
     matches = []
     for index, candle in enumerate(candles):
         if not _same_period(candle.timestamp, touch_timestamp, purple_timeframe):
             continue
-        if candle.low <= purple_ema9 * (1 + tolerance) and candle.high >= purple_ema9 * (1 - tolerance):
+        if _is_bullish_purple_touch(candle, purple_ema9, tolerance_percent):
             matches.append(index)
     return matches[-1] if matches else None
 
@@ -1196,20 +1192,24 @@ def _purple_touch_distance_percent(candle: Candle, ema9: float) -> float | None:
     return abs((nearest - ema9) / ema9) * 100
 
 
+def _is_bullish_purple_touch(candle: Candle, ema9: float, tolerance_percent: float) -> bool:
+    if ema9 <= 0:
+        return False
+    maximum_close = ema9 * (1 + tolerance_percent / 100)
+    return candle.low <= ema9 <= candle.high and ema9 <= candle.close <= maximum_close
+
+
 def _purple_touch_reason(
-    range_distance_percent: float | None,
+    close_distance_percent: float | None,
     tolerance_percent: float,
     prefix: str = "",
 ) -> str:
-    if range_distance_percent is not None and range_distance_percent <= 1e-9:
-        detail = "purple EMA9 is inside the higher-timeframe candle high/low range (exact 0.00% touch)."
-    else:
-        detail = (
-            f"higher-timeframe candle is within {range_distance_percent:.2f}% of purple EMA9 "
-            f"(maximum {tolerance_percent:.2f}%)."
-            if range_distance_percent is not None
-            else f"higher-timeframe candle is within the {tolerance_percent:.2f}% purple EMA9 zone."
-        )
+    detail = (
+        f"higher-timeframe wick/range physically touches purple EMA9 and the close is "
+        f"{close_distance_percent:.2f}% above it (maximum {tolerance_percent:.2f}%)."
+        if close_distance_percent is not None
+        else "higher-timeframe wick/range physically touches purple EMA9 and closes on or above it."
+    )
     return prefix + detail[0].upper() + detail[1:]
 
 
