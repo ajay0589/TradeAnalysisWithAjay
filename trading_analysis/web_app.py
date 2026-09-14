@@ -516,7 +516,7 @@ def _tail_id_from_path(path: str, marker: str) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Trading analysis web UI")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--port", type=int, default=8766)
     args = parser.parse_args()
 
     server = ReusableThreadingHTTPServer((args.host, args.port), TradingRequestHandler)

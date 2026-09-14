@@ -186,9 +186,9 @@ Start the local F&O decision dashboard:
 .\scripts\start_web_ui.ps1
 ```
 
-Then open `http://127.0.0.1:8765`.
+Then open `http://127.0.0.1:8766`.
 
-Use this same URL going forward. The script stops any older UI process already listening on port `8765` and starts the latest code on the same stable port. For foreground logs while debugging:
+Use this same URL going forward on `scanner-audit-and-v4`. The script stops any older UI process already listening on port `8766` and starts the latest code on the same stable port. The v3 server can continue running separately on port `8765`. For foreground logs while debugging:
 
 ```powershell
 .\scripts\start_web_ui.ps1 -Foreground

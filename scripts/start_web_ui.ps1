@@ -1,6 +1,6 @@
 param(
     [string]$HostAddress = "127.0.0.1",
-    [int]$Port = 8765,
+    [int]$Port = 8766,
     [switch]$Foreground
 )
 
