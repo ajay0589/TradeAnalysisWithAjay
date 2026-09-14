@@ -88,7 +88,7 @@ const PURPLE_PROFILES = {
   day: { label: "Daily", confirmation: "week", early: "10minute", final: "30minute", exit: "10minute", days: 365 },
 };
 
-const PURPLE_ACTIVE_PROFILE_KEYS = ["week"];
+const PURPLE_ACTIVE_PROFILE_KEYS = ["month", "week", "day"];
 
 const PURPLE_PROFILE_ANALYSIS_DETAILS = {
   month: "Analyzing Monthly touch, derived 5-month confirmation, 2-hour early/exit, and Daily final-entry rules.",
@@ -1046,7 +1046,11 @@ async function refreshCandlesForPurple() {
 }
 
 async function refreshCandlesForAllPurpleProfiles() {
-  await refreshCandlesForPurpleProfile("week");
+  const timeframes = Array.from(new Set(PURPLE_ACTIVE_PROFILE_KEYS.flatMap((key) => {
+    const profile = PURPLE_PROFILES[key];
+    return [key, profile.confirmation, profile.early, profile.final, profile.exit];
+  })));
+  await refreshPurpleTimeframes(timeframes, Math.max(...PURPLE_ACTIVE_PROFILE_KEYS.map((key) => PURPLE_PROFILES[key].days)));
 }
 
 async function refreshCandlesForPurpleProfile(profileKey) {
@@ -1520,8 +1524,8 @@ function downloadPurpleCsv() {
   ]);
 }
 
-async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "week" } = {}) {
-  purpleTimeframe = "week";
+async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "all" } = {}) {
+  if (![...PURPLE_ACTIVE_PROFILE_KEYS, "all"].includes(purpleTimeframe)) purpleTimeframe = "all";
   if (state.purpleScanInFlight) {
     queuePurpleProfile(purpleTimeframe);
     return;
@@ -1532,7 +1536,7 @@ async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "week" } = {
   state.purpleCancelRequested = false;
   $("purpleLiveScanBtn").disabled = true;
   $("purpleCancelScanBtn").disabled = !$("purpleRefreshToggle").checked;
-  const scanLabel = "Weekly";
+  const scanLabel = purpleTimeframe === "all" ? "Monthly, Weekly, and Daily" : purpleProfileLabel(purpleTimeframe);
   beginPurpleProfileRun(purpleTimeframe, `Starting ${scanLabel} candle refresh and analysis.`);
   updatePurpleMonitorUi(state.purpleMonitorRunning ? `Scanning ${scanLabel} now...` : `Running ${scanLabel} scan...`);
   if (!quiet) {
@@ -1540,14 +1544,19 @@ async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "week" } = {
     $("purpleAlertMeta").textContent = "running";
   }
   try {
-    if ($("purpleRefreshToggle").checked) await refreshCandlesForPurpleProfile("week");
+    if ($("purpleRefreshToggle").checked) {
+      if (purpleTimeframe === "all") await refreshCandlesForAllPurpleProfiles();
+      else await refreshCandlesForPurpleProfile(purpleTimeframe);
+    }
     setPurpleProgress(
       "running",
       `Candle refresh complete. Analyzing ${scanLabel} setup rules, entry confirmations, and open-trade exits...`,
       purpleTimeframe,
       85,
     );
-    setPurpleProfileProgress("week", "running", PURPLE_PROFILE_ANALYSIS_DETAILS.week, 85);
+    purpleProfileKeys(purpleTimeframe).forEach((profileKey) => {
+      setPurpleProfileProgress(profileKey, "running", PURPLE_PROFILE_ANALYSIS_DETAILS[profileKey], 85);
+    });
     $("purpleProgressMeta").textContent = "analysis running";
     const data = await postApi("/api/krishna-purple-touch-live-scan", {
       purple_timeframe: purpleTimeframe,
@@ -1608,11 +1617,11 @@ function mergePurpleProfileRows(existing, incoming, purpleTimeframe) {
 }
 
 function queuePurpleProfile(purpleTimeframe) {
-  purpleTimeframe = "week";
+  if (!PURPLE_ACTIVE_PROFILE_KEYS.includes(purpleTimeframe)) return;
   if (!state.purpleMonitorRunning) return;
   if (!state.purplePendingProfiles.includes(purpleTimeframe)) {
     state.purplePendingProfiles.push(purpleTimeframe);
-    setPurpleProfileProgress(purpleTimeframe, "queued", "Scheduled Weekly scan is queued behind the active scan.", 5);
+    setPurpleProfileProgress(purpleTimeframe, "queued", `Scheduled ${purpleProfileLabel(purpleTimeframe)} scan is queued behind the active candle refresh.`, 5);
   }
   if (!state.purpleScanInFlight) runNextQueuedPurpleProfile();
 }
@@ -1659,8 +1668,8 @@ function scanSummaryFromLiveScan(data, rows, step1Rows = []) {
     latest_candles_pulled: $("purpleRefreshToggle").checked,
     points: [
       `Scanner evaluated ${profileList(data)} purple-touch profile${(data.profiles || []).length === 1 ? "" : "s"}.`,
-      `Step 1 found ${step1Matched || step1Rows.length} physical Weekly EMA9 touch row(s) whose close is 0.00% to 3.00% above purple; rows are ordered by close distance.`,
-      `Weekly Setups Passing All Filters shows ${rows.length} row(s) after mandatory EMA89, EMA26, Weekly blue/purple direction, 2-3 candle approach, and Monthly confirmation checks.`,
+      `Step 1 found ${step1Matched || step1Rows.length} physical EMA9 touch row(s) across the selected profile(s); rows are ordered by close distance.`,
+      `Setups Passing All Filters shows ${rows.length} row(s) after each profile's mandatory EMA89, EMA26, blue/purple direction, 2-3 candle approach, and higher-timeframe confirmation checks.`,
       `${earlyReady} all-filter setup row(s) have Early ready; ${finalReady} have Final ready. Setup rows are not the same as newly created entry signals.`,
       data.market_hours === false && !data.forced
         ? "Market is closed and Force is off: analysis was refreshed, but entry/exit events, trade IDs, and Telegram alerts were intentionally not created."
@@ -1728,9 +1737,9 @@ function startPurpleAutoMonitor() {
     state.purpleNextRunAt[profileKey] = Date.now() + purpleIntervalSeconds(profileKey) * 1000;
   });
   renderPurpleProfileProgress();
-  updatePurpleMonitorUi("Initial Weekly scan is starting...");
-  $("purpleAlertMeta").textContent = "monitoring Weekly schedule";
-  runPurpleLiveScan({ quiet: true, purpleTimeframe: "week" });
+  updatePurpleMonitorUi("Initial Monthly, Weekly, and Daily scan is starting...");
+  $("purpleAlertMeta").textContent = "monitoring three profile schedules";
+  runPurpleLiveScan({ quiet: true, purpleTimeframe: "all" });
   PURPLE_ACTIVE_PROFILE_KEYS.forEach((profileKey) => {
     const seconds = purpleIntervalSeconds(profileKey);
     state.purpleAutoTimers[profileKey] = window.setInterval(() => {
@@ -1764,7 +1773,7 @@ function updatePurpleMonitorUi(detail) {
   status.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(text)}</span>`;
   $("purpleAutoStartBtn").disabled = running;
   $("purpleAutoStopBtn").disabled = !running;
-  ["purpleWeekIntervalSeconds"].forEach((id) => {
+  ["purpleMonthIntervalSeconds", "purpleWeekIntervalSeconds", "purpleDayIntervalSeconds"].forEach((id) => {
     $(id).disabled = running;
   });
 }

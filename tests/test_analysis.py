@@ -4,6 +4,7 @@ import unittest
 import json
 import os
 import tempfile
+import threading
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -1304,39 +1305,79 @@ class AnalysisTests(unittest.TestCase):
 
         service = AnalysisService()
         next_open = datetime(2026, 8, 24, 9, 15)
-        scan_result = {
-            "profile": {},
-            "results": [],
-            "analyzed_symbols": 1,
-            "matched_symbols": 0,
-            "errors": [],
-        }
-        step1_result = {
-            "results": [{"symbol": "ABC", "purple_timeframe": "week"}],
-            "analyzed_symbols": 1,
-            "matched_symbols": 1,
-            "errors": [],
-        }
+        def profile_result(profile, *_args):
+            timeframe = profile.purple_timeframe
+            scan_result = {
+                "purple_timeframe": timeframe,
+                "profile": profile.to_dict(),
+                "results": [],
+                "analyzed_symbols": 1,
+                "matched_symbols": 0,
+                "errors": [],
+            }
+            step1_result = {
+                "purple_timeframe": timeframe,
+                "results": [{"symbol": "ABC", "purple_timeframe": timeframe}],
+                "analyzed_symbols": 1,
+                "matched_symbols": 1,
+                "errors": [],
+            }
+            return step1_result, scan_result
         with (
             patch("trading_analysis.web_services.is_market_hours", return_value=False),
             patch("trading_analysis.web_services.next_market_open", return_value=next_open),
             patch("trading_analysis.web_services.KrishnaPurpleAlertRepository", return_value=FakePurpleRepo()),
-            patch.object(service, "scan_krishna_purple_touch_step1", return_value=step1_result) as step1_scan,
-            patch.object(service, "scan_krishna_purple_touch", return_value=scan_result) as strict_scan,
+            patch.object(service, "_scan_krishna_purple_profile_once", side_effect=profile_result) as profile_scan,
         ):
             result = service.scan_krishna_purple_touch_alerts(purple_timeframe="all")
 
         self.assertFalse(result["skipped"])
         self.assertTrue(result["alert_creation_skipped"])
         self.assertFalse(result["market_hours"])
-        self.assertEqual(len(result["step1_results"]), 1)
-        self.assertEqual(step1_scan.call_count, 1)
-        self.assertEqual(strict_scan.call_count, 1)
+        self.assertEqual(len(result["step1_results"]), 3)
+        self.assertEqual(profile_scan.call_count, 3)
         self.assertEqual(result["entry_alerts_created"], 0)
         self.assertEqual(result["exit_alerts_created"], 0)
-        self.assertTrue(result["weekly_only"])
+        self.assertFalse(result["weekly_only"])
         self.assertEqual(result["requested_purple_timeframe"], "all")
-        self.assertEqual([profile["purple_timeframe"] for profile in result["profiles"]], ["week"])
+        self.assertEqual([profile["purple_timeframe"] for profile in result["profiles"]], ["month", "week", "day"])
+
+    def test_krishna_purple_live_alert_profiles_run_concurrently(self) -> None:
+        class FakePurpleRepo:
+            def list_recent_alerts(self, limit=50):
+                return []
+
+            def list_open_trades(self, limit=200):
+                return []
+
+            def counts(self):
+                return {}
+
+        barrier = threading.Barrier(3)
+
+        def profile_result(profile, *_args):
+            barrier.wait(timeout=2)
+            base = {
+                "purple_timeframe": profile.purple_timeframe,
+                "profile": profile.to_dict(),
+                "results": [],
+                "analyzed_symbols": 1,
+                "matched_symbols": 0,
+                "errors": [],
+            }
+            return dict(base, type="krishna_purple_touch_step1"), dict(base, type="krishna_purple_touch_entry")
+
+        service = AnalysisService()
+        with (
+            patch("trading_analysis.web_services.is_market_hours", return_value=False),
+            patch("trading_analysis.web_services.next_market_open", return_value=datetime(2026, 8, 24, 9, 15)),
+            patch("trading_analysis.web_services.KrishnaPurpleAlertRepository", return_value=FakePurpleRepo()),
+            patch.object(service, "_scan_krishna_purple_profile_once", side_effect=profile_result),
+        ):
+            result = service.scan_krishna_purple_touch_alerts(purple_timeframe="all")
+
+        self.assertEqual(len(result["scans"]), 3)
+        self.assertEqual(result["errors"], [])
 
     def test_telegram_purple_alert_message_contains_profile_and_trade_id(self) -> None:
         message = purple_alert_message(

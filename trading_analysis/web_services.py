@@ -7,6 +7,7 @@ import threading
 import time
 import uuid
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
 from datetime import date, datetime
 from datetime import timedelta
@@ -1363,35 +1364,17 @@ class AnalysisService:
         existing_entries: list[dict[str, Any]] = []
         closed_trades: list[dict[str, Any]] = []
         errors: list[dict[str, str]] = []
-        # Purple Touch live monitoring is intentionally restricted to Weekly while
-        # its rules and alerts are being validated. Monthly and Daily data/history
-        # remain intact so those profiles can be re-enabled later.
         requested_profile = str(purple_timeframe or "week")
-        profiles = _purple_profiles("week")
+        profiles = _purple_profiles(requested_profile)
+        open_trades = repository.list_open_trades(limit=500) if alerts_allowed else []
+        persistence_lock = threading.Lock()
 
-        for profile in profiles:
-            step1_scan = self.scan_krishna_purple_touch_step1(
-                purple_timeframe=profile.purple_timeframe,
-                days=days,
-                from_date=from_date,
-                to_date=to_date,
-                limit=limit,
-            )
-            step1_scans.append(step1_scan)
-            scan = self.scan_krishna_purple_touch(
-                purple_timeframe=profile.purple_timeframe,
-                days=days,
-                from_date=from_date,
-                to_date=to_date,
-                limit=limit,
-            )
-            scans.append(scan)
+        def persist_entry_row(row: dict[str, Any]) -> None:
             if not alerts_allowed:
-                continue
-            for row in scan.get("results") or []:
-                # Final is evaluated first. If it is active, the repository suppresses
-                # a later early entry for this symbol/profile. An early trade opened
-                # on an earlier scan may remain open while final confirmation develops.
+                return
+            # Final is persisted first so it suppresses a later early entry for the
+            # same setup. Both confirmations are calculated from the same snapshot.
+            with persistence_lock:
                 for entry_kind in ("final", "early"):
                     entry = row.get(f"{entry_kind}_entry") or {}
                     if entry.get("status") != "entry_candidate":
@@ -1406,30 +1389,68 @@ class AnalysisService:
                     except Exception as exc:
                         errors.append({"symbol": row.get("symbol") or "", "error": str(exc)})
 
-        if alerts_allowed:
-            max_days = max((days or profile.minimum_days) for profile in profiles)
-            window = candle_window(from_date=from_date, to_date=to_date, days=max_days)
-            for trade in repository.list_open_trades(limit=500):
-                matching_profile = next(
-                    (profile for profile in profiles if profile.purple_timeframe == trade.get("purple_timeframe")),
-                    None,
-                )
-                if not matching_profile:
-                    continue
-                try:
-                    exit_timeframe = trade.get("exit_timeframe") or matching_profile.exit_timeframe
-                    exit_candles, _summary = self._load_optional_timeframe_with_summary(
-                        trade["symbol"], exit_timeframe, window
+        # Profile analysis is read-only and independent once candle refresh is complete.
+        # Exit evaluation is independent of new setup discovery, so it runs beside the
+        # profile workers. Database writes stay on this request thread to avoid races.
+        with ThreadPoolExecutor(max_workers=len(profiles) + (1 if alerts_allowed else 0)) as executor:
+            futures = {
+                executor.submit(
+                    self._scan_krishna_purple_profile_once,
+                    profile,
+                    days,
+                    from_date,
+                    to_date,
+                    limit,
+                    persist_entry_row,
+                ): ("profile", profile)
+                for profile in profiles
+            }
+            if alerts_allowed:
+                futures[
+                    executor.submit(
+                        self._evaluate_krishna_purple_exits,
+                        profiles,
+                        open_trades,
+                        days,
+                        from_date,
+                        to_date,
                     )
-                    exit_snapshot = scan_krishna_purple_exit_status(trade["symbol"], exit_candles, exit_timeframe)
-                    if exit_snapshot.get("status") == "exit_triggered":
-                        outcome = repository.close_trade_alert(trade, exit_snapshot)
-                        closed_trades.append(outcome)
-                        self._notify_purple_alert(outcome, notifier, telegram_status, send_telegram)
-                    else:
-                        repository.update_checked(trade["trade_id"])
+                ] = ("exits", None)
+
+            for future in as_completed(futures):
+                work_type, profile = futures[future]
+                try:
+                    result = future.result()
                 except Exception as exc:
-                    errors.append({"symbol": trade.get("symbol") or "", "error": str(exc)})
+                    errors.append({"symbol": "", "error": f"{work_type} scan failed: {exc}"})
+                    continue
+
+                if work_type == "exits":
+                    for exit_result in result:
+                        trade = exit_result["trade"]
+                        if exit_result.get("error"):
+                            errors.append({"symbol": trade.get("symbol") or "", "error": exit_result["error"]})
+                            continue
+                        exit_snapshot = exit_result["snapshot"]
+                        try:
+                            with persistence_lock:
+                                if exit_snapshot.get("status") == "exit_triggered":
+                                    outcome = repository.close_trade_alert(trade, exit_snapshot)
+                                    closed_trades.append(outcome)
+                                    self._notify_purple_alert(outcome, notifier, telegram_status, send_telegram)
+                                else:
+                                    repository.update_checked(trade["trade_id"])
+                        except Exception as exc:
+                            errors.append({"symbol": trade.get("symbol") or "", "error": str(exc)})
+                    continue
+
+                step1_scan, scan = result
+                step1_scans.append(step1_scan)
+                scans.append(scan)
+
+        profile_order = {"month": 0, "week": 1, "day": 2}
+        scans.sort(key=lambda item: profile_order.get(str(item.get("purple_timeframe")), 99))
+        step1_scans.sort(key=lambda item: profile_order.get(str(item.get("purple_timeframe")), 99))
 
         recent_alerts = repository.list_recent_alerts(limit=50)
         open_trades = repository.list_open_trades(limit=200)
@@ -1438,9 +1459,9 @@ class AnalysisService:
             "type": "krishna_purple_touch_live_alert_scan",
             "profile": scans[0].get("profile") if len(scans) == 1 else None,
             "profiles": [profile.to_dict() for profile in profiles],
-            "purple_timeframe": "week",
+            "purple_timeframe": requested_profile,
             "requested_purple_timeframe": requested_profile,
-            "weekly_only": True,
+            "weekly_only": False,
             "market_hours": market_open,
             "forced": force,
             "skipped": False,
@@ -1465,20 +1486,142 @@ class AnalysisService:
             "errors": errors[:20],
             "summary": {
                 "points": [
-                    "Live alert scan is temporarily restricted to the Weekly purple-touch profile while its rules are validated.",
-                    "Weekly uses Weekly touch candles, Monthly confirmation, 30-minute early/exit candles, and 2-hour final-entry candles.",
+                    "Monthly, Weekly, and Daily Purple Touch profiles are enabled and use their own supporting timeframes.",
+                    "Profile analysis runs concurrently after candle refresh; each symbol is loaded once for Step 1, strict setup, Early, and Final evaluation.",
+                    "Open-trade exit evaluation runs concurrently with profile analysis and does not wait for a new shortlist.",
                     "Entry alerts get a trade ID and remain open until the configured exit timeframe closes below yellow.",
-                    "Each stock can hold one Weekly early trade and one Weekly final trade; final confirmation suppresses any later early entry for the same setup.",
-                    "An early Weekly trade may remain open while the same setup continues toward final confirmation.",
+                    "Within each profile, a stock can hold one early trade and one final trade; final confirmation suppresses any later early entry for the same setup.",
+                    "An early trade may remain open while the same profile setup continues toward final confirmation.",
                     "A closed final trade also suppresses a later early alert from the same mapped Purple Touch candle; a new touch candle starts a new setup lifecycle.",
                     "Duplicate entry alerts are suppressed for the same symbol, profile, entry kind, and mapped Purple Touch candle.",
-                    "Existing Monthly and Daily history is preserved, but those profiles are not scanned or exit-monitored while paused.",
+                    "Early and Final confirmations require a qualifying profile setup, so they cannot start before that stock passes the setup filters.",
                     "Cached candles are analyzed even outside market hours so Step 1 and all-filter setups remain visible.",
                     "Fresh entry/exit alerts and Telegram delivery are gated to NSE market hours unless force is enabled for testing.",
                     "This is read-only alert tracking for manual review, not order placement.",
                 ],
             },
         }
+
+    def _scan_krishna_purple_profile_once(
+        self,
+        profile,
+        days: int | None,
+        from_date: str | None,
+        to_date: str | None,
+        limit: int | None,
+        on_strict_row=None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Build Step 1 and strict results in one candle-file traversal."""
+        window = candle_window(from_date=from_date, to_date=to_date, days=days or profile.minimum_days)
+        step1_rows: list[dict[str, Any]] = []
+        strict_rows: list[dict[str, Any]] = []
+        errors: list[dict[str, str]] = []
+        analyzed_symbols = 0
+        symbols = self._watchlist_symbols()
+
+        for symbol in symbols:
+            if not self._has_candles(symbol, profile.purple_timeframe):
+                continue
+            try:
+                touch_candles, touch_source = self._load_timeframe_with_summary(symbol, profile.purple_timeframe, window)
+                analyzed_symbols += 1
+                early_candles, early_source = self._load_optional_timeframe_with_summary(symbol, profile.early_timeframe, window)
+                final_candles, final_source = self._load_optional_timeframe_with_summary(symbol, profile.final_timeframe, window)
+                confirmation_candles, confirmation_source = self._load_purple_confirmation_with_summary(symbol, profile, window)
+                structure = analyze_market_structure(touch_candles) if len(touch_candles) >= 10 else None
+                shared_args = {
+                    "early_candles": early_candles,
+                    "final_candles": final_candles,
+                    "confirmation_candles": confirmation_candles,
+                    "purple_timeframe": profile.purple_timeframe,
+                    "structure": structure,
+                }
+                candidate = scan_krishna_purple_step1_candidate(symbol, touch_candles, **shared_args)
+                match = scan_krishna_purple_touch_setup(symbol, touch_candles, **shared_args)
+                sources = {
+                    "profile": profile.to_dict(),
+                    "touch_candle_count": touch_source.get("analyzed_count"),
+                    "touch_from": touch_source.get("from"),
+                    "touch_to": touch_source.get("to"),
+                    "touch_source_path": touch_source.get("path"),
+                    "early_source_path": early_source.get("path"),
+                    "final_source_path": final_source.get("path"),
+                    "confirmation_source_path": confirmation_source.get("path"),
+                    "confirmation_candle_count": confirmation_source.get("analyzed_count"),
+                }
+                if candidate:
+                    row = candidate.to_dict()
+                    row.update(sources)
+                    row["reasons_text"] = "; ".join(row.get("reasons") or [])
+                    step1_rows.append(row)
+                if match:
+                    row = match.to_dict()
+                    row.update(sources)
+                    row["reasons_text"] = "; ".join(row.get("reasons") or [])
+                    strict_rows.append(row)
+                    if on_strict_row:
+                        on_strict_row(row)
+            except Exception as exc:
+                errors.append({"symbol": symbol, "error": str(exc)})
+
+        step1_rows.sort(key=lambda row: (
+            float(row.get("purple_touch_distance_percent") or 0),
+            -int(row.get("full_setup_status") == "qualified"),
+            -int(row.get("score") or 0),
+            str(row.get("symbol") or ""),
+        ))
+        strict_rows.sort(key=lambda row: (
+            float(row.get("purple_touch_distance_percent") or 0),
+            -int((row.get("final_entry") or {}).get("status") == "entry_candidate"),
+            -int((row.get("early_entry") or {}).get("status") == "entry_candidate"),
+            -int(row.get("score") or 0),
+            str(row.get("symbol") or ""),
+        ))
+
+        def payload(kind: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+            shown = rows if limit is None else rows[:limit]
+            return {
+                "type": kind,
+                "profile": profile.to_dict(),
+                "purple_timeframe": profile.purple_timeframe,
+                "purple_timeframe_label": profile.label,
+                "analyzed_symbols": analyzed_symbols,
+                "available_symbols": self._available_count(profile.purple_timeframe),
+                "total_fno_symbols": len(symbols),
+                "matched_symbols": len(rows),
+                "limit": limit,
+                "results": shown,
+                "errors": errors[:20],
+            }
+
+        return payload("krishna_purple_touch_step1", step1_rows), payload("krishna_purple_touch_entry", strict_rows)
+
+    def _evaluate_krishna_purple_exits(
+        self,
+        profiles,
+        trades: list[dict[str, Any]],
+        days: int | None,
+        from_date: str | None,
+        to_date: str | None,
+    ) -> list[dict[str, Any]]:
+        max_days = max((days or profile.minimum_days) for profile in profiles)
+        window = candle_window(from_date=from_date, to_date=to_date, days=max_days)
+        profile_by_timeframe = {profile.purple_timeframe: profile for profile in profiles}
+        results: list[dict[str, Any]] = []
+        for trade in trades:
+            profile = profile_by_timeframe.get(trade.get("purple_timeframe"))
+            if not profile:
+                continue
+            try:
+                exit_timeframe = trade.get("exit_timeframe") or profile.exit_timeframe
+                exit_candles, _summary = self._load_optional_timeframe_with_summary(trade["symbol"], exit_timeframe, window)
+                results.append({
+                    "trade": trade,
+                    "snapshot": scan_krishna_purple_exit_status(trade["symbol"], exit_candles, exit_timeframe),
+                })
+            except Exception as exc:
+                results.append({"trade": trade, "error": str(exc)})
+        return results
 
     def _notify_purple_alert(
         self,
@@ -1590,8 +1733,8 @@ class AnalysisService:
         )
         return {
             "type": "krishna_purple_touch_alerts",
-            "profiles": _purple_profile_dicts("week"),
-            "weekly_only": True,
+            "profiles": _purple_profile_dicts("all"),
+            "weekly_only": False,
             "market_hours": is_market_hours(),
             "telegram": {
                 "configured": notifier.configured(),

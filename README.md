@@ -200,7 +200,7 @@ The visual workflow, confirmed rules, timeframe matrix, entry/exit lifecycle, UI
 
 The current Weekly-only execution rules, valid/invalid candle diagrams, exact boundaries, live monitoring guide, alert gates, and audit worksheet are documented in [Weekly Purple Touch Validation Guide v1.1](docs/Weekly_Purple_Touch_Validation_Guide_v1_1.pdf). The [previous v1.0 guide](docs/Weekly_Purple_Touch_Validation_Guide_v1_0.pdf) is retained for comparison.
 
-Purple Touch live scanning and monitoring are temporarily restricted to the Weekly profile while its results are validated. Each run refreshes Weekly touch candles, Monthly confirmation candles, 30-minute early/exit candles, and 2-hour final-entry candles. Existing Monthly and Daily history is preserved, but those profiles are not newly scanned or exit-monitored while paused.
+Purple Touch live monitoring supports Monthly, Weekly, and Daily profiles on independent schedules. Candle downloads remain queued to respect Zerodha rate limits. Once refresh completes, the three profile analyses run concurrently, each symbol is loaded once for Step 1 plus strict entry checks, and existing open-trade exits are evaluated in parallel with setup analysis.
 
 Purple Touch entry alerts and trade lifecycle records are retained in local SQLite storage for audit and setup-quality review. The UI combines each created entry signal and its lifecycle into one `Trades Triggered: Open & Closed` table with profile, entry type, status, symbol, date, and sorting controls; it does not automatically purge open or closed Purple Touch trades.
 

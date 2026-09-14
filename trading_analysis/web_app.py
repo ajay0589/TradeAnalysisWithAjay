@@ -138,7 +138,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 params = parse_qs(parsed.query)
                 self._send_json(
                     self.service.scan_krishna_purple_touch(
-                        purple_timeframe="week",
+                        purple_timeframe=params.get("purple_timeframe", ["week"])[0],
                         days=_optional_int(params.get("days", [None])[0]),
                         from_date=params.get("from_date", [None])[0] or None,
                         to_date=params.get("to_date", [None])[0] or None,
@@ -347,7 +347,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 payload = self._read_json()
                 self._send_json(
                     self.service.scan_krishna_purple_touch_alerts(
-                        purple_timeframe=str(payload.get("purple_timeframe") or "week"),
+                        purple_timeframe=str(payload.get("purple_timeframe") or "all"),
                         days=_optional_int(payload.get("days")),
                         from_date=payload.get("from_date") or None,
                         to_date=payload.get("to_date") or None,
