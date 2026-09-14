@@ -880,6 +880,18 @@ class KrishnaPurpleAlertRepository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def mark_incomplete_refreshes_stopped(self) -> None:
+        with _connection(self.db_path) as conn:
+            conn.execute(
+                """
+                UPDATE candle_refresh_state
+                SET status = CASE WHEN last_success_at IS NULL THEN 'missing' ELSE 'stale' END,
+                    updated_at = ?
+                WHERE status IN ('queued', 'updating')
+                """,
+                (_now(),),
+            )
+
     def start_scan_run(self, profile: str, scheduled_at: str | None = None, queued_at: str | None = None) -> str:
         run_id = f"KPS-{profile.upper()}-{datetime.now(IST).strftime('%Y%m%d%H%M%S%f')}"
         with _connection(self.db_path) as conn:
@@ -917,7 +929,14 @@ class KrishnaPurpleAlertRepository:
                    JOIN (SELECT purple_timeframe, MAX(id) AS id FROM krishna_purple_scan_runs GROUP BY purple_timeframe) x
                    ON r.id = x.id ORDER BY CASE r.purple_timeframe WHEN 'month' THEN 1 WHEN 'week' THEN 2 ELSE 3 END"""
             ).fetchall()
-        return [dict(row) for row in rows]
+        output = []
+        for row in rows:
+            item = dict(row)
+            result = _loads(item.get("result_json"), {})
+            item["result"] = result
+            item["stale_skipped_symbols"] = int(result.get("stale_skipped_symbols") or 0)
+            output.append(item)
+        return output
 
     def open_entry_alert(self, match: dict[str, Any], entry: dict[str, Any], entry_kind: str) -> dict[str, Any]:
         symbol = str(match.get("symbol") or "").upper()

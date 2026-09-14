@@ -230,6 +230,102 @@ class PurpleMonitorTests(unittest.TestCase):
         self.assertEqual(self.service._purple_monitor_state["entry_checks"], 1)
         self.assertEqual(self.service._purple_monitor_state["exit_checks"], 1)
 
+    def test_refresh_scheduler_covers_all_profile_sources_by_priority(self) -> None:
+        class SchedulerRepository:
+            @staticmethod
+            def refresh_states(limit=5000):
+                return []
+
+            @staticmethod
+            def list_open_trades(limit=500):
+                return [{"symbol": "EXIT", "exit_timeframe": "120minute"}]
+
+            @staticmethod
+            def active_setups(limit=2000):
+                return [
+                    {"symbol": "MONTH", "purple_timeframe": "month"},
+                    {"symbol": "WEEK", "purple_timeframe": "week"},
+                    {"symbol": "DAY", "purple_timeframe": "day"},
+                ]
+
+        queued = []
+        with (
+            patch.object(self.service, "_watchlist_symbols", return_value=["FULL"]),
+            patch.object(
+                self.service,
+                "_queue_purple_refresh",
+                side_effect=lambda symbol, timeframe, priority, _states: queued.append(
+                    (symbol, timeframe, priority)
+                ),
+            ),
+        ):
+            self.service._schedule_purple_refreshes(SchedulerRepository())
+
+        self.assertIn(("EXIT", "60minute", 10), queued)
+        self.assertIn(("MONTH", "60minute", 20), queued)
+        self.assertIn(("MONTH", "day", 20), queued)
+        self.assertIn(("WEEK", "30minute", 20), queued)
+        self.assertIn(("WEEK", "60minute", 20), queued)
+        self.assertIn(("DAY", "10minute", 20), queued)
+        self.assertIn(("DAY", "30minute", 20), queued)
+        self.assertIn(("FULL", "day", 30), queued)
+
+    def test_manual_scan_reports_when_all_profiles_are_stale(self) -> None:
+        def stale_profile(profile, *_args):
+            payload = {
+                "purple_timeframe": profile.purple_timeframe,
+                "profile": profile.to_dict(),
+                "results": [],
+                "analyzed_symbols": 0,
+                "matched_symbols": 0,
+                "stale_skipped_symbols": 3,
+                "errors": [{"symbol": "ABC", "error": "Setup scan skipped because required candle data is stale."}],
+            }
+            return dict(payload), dict(payload)
+
+        with (
+            patch("trading_analysis.web_services.KrishnaPurpleAlertRepository", return_value=self.repo),
+            patch.object(self.service, "_scan_krishna_purple_profile_once", side_effect=stale_profile),
+            patch.object(self.service, "check_krishna_purple_entries", return_value={"created": [], "errors": []}),
+            patch.object(self.service, "check_krishna_purple_exits", return_value={"closed": [], "errors": []}),
+        ):
+            result = self.service.scan_krishna_purple_touch_alerts("all", send_telegram=False)
+
+        self.assertTrue(result["skipped"])
+        self.assertEqual(result["stale_skipped_symbols"], 9)
+        self.assertEqual(len(result["errors"]), 3)
+        self.assertIn("Start the market monitor", result["skip_reason"])
+
+    def test_manual_scan_cancel_sets_cooperative_stop_event(self) -> None:
+        self.service._purple_manual_scan_running = True
+
+        result = self.service.cancel_krishna_purple_manual_scan()
+
+        self.assertTrue(result["cancel_requested"])
+        self.assertTrue(self.service._purple_manual_scan_cancel_event.is_set())
+
+    def test_manual_scan_wrapper_receives_cancel_request(self) -> None:
+        started = threading.Event()
+        result_holder = {}
+
+        def cancellable_scan(*, cancel_event, **_kwargs):
+            started.set()
+            cancel_event.wait(timeout=2)
+            return {"cancelled": cancel_event.is_set()}
+
+        with patch.object(self.service, "scan_krishna_purple_touch_alerts", side_effect=cancellable_scan):
+            scan_thread = threading.Thread(
+                target=lambda: result_holder.update(self.service.run_krishna_purple_manual_scan())
+            )
+            scan_thread.start()
+            self.assertTrue(started.wait(timeout=1))
+            cancel_result = self.service.cancel_krishna_purple_manual_scan()
+            scan_thread.join(timeout=2)
+
+        self.assertTrue(cancel_result["cancel_requested"])
+        self.assertTrue(result_holder["cancelled"])
+        self.assertFalse(self.service._purple_manual_scan_running)
+
 
 if __name__ == "__main__":
     unittest.main()

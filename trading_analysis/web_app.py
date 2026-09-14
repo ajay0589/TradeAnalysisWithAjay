@@ -363,7 +363,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/krishna-purple-touch-live-scan":
                 payload = self._read_json()
                 self._send_json(
-                    self.service.scan_krishna_purple_touch_alerts(
+                    self.service.run_krishna_purple_manual_scan(
                         purple_timeframe=str(payload.get("purple_timeframe") or "all"),
                         days=_optional_int(payload.get("days")),
                         from_date=payload.get("from_date") or None,
@@ -373,6 +373,9 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         send_telegram=bool(payload.get("send_telegram", True)),
                     )
                 )
+            elif parsed.path == "/api/krishna-purple-touch-live-scan/cancel":
+                self._read_json()
+                self._send_json(self.service.cancel_krishna_purple_manual_scan())
             elif parsed.path == "/api/krishna-purple-monitor/start":
                 payload = self._read_json()
                 self._send_json(

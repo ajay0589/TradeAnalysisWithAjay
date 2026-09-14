@@ -1115,15 +1115,19 @@ function renderPurpleRefreshJob(job, purpleTimeframe = "all") {
 }
 
 async function cancelPurpleCurrentScan() {
-  if (!state.purpleRefreshJobId || !state.purpleScanInFlight || state.purpleCancelRequested) return;
+  if (!state.purpleScanInFlight || state.purpleCancelRequested) return;
   state.purpleCancelRequested = true;
   $("purpleCancelScanBtn").disabled = true;
   $("purpleProgressMeta").textContent = "cancelling";
-  $("purpleProgressStatus").textContent = "Cancellation requested. Waiting for the current Zerodha request to finish...";
-  setPurpleProfileProgress(state.purpleActiveProfile || "all", "cancelling", "Waiting for the current candle request to finish...", 95);
+  $("purpleProgressStatus").textContent = "Cancellation requested. Waiting for active profile analysis to stop...";
+  setPurpleProfileProgress(state.purpleActiveProfile || "all", "cancelling", "Stopping active profile analysis...", 95);
   try {
-    const job = await postApi("/api/job/stop", { job_id: state.purpleRefreshJobId });
-    renderPurpleRefreshJob(job, state.purpleActiveProfile || "all");
+    if (state.purpleRefreshJobId) {
+      const job = await postApi("/api/job/stop", { job_id: state.purpleRefreshJobId });
+      renderPurpleRefreshJob(job, state.purpleActiveProfile || "all");
+    } else {
+      await postApi("/api/krishna-purple-touch-live-scan/cancel", {});
+    }
   } catch (error) {
     state.purpleCancelRequested = false;
     $("purpleCancelScanBtn").disabled = false;
@@ -1538,7 +1542,7 @@ async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "all" } = {}
   state.purpleRefreshJobId = null;
   state.purpleCancelRequested = false;
   $("purpleLiveScanBtn").disabled = true;
-  $("purpleCancelScanBtn").disabled = !$("purpleRefreshToggle").checked;
+  $("purpleCancelScanBtn").disabled = false;
   const scanLabel = purpleTimeframe === "all" ? "Monthly, Weekly, and Daily" : purpleProfileLabel(purpleTimeframe);
   beginPurpleProfileRun(purpleTimeframe, `Starting ${scanLabel} candle refresh and analysis.`);
   updatePurpleMonitorUi(state.purpleMonitorRunning ? `Scanning ${scanLabel} now...` : `Running ${scanLabel} scan...`);
@@ -1577,9 +1581,17 @@ async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "all" } = {}
     loadPurpleSetups();
     loadPurpleMonitorStatus();
     const newAlerts = Number(data.entry_alerts_created || 0) + Number(data.exit_alerts_created || 0);
+    if (data.cancelled) {
+      const error = new Error(data.skip_reason || "Purple Touch scan cancelled.");
+      error.cancelled = true;
+      throw error;
+    }
+    if (data.skipped) {
+      throw new Error(data.skip_reason || "Purple Touch scan skipped because required candle data is stale or missing.");
+    }
     setPurpleProgress(
-      "completed",
-      `${scanLabel} analysis complete: ${step1Rows.length} physical touch row(s), ${rows.length} all-filter setup(s), ${newAlerts} new alert(s).`,
+      data.partial ? "partial" : "completed",
+      `${scanLabel} analysis ${data.partial ? "partially completed" : "complete"}: ${step1Rows.length} physical touch row(s), ${rows.length} all-filter setup(s), ${newAlerts} new alert(s)${data.partial ? `; ${data.stale_skipped_symbols || 0} profile-symbol checks deferred for stale data.` : "."}`,
       purpleTimeframe,
       100,
     );
@@ -1587,7 +1599,11 @@ async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "all" } = {}
       ? "analysis complete / live alerts paused"
       : `${data.entry_alerts_created || 0} entry / ${data.exit_alerts_created || 0} new alert(s)`;
     if (!quiet) {
-      setNotes(newAlerts ? `${newAlerts} new Purple Touch alert(s) are shown on the Web UI.` : "Purple Touch scan completed; no new live alerts.");
+      setNotes(
+        data.partial
+          ? `Purple Touch scan used available fresh cache; ${data.stale_skipped_symbols || 0} profile-symbol checks were deferred until candle refresh completes.`
+          : newAlerts ? `${newAlerts} new Purple Touch alert(s) are shown on the Web UI.` : "Purple Touch scan completed; no new live alerts.",
+      );
     }
   } catch (error) {
     $("purpleAlertMeta").textContent = error.cancelled ? "cancelled" : "failed";
@@ -1826,10 +1842,17 @@ function renderPurpleMonitorStatus(data) {
     Object.entries(data.next_profile_runs || {}).map(([key, value]) => [key, new Date(value).getTime()]),
   );
   const current = data.current_refresh;
+  const dailyFreshness = (data.freshness || []).find((row) => row.timeframe === "day");
+  const freshSetupSources = Number(dailyFreshness?.fresh || 0);
   $("purpleDataServiceMeta").textContent = data.running ? "Running" : "Stopped";
   $("purpleDataServiceStatus").textContent = current
     ? `Refreshing ${current.symbol} ${current.timeframe}; scanners continue using the previous complete cache.`
     : data.running ? "Refresh worker is ready for the next prioritized source." : "Continuous refresh is stopped.";
+  $("purpleRunHint").textContent = freshSetupSources > 0
+    ? `Manual runs analyze the latest completed cache. ${freshSetupSources} Daily setup source(s) are currently fresh.`
+    : data.running
+      ? "Candle refresh is in progress. Manual profile scans will become available as fresh Daily sources arrive."
+      : "Start the market monitor first so the candle service can prepare fresh data. A manual run cannot create results from stale or missing candles.";
   $("purpleDataServiceCards").innerHTML = [
     ["Queue", data.queue_size || 0],
     ["Successful", data.refresh_successes || 0],
@@ -1846,7 +1869,7 @@ function renderPurpleMonitorStatus(data) {
     const profile = run.purple_timeframe;
     state.purpleProfileRuns[profile] = {
       status: run.status,
-      detail: `${fmtInt(run.symbols_analyzed)} analyzed; ${fmtInt(run.setups_added)} added; ${fmtInt(run.setups_updated)} updated; ${fmtInt(run.error_count)} errors; ${run.duration_ms == null ? "duration pending" : `${(Number(run.duration_ms) / 1000).toFixed(1)} sec`}.`,
+      detail: `${fmtInt(run.symbols_analyzed)} analyzed; ${fmtInt(run.stale_skipped_symbols)} deferred for stale data; ${fmtInt(run.setups_added)} added; ${fmtInt(run.setups_updated)} updated; ${fmtInt(run.error_count)} errors; ${run.duration_ms == null ? "duration pending" : `${(Number(run.duration_ms) / 1000).toFixed(1)} sec`}.`,
       progress: run.status === "running" ? 65 : 100,
       startedAt: run.started_at,
       endedAt: run.completed_at,

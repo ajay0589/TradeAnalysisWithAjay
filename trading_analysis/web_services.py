@@ -194,6 +194,9 @@ class AnalysisService:
         self._purple_profile_running: set[str] = set()
         self._purple_entry_checker_running = False
         self._purple_exit_checker_running = False
+        self._purple_manual_scan_lock = threading.Lock()
+        self._purple_manual_scan_cancel_event = threading.Event()
+        self._purple_manual_scan_running = False
         self._purple_monitor_state = self._new_purple_monitor_state()
 
     def zerodha_status(self) -> dict[str, Any]:
@@ -406,6 +409,13 @@ class AnalysisService:
         for thread in (self._purple_monitor_thread, self._purple_refresh_thread):
             if thread and thread.is_alive() and thread is not threading.current_thread():
                 thread.join(timeout=5)
+        repository = KrishnaPurpleAlertRepository()
+        repository.mark_incomplete_refreshes_stopped()
+        if not (self._purple_refresh_thread and self._purple_refresh_thread.is_alive()):
+            with self._purple_monitor_lock:
+                self._purple_refresh_queue = queue.PriorityQueue()
+                self._purple_refresh_enqueued.clear()
+                self._purple_monitor_state["current_refresh"] = None
         return self.purple_monitor_status()
 
     def purple_monitor_status(self) -> dict[str, Any]:
@@ -428,6 +438,33 @@ class AnalysisService:
             "refresh_sources": refresh_rows[-100:],
             "profile_runs": repository.latest_scan_runs(),
             "active_setup_count": len(repository.active_setups(limit=5000)),
+            "manual_scan_running": self._purple_manual_scan_running,
+        }
+
+    def run_krishna_purple_manual_scan(self, **kwargs) -> dict[str, Any]:
+        with self._purple_manual_scan_lock:
+            if self._purple_manual_scan_running:
+                raise ValueError("A manual Purple Touch scan is already running.")
+            self._purple_manual_scan_running = True
+            self._purple_manual_scan_cancel_event.clear()
+        try:
+            return self.scan_krishna_purple_touch_alerts(
+                **kwargs,
+                cancel_event=self._purple_manual_scan_cancel_event,
+            )
+        finally:
+            with self._purple_manual_scan_lock:
+                self._purple_manual_scan_running = False
+
+    def cancel_krishna_purple_manual_scan(self) -> dict[str, Any]:
+        with self._purple_manual_scan_lock:
+            running = self._purple_manual_scan_running
+            if running:
+                self._purple_manual_scan_cancel_event.set()
+        return {
+            "type": "krishna_purple_manual_scan_cancel",
+            "running": running,
+            "cancel_requested": running,
         }
 
     def krishna_purple_setups(
@@ -1693,6 +1730,7 @@ class AnalysisService:
         limit: int | None = None,
         force: bool = False,
         send_telegram: bool = True,
+        cancel_event: threading.Event | None = None,
     ) -> dict[str, Any]:
         market_open = is_market_hours()
         repository = KrishnaPurpleAlertRepository()
@@ -1722,6 +1760,7 @@ class AnalysisService:
                     limit,
                     persist_setup_row,
                     True,
+                    cancel_event,
                 ): ("profile", profile)
                 for profile in profiles
             }
@@ -1737,13 +1776,21 @@ class AnalysisService:
                 step1_scan, scan = result
                 step1_scans.append(step1_scan)
                 scans.append(scan)
+                errors.extend(scan.get("errors") or [])
 
         profile_order = {"month": 0, "week": 1, "day": 2}
         scans.sort(key=lambda item: profile_order.get(str(item.get("purple_timeframe")), 99))
         step1_scans.sort(key=lambda item: profile_order.get(str(item.get("purple_timeframe")), 99))
         selected_profile_keys = [profile.purple_timeframe for profile in profiles]
-        entry_result = self.check_krishna_purple_entries(selected_profile_keys, send_telegram, force)
-        exit_result = self.check_krishna_purple_exits(selected_profile_keys, send_telegram, force)
+        cancelled = bool(cancel_event and cancel_event.is_set())
+        entry_result = (
+            {"created": [], "errors": [], "skipped": True, "reason": "Manual scan cancelled."}
+            if cancelled else self.check_krishna_purple_entries(selected_profile_keys, send_telegram, force)
+        )
+        exit_result = (
+            {"closed": [], "errors": [], "skipped": True, "reason": "Manual scan cancelled."}
+            if cancelled else self.check_krishna_purple_exits(selected_profile_keys, send_telegram, force)
+        )
         created_entries = entry_result.get("created") or []
         closed_trades = exit_result.get("closed") or []
         errors.extend(entry_result.get("errors") or [])
@@ -1755,6 +1802,8 @@ class AnalysisService:
         recent_alerts = repository.list_recent_alerts(limit=50)
         open_trades = repository.list_open_trades(limit=200)
         alert_counts = repository.counts()
+        stale_skipped_symbols = sum(int(scan.get("stale_skipped_symbols") or 0) for scan in scans)
+        analyzed_symbols = sum(int(scan.get("analyzed_symbols") or 0) for scan in scans)
         return {
             "type": "krishna_purple_touch_live_alert_scan",
             "profile": scans[0].get("profile") if len(scans) == 1 else None,
@@ -1764,7 +1813,15 @@ class AnalysisService:
             "weekly_only": False,
             "market_hours": market_open,
             "forced": force,
-            "skipped": False,
+            "skipped": not cancelled and bool(scans) and all(not scan.get("analyzed_symbols") for scan in scans),
+            "cancelled": cancelled,
+            "partial": not cancelled and analyzed_symbols > 0 and stale_skipped_symbols > 0,
+            "skip_reason": (
+                "Manual scan cancelled."
+                if cancelled else
+                "No profile was analyzed because required setup candle data is stale or missing. Start the market monitor and wait for fresh Daily candle sources."
+                if scans and all(not scan.get("analyzed_symbols") for scan in scans) else None
+            ),
             "alert_creation_skipped": not alerts_allowed,
             "next_market_open": next_open.isoformat(timespec="seconds") if next_open else None,
             "scan": scans[0] if len(scans) == 1 else None,
@@ -1786,6 +1843,7 @@ class AnalysisService:
             "errors": errors[:20],
             "setups_added": setup_counts["added"],
             "setups_updated": setup_counts["updated"],
+            "stale_skipped_symbols": stale_skipped_symbols,
             "entry_checker": entry_result,
             "exit_checker": exit_result,
             "summary": {
@@ -1815,12 +1873,15 @@ class AnalysisService:
         limit: int | None,
         on_strict_row=None,
         require_fresh: bool = False,
+        cancel_event: threading.Event | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Build Step 1 and strict results in one candle-file traversal."""
         window = candle_window(from_date=from_date, to_date=to_date, days=days or profile.minimum_days)
         step1_rows: list[dict[str, Any]] = []
         strict_rows: list[dict[str, Any]] = []
         errors: list[dict[str, str]] = []
+        stale_skipped_symbols = 0
+        cancelled = False
         analyzed_symbols = 0
         symbols = self._watchlist_symbols()
         refresh_states = {
@@ -1829,6 +1890,9 @@ class AnalysisService:
         } if require_fresh else {}
 
         for symbol in symbols:
+            if cancel_event and cancel_event.is_set():
+                cancelled = True
+                break
             if not self._has_candles(symbol, profile.purple_timeframe):
                 continue
             if require_fresh and not _refresh_state_is_fresh(
@@ -1836,7 +1900,7 @@ class AnalysisService:
                 source_timeframe(profile.purple_timeframe),
                 max_age_seconds=int(self._purple_monitor_state.get("intervals", {}).get(profile.purple_timeframe, 300)),
             ):
-                errors.append({"symbol": symbol, "error": "Setup scan skipped because required candle data is stale."})
+                stale_skipped_symbols += 1
                 continue
             try:
                 touch_candles, touch_source = self._load_timeframe_with_summary(symbol, profile.purple_timeframe, window)
@@ -1916,6 +1980,8 @@ class AnalysisService:
                 "limit": limit,
                 "results": shown,
                 "errors": errors[:20],
+                "stale_skipped_symbols": stale_skipped_symbols,
+                "cancelled": cancelled,
             }
 
         return payload("krishna_purple_touch_step1", step1_rows), payload("krishna_purple_touch_entry", strict_rows)

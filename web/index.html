@@ -998,8 +998,9 @@
                 <div class="field-hint warning-hint">Normally leave this off. Manual scans still show candidates after market close. Enable it only to test creation of trade IDs, entry/exit alerts, and optional Telegram delivery from cached candles outside NSE hours.</div>
                 <div class="button-row">
                   <button id="purpleLiveScanBtn" type="button">Run scanner now</button>
-                  <button id="purpleCancelScanBtn" type="button" hidden disabled>Cancel current scan</button>
+                  <button id="purpleCancelScanBtn" type="button" disabled>Cancel scan</button>
                 </div>
+                <div id="purpleRunHint" class="field-hint">Start the market monitor first so the candle service can prepare fresh data. Manual runs analyze the latest completed cache.</div>
                 <div class="button-row">
                   <button id="purpleAutoStartBtn" type="button">Start market monitor</button>
                   <button id="purpleAutoStopBtn" type="button">Stop</button>
