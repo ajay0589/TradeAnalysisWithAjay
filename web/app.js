@@ -13,6 +13,7 @@ const state = {
   lastPurpleAlertResponse: null,
   lastPurpleBacktest: null,
   purpleAutoTimers: {},
+  purpleMonitorPollTimer: null,
   purplePendingProfiles: [],
   purpleNextRunAt: {},
   purpleProfileRuns: {
@@ -24,7 +25,7 @@ const state = {
   purpleMonitorRunning: false,
   purpleScanInFlight: false,
   purpleCancelRequested: false,
-  purplePages: { step1: 1, candidates: 1, exit: 1, trades: 1 },
+  purplePages: { step1: 1, candidates: 1, setups: 1, exit: 1, trades: 1 },
   lastBacktest: null,
   strategies: [],
   lastGenericBacktest: null,
@@ -1181,6 +1182,8 @@ function renderPurpleProfileProgress() {
     $(`${id}ProgressBar`).classList.toggle("active", ["running", "refreshing", "analysis running", "queued"].includes(run.status));
     $(`${id}LastStarted`).textContent = fmtDateTime(run.startedAt);
     $(`${id}LastEnded`).textContent = fmtDateTime(run.endedAt);
+    if ($(`${id}Queued`)) $(`${id}Queued`).textContent = fmtDateTime(run.queuedAt);
+    if ($(`${id}Duration`)) $(`${id}Duration`).textContent = run.durationMs == null ? "-" : `${(Number(run.durationMs) / 1000).toFixed(1)} sec`;
     const next = state.purpleNextRunAt[profileKey];
     $(`${id}NextRun`).textContent = next ? fmtDateTime(new Date(next).toISOString()) : "Not scheduled";
   });
@@ -1544,15 +1547,11 @@ async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "all" } = {}
     $("purpleAlertMeta").textContent = "running";
   }
   try {
-    if ($("purpleRefreshToggle").checked) {
-      if (purpleTimeframe === "all") await refreshCandlesForAllPurpleProfiles();
-      else await refreshCandlesForPurpleProfile(purpleTimeframe);
-    }
     setPurpleProgress(
       "running",
-      `Candle refresh complete. Analyzing ${scanLabel} setup rules, entry confirmations, and open-trade exits...`,
+      `Analyzing ${scanLabel} setup rules from the latest complete candle cache...`,
       purpleTimeframe,
-      85,
+      55,
     );
     purpleProfileKeys(purpleTimeframe).forEach((profileKey) => {
       setPurpleProfileProgress(profileKey, "running", PURPLE_PROFILE_ANALYSIS_DETAILS[profileKey], 85);
@@ -1575,6 +1574,8 @@ async function runPurpleLiveScan({ quiet = false, purpleTimeframe = "all" } = {}
     renderPurpleResults();
     renderPurpleAlerts(data);
     loadPurpleAlerts();
+    loadPurpleSetups();
+    loadPurpleMonitorStatus();
     const newAlerts = Number(data.entry_alerts_created || 0) + Number(data.exit_alerts_created || 0);
     setPurpleProgress(
       "completed",
@@ -1665,7 +1666,7 @@ function scanSummaryFromLiveScan(data, rows, step1Rows = []) {
     new_entry_alerts: Number(data.entry_alerts_created || 0),
     new_exit_alerts: Number(data.exit_alerts_created || 0),
     error_count: errors,
-    latest_candles_pulled: $("purpleRefreshToggle").checked,
+    latest_candles_pulled: state.purpleMonitorRunning,
     points: [
       `Scanner evaluated ${profileList(data)} purple-touch profile${(data.profiles || []).length === 1 ? "" : "s"}.`,
       `Step 1 found ${step1Matched || step1Rows.length} physical EMA9 touch row(s) across the selected profile(s); rows are ordered by close distance.`,
@@ -1708,6 +1709,57 @@ async function loadPurpleAlerts() {
   }
 }
 
+async function loadPurpleSetups() {
+  try {
+    const [sort, order] = ($("purpleSetupSort")?.value || "updated_at:desc").split(":");
+    const params = new URLSearchParams({
+      page: String(state.purplePages.setups),
+      page_size: String(PURPLE_PAGE_SIZE),
+      sort,
+      order: order || "desc",
+    });
+    const values = {
+      profile: $("purpleSetupProfileFilter")?.value,
+      status: $("purpleSetupStatusFilter")?.value,
+      symbol: $("purpleSetupSymbolFilter")?.value.trim(),
+      early_status: $("purpleSetupEarlyFilter")?.value,
+      final_status: $("purpleSetupFinalFilter")?.value,
+    };
+    Object.entries(values).forEach(([key, value]) => {
+      if (value && value !== "all") params.set(key, value);
+    });
+    renderPurpleSetups(await api(`/api/krishna-purple-setups?${params.toString()}`));
+  } catch (error) {
+    $("purpleSetupMeta").textContent = "Setups unavailable";
+  }
+}
+
+function renderPurpleSetups(data) {
+  const rows = data.setups || [];
+  const pagination = data.pagination || { page: 1, pages: 1, total: rows.length };
+  state.purplePages.setups = Number(pagination.page || 1);
+  $("purpleSetupMeta").textContent = `${fmtInt(pagination.total || 0)} setup(s)`;
+  $("purpleSetupBody").innerHTML = rows.map((row) => {
+    const lifecycleClass = row.lifecycle_status?.startsWith("discarded") ? "points-negative" : row.lifecycle_status === "final_entry_triggered" ? "points-positive" : "points-warn";
+    return `<tr>
+      <td>${escapeHtml(row.setup_id)}</td>
+      <td><strong>${escapeHtml(row.symbol)}</strong><div class="cell-note">${escapeHtml(purpleProfileLabel(row.purple_timeframe))}</div></td>
+      <td>${fmtDateTime(row.touch_candle_timestamp)}<div class="cell-note">Purple ${fmt(row.captured_purple_ema9)}</div></td>
+      <td>${fmt(row.current_price)}<div class="cell-note">${row.current_distance_percent == null ? "-" : `${fmt(row.current_distance_percent)}%`}</div></td>
+      <td>${fmt(row.upper_discard_level)}<div class="cell-note">fixed at touch</div></td>
+      <td>${escapeHtml(row.early_status)}<div class="cell-note">${fmtDateTime(row.early_triggered_at)}</div></td>
+      <td>${escapeHtml(row.final_status)}<div class="cell-note">${fmtDateTime(row.final_triggered_at)}</div></td>
+      <td>C1 ${fmt(row.candle1_low)}<div class="cell-note">C2 ${fmt(row.candle2_low)}</div></td>
+      <td>${fmt(row.invalidation_level)}</td>
+      <td>${fmtDateTime(row.last_checked_at)}</td>
+      <td><span class="${lifecycleClass}">${escapeHtml(row.lifecycle_status)}</span><div class="cell-note">${escapeHtml(row.discard_reason || "-")}</div></td>
+    </tr>`;
+  }).join("") || emptyTableRow(11, "No Purple Touch setups match these filters.");
+  $("purpleSetupPrev").disabled = !pagination.has_previous;
+  $("purpleSetupNext").disabled = !pagination.has_next;
+  $("purpleSetupPageLabel").textContent = `Page ${pagination.page || 1} of ${pagination.pages || 1} (${pagination.total || 0} rows)`;
+}
+
 function addPurpleAlertFilterParams(params, prefix, profileFilterId, entryFilterId) {
   const profile = $(profileFilterId)?.value || "all";
   const entryKind = $(entryFilterId)?.value || "all";
@@ -1729,35 +1781,79 @@ function addPurpleHistoryFilterParams(params, prefix, controls) {
   params.set(`${prefix}_order`, sortOrder || "desc");
 }
 
-function startPurpleAutoMonitor() {
-  stopPurpleAutoMonitor();
-  state.purpleMonitorRunning = true;
-  state.purplePendingProfiles = [];
-  PURPLE_ACTIVE_PROFILE_KEYS.forEach((profileKey) => {
-    state.purpleNextRunAt[profileKey] = Date.now() + purpleIntervalSeconds(profileKey) * 1000;
-  });
-  renderPurpleProfileProgress();
-  updatePurpleMonitorUi("Initial Monthly, Weekly, and Daily scan is starting...");
-  $("purpleAlertMeta").textContent = "monitoring three profile schedules";
-  runPurpleLiveScan({ quiet: true, purpleTimeframe: "all" });
-  PURPLE_ACTIVE_PROFILE_KEYS.forEach((profileKey) => {
-    const seconds = purpleIntervalSeconds(profileKey);
-    state.purpleAutoTimers[profileKey] = window.setInterval(() => {
-      state.purpleNextRunAt[profileKey] = Date.now() + seconds * 1000;
-      queuePurpleProfile(profileKey);
-      updatePurpleMonitorUi();
-      renderPurpleProfileProgress();
-    }, seconds * 1000);
-  });
+async function startPurpleAutoMonitor() {
+  try {
+    const data = await postApi("/api/krishna-purple-monitor/start", {
+      intervals: Object.fromEntries(PURPLE_ACTIVE_PROFILE_KEYS.map((key) => [key, purpleIntervalSeconds(key)])),
+      send_telegram: $("purpleTelegramToggle").checked,
+      force: $("purpleForceToggle").checked,
+    });
+    renderPurpleMonitorStatus(data);
+    startPurpleMonitorPolling();
+    setNotes("Purple Touch candle service and independent scanners are running.");
+  } catch (error) {
+    setNotes([error.message], true);
+  }
 }
 
-function stopPurpleAutoMonitor() {
-  Object.values(state.purpleAutoTimers).forEach((timer) => window.clearInterval(timer));
-  state.purpleAutoTimers = {};
-  state.purpleNextRunAt = {};
-  state.purplePendingProfiles = [];
-  state.purpleMonitorRunning = false;
-  $("purpleAlertMeta").textContent = "stopped";
+async function stopPurpleAutoMonitor() {
+  try {
+    renderPurpleMonitorStatus(await postApi("/api/krishna-purple-monitor/stop", {}));
+    setNotes("Purple Touch monitor stopped. Existing setup and trade history was preserved.");
+  } catch (error) {
+    setNotes([error.message], true);
+  }
+}
+
+function startPurpleMonitorPolling() {
+  if (state.purpleMonitorPollTimer) window.clearInterval(state.purpleMonitorPollTimer);
+  state.purpleMonitorPollTimer = window.setInterval(loadPurpleMonitorStatus, 3000);
+}
+
+async function loadPurpleMonitorStatus() {
+  try {
+    const data = await api("/api/krishna-purple-monitor/status");
+    renderPurpleMonitorStatus(data);
+    loadPurpleSetups();
+  } catch (error) {
+    $("purpleDataServiceMeta").textContent = "Unavailable";
+  }
+}
+
+function renderPurpleMonitorStatus(data) {
+  state.purpleMonitorRunning = Boolean(data.running);
+  state.purpleNextRunAt = Object.fromEntries(
+    Object.entries(data.next_profile_runs || {}).map(([key, value]) => [key, new Date(value).getTime()]),
+  );
+  const current = data.current_refresh;
+  $("purpleDataServiceMeta").textContent = data.running ? "Running" : "Stopped";
+  $("purpleDataServiceStatus").textContent = current
+    ? `Refreshing ${current.symbol} ${current.timeframe}; scanners continue using the previous complete cache.`
+    : data.running ? "Refresh worker is ready for the next prioritized source." : "Continuous refresh is stopped.";
+  $("purpleDataServiceCards").innerHTML = [
+    ["Queue", data.queue_size || 0],
+    ["Successful", data.refresh_successes || 0],
+    ["Failures", data.refresh_failures || 0],
+    ["Last success", fmtDateTime(data.last_refresh_success)],
+    ["Latest failure", data.latest_failure || "None"],
+    ["Active setups", data.active_setup_count || 0],
+  ].map(([label, value]) => `<div class="compact-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+  $("purpleFreshnessBody").innerHTML = (data.freshness || []).map((row) => `
+    <tr><td>${escapeHtml(row.label)}</td><td class="points-positive">${fmtInt(row.fresh)}</td><td class="points-warn">${fmtInt(row.updating)}</td><td class="points-negative">${fmtInt(row.stale)}</td><td>${fmtInt(row.missing)}</td><td>${fmtDateTime(row.latest_candle_timestamp)}</td><td>${fmtDateTime(row.last_success_at)}</td><td>${fmtDateTime(row.expected_latest_closed_candle)}</td></tr>
+  `).join("") || emptyTableRow(8, "No candle sources have been tracked yet.");
+
+  (data.profile_runs || []).forEach((run) => {
+    const profile = run.purple_timeframe;
+    state.purpleProfileRuns[profile] = {
+      status: run.status,
+      detail: `${fmtInt(run.symbols_analyzed)} analyzed; ${fmtInt(run.setups_added)} added; ${fmtInt(run.setups_updated)} updated; ${fmtInt(run.error_count)} errors; ${run.duration_ms == null ? "duration pending" : `${(Number(run.duration_ms) / 1000).toFixed(1)} sec`}.`,
+      progress: run.status === "running" ? 65 : 100,
+      startedAt: run.started_at,
+      endedAt: run.completed_at,
+      queuedAt: run.queued_at,
+      durationMs: run.duration_ms,
+    };
+  });
   renderPurpleProfileProgress();
   updatePurpleMonitorUi();
 }
@@ -1792,8 +1888,7 @@ function purpleScheduleText() {
     const dueAt = state.purpleNextRunAt[profileKey];
     return `${profile.label} ${interval}${dueAt ? ` (next ${fmtDateTime(new Date(dueAt).toISOString())})` : ""}`;
   });
-  const queued = state.purplePendingProfiles.length ? ` Queued: ${state.purplePendingProfiles.map(purpleProfileLabel).join(", ")}.` : "";
-  return `${schedules.join("; ")}.${queued}`;
+  return `${schedules.join("; ")}.`;
 }
 
 function renderPurpleAlerts(data = null) {
@@ -3639,6 +3734,15 @@ $("purpleExitPrev").addEventListener("click", () => { state.purplePages.exit -= 
 $("purpleExitNext").addEventListener("click", () => { state.purplePages.exit += 1; loadPurpleAlerts(); });
 $("purpleTradePrev").addEventListener("click", () => { state.purplePages.trades -= 1; loadPurpleAlerts(); });
 $("purpleTradeNext").addEventListener("click", () => { state.purplePages.trades += 1; loadPurpleAlerts(); });
+[
+  "purpleSetupProfileFilter", "purpleSetupStatusFilter", "purpleSetupSymbolFilter",
+  "purpleSetupEarlyFilter", "purpleSetupFinalFilter", "purpleSetupSort",
+].forEach((id) => $(id).addEventListener("change", () => {
+  state.purplePages.setups = 1;
+  loadPurpleSetups();
+}));
+$("purpleSetupPrev").addEventListener("click", () => { state.purplePages.setups -= 1; loadPurpleSetups(); });
+$("purpleSetupNext").addEventListener("click", () => { state.purplePages.setups += 1; loadPurpleSetups(); });
 $("purpleBacktestRunBtn").addEventListener("click", runPurpleBacktest);
 $("purpleBacktestDownloadBtn").addEventListener("click", downloadPurpleBacktestTrades);
 $("genericStrategySelect").addEventListener("change", populateStrategyParams);
@@ -3686,6 +3790,9 @@ setPurpleBacktestDefaults();
 updatePurpleMonitorUi();
 renderPurpleProfileProgress();
 loadPurpleAlerts();
+loadPurpleSetups();
+loadPurpleMonitorStatus();
+startPurpleMonitorPolling();
 
 Promise.all([loadZerodhaLoginUrl(), checkZerodhaStatus(), loadSymbols(), loadStrategies(), loadNiftyExpiries(), loadSectorStatus(), loadFiiDii(false)])
   .then(() => {

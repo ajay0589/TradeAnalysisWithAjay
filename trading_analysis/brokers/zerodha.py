@@ -3,6 +3,9 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import os
+import tempfile
+import threading
 from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
@@ -13,6 +16,7 @@ from trading_analysis.models import Candle
 
 
 QUOTE_LIMIT = 500
+_CANDLE_MERGE_LOCK = threading.RLock()
 HISTORICAL_MAX_DAYS = {
     "day": 1900,
     "60minute": 390,
@@ -204,42 +208,60 @@ def write_candles_csv(path: str | Path, candles: list[Candle]) -> None:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = ["date", "open", "high", "low", "close", "volume", "open_interest"]
-    with output_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        for candle in candles:
-            writer.writerow(
-                {
-                    "date": candle.timestamp.isoformat(),
-                    "open": candle.open,
-                    "high": candle.high,
-                    "low": candle.low,
-                    "close": candle.close,
-                    "volume": candle.volume,
-                    "open_interest": "" if candle.open_interest is None else candle.open_interest,
-                }
-            )
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            newline="",
+            delete=False,
+            dir=output_path.parent,
+            prefix=f".{output_path.name}.",
+            suffix=".tmp",
+        ) as handle:
+            temporary_path = Path(handle.name)
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            for candle in candles:
+                writer.writerow(
+                    {
+                        "date": candle.timestamp.isoformat(),
+                        "open": candle.open,
+                        "high": candle.high,
+                        "low": candle.low,
+                        "close": candle.close,
+                        "volume": candle.volume,
+                        "open_interest": "" if candle.open_interest is None else candle.open_interest,
+                    }
+                )
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, output_path)
+    finally:
+        if temporary_path and temporary_path.exists():
+            temporary_path.unlink()
 
 
 def merge_candles_csv(path: str | Path, candles: list[Candle]) -> None:
-    output_path = Path(path)
-    candles_by_timestamp: dict[datetime, Candle] = {}
-    if output_path.exists():
-        with output_path.open("r", encoding="utf-8", newline="") as handle:
-            for row in csv.DictReader(handle):
-                timestamp = parse_kite_timestamp(row["date"])
-                candles_by_timestamp[timestamp] = Candle(
-                    timestamp=timestamp,
-                    open=float(row["open"]),
-                    high=float(row["high"]),
-                    low=float(row["low"]),
-                    close=float(row["close"]),
-                    volume=int(float(row.get("volume") or 0)),
-                    open_interest=int(float(row["open_interest"])) if row.get("open_interest") else None,
-                )
-    for candle in candles:
-        candles_by_timestamp[candle.timestamp] = candle
-    write_candles_csv(output_path, [candles_by_timestamp[timestamp] for timestamp in sorted(candles_by_timestamp)])
+    with _CANDLE_MERGE_LOCK:
+        output_path = Path(path)
+        candles_by_timestamp: dict[datetime, Candle] = {}
+        if output_path.exists():
+            with output_path.open("r", encoding="utf-8", newline="") as handle:
+                for row in csv.DictReader(handle):
+                    timestamp = parse_kite_timestamp(row["date"])
+                    candles_by_timestamp[timestamp] = Candle(
+                        timestamp=timestamp,
+                        open=float(row["open"]),
+                        high=float(row["high"]),
+                        low=float(row["low"]),
+                        close=float(row["close"]),
+                        volume=int(float(row.get("volume") or 0)),
+                        open_interest=int(float(row["open_interest"])) if row.get("open_interest") else None,
+                    )
+        for candle in candles:
+            candles_by_timestamp[candle.timestamp] = candle
+        write_candles_csv(output_path, [candles_by_timestamp[timestamp] for timestamp in sorted(candles_by_timestamp)])
 
 
 def historical_windows(from_time: datetime, to_time: datetime, interval: str) -> list[tuple[datetime, datetime]]:

@@ -200,17 +200,18 @@ The visual workflow, confirmed rules, timeframe matrix, entry/exit lifecycle, UI
 
 The current Weekly-only execution rules, valid/invalid candle diagrams, exact boundaries, live monitoring guide, alert gates, and audit worksheet are documented in [Weekly Purple Touch Validation Guide v1.1](docs/Weekly_Purple_Touch_Validation_Guide_v1_1.pdf). The [previous v1.0 guide](docs/Weekly_Purple_Touch_Validation_Guide_v1_0.pdf) is retained for comparison.
 
-Purple Touch live monitoring supports Monthly, Weekly, and Daily profiles on independent schedules. Candle downloads remain queued to respect Zerodha rate limits. Once refresh completes, the three profile analyses run concurrently, each symbol is loaded once for Step 1 plus strict entry checks, and existing open-trade exits are evaluated in parallel with setup analysis.
+Purple Touch live monitoring supports Monthly, Weekly, and Daily profiles on independent server-side schedules. A continuous, rate-limited candle service prioritizes open trades, active entry setups, and then the full setup universe. Scanners read only atomically completed cache files and do not wait for a full-universe refresh.
 
 Purple Touch entry alerts and trade lifecycle records are retained in local SQLite storage for audit and setup-quality review. The UI combines each created entry signal and its lifecycle into one `Trades Triggered: Open & Closed` table with profile, entry type, status, symbol, date, and sorting controls; it does not automatically purge open or closed Purple Touch trades.
 
-Purple Touch lifecycle precedence:
+Purple Touch setup lifecycle precedence:
 
-- Weekly is the only active live profile during validation.
-- A symbol can have one Weekly early and one Weekly final lifecycle row open at the same time.
-- An early entry may be followed by a final entry for the same mapped Purple Touch setup.
-- Once final entry has been recorded, a later early entry from that same mapped touch candle is suppressed, even if the final lifecycle row has subsequently closed.
-- A newly mapped Purple Touch candle starts a new setup lifecycle.
+- A strict Monthly, Weekly, or Daily setup is persisted by symbol, profile, and touch-candle timestamp.
+- Purple EMA9 and the upper discard level (`captured EMA9 × 1.03`) are fixed when the touch is first stored; later EMA9 changes do not move that limit.
+- Exactly 3.00% remains active. A price strictly above the fixed limit discards further entry checking, but does not close an existing trade.
+- Candle 1 and Candle 2 can trigger entries. From Candle 3 onward, a break below the lower C1/C2 low discards the setup.
+- Early entry keeps the setup active for Final. Final entry stops later Early checks. Each resulting trade keeps its own exit lifecycle.
+- Freshness and last-processed candle timestamps prevent stale-data alerts and repeated processing of the same closed entry candle.
 
 The `Purple Touch` tab also includes a cached-candle historical simulation with date range, symbol/profile selection, early/final mode, touch tolerance, score threshold, stop model, target R, holding limit, slippage, costs, capital, and risk-per-trade controls. It uses next-candle-open entry and only candles available at each historical event. Results include profile and entry-type performance, trade rows, data coverage, win rate, expectancy, average R, profit factor, and maximum drawdown.
 

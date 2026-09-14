@@ -954,8 +954,8 @@
                 <input id="purpleDays" type="hidden" value="3000" />
                 <input id="purpleLimit" type="hidden" value="all" />
                 <label class="check-row">
-                  <input id="purpleRefreshToggle" type="checkbox" checked />
-                  Pull latest required candles before scan
+                  <input id="purpleRefreshToggle" type="checkbox" checked disabled />
+                  Run continuous candle data service
                 </label>
                 <label class="check-row">
                   <input id="purpleTelegramToggle" type="checkbox" checked />
@@ -990,7 +990,7 @@
                     </select>
                   </label>
                 </div>
-                <div class="field-hint">Each profile becomes due independently. Candle downloads stay queued to protect Zerodha rate limits; after refresh, profile analysis and open-trade exit checks run concurrently.</div>
+                <div class="field-hint">Each profile becomes due independently. A server-side, rate-limited queue continuously refreshes candles; scanners use the latest complete cache without waiting for a full-universe download.</div>
                 <label class="check-row">
                   <input id="purpleForceToggle" type="checkbox" />
                   Force cached-data run outside market hours
@@ -998,7 +998,7 @@
                 <div class="field-hint warning-hint">Normally leave this off. Manual scans still show candidates after market close. Enable it only to test creation of trade IDs, entry/exit alerts, and optional Telegram delivery from cached candles outside NSE hours.</div>
                 <div class="button-row">
                   <button id="purpleLiveScanBtn" type="button">Run scanner now</button>
-                  <button id="purpleCancelScanBtn" type="button" title="Stops the active candle refresh after the current Zerodha request finishes." disabled>Cancel current scan</button>
+                  <button id="purpleCancelScanBtn" type="button" hidden disabled>Cancel current scan</button>
                 </div>
                 <div class="button-row">
                   <button id="purpleAutoStartBtn" type="button">Start market monitor</button>
@@ -1019,6 +1019,23 @@
 
               <section class="table-panel">
                 <div class="panel-head">
+                  <h2>Candle Data Service</h2>
+                  <span id="purpleDataServiceMeta">Stopped</span>
+                </div>
+                <div class="ops-body">
+                  <div id="purpleDataServiceCards" class="compact-metrics"></div>
+                  <div id="purpleDataServiceStatus" class="mini-status">Start the market monitor to run the continuous, prioritized candle refresh queue.</div>
+                  <div class="wide-table">
+                    <table class="krishna-table">
+                      <thead><tr><th>Source timeframe</th><th>Fresh</th><th>Updating</th><th>Stale</th><th>Missing</th><th>Latest candle</th><th>Last refresh</th><th>Expected closed candle</th></tr></thead>
+                      <tbody id="purpleFreshnessBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
                   <h2>What I Understand</h2>
                   <span id="purpleRulesMeta">Confirmed setup rules</span>
                 </div>
@@ -1026,6 +1043,31 @@
                   <div id="purpleRuleCards" class="compact-metrics"></div>
                   <div id="purpleRulePoints" class="mini-list"></div>
                 </div>
+              </section>
+
+              <section class="table-panel">
+                <div class="panel-head">
+                  <h2>Stocks Waiting for Entry</h2>
+                  <span id="purpleSetupMeta">0 setup(s)</span>
+                </div>
+                <div class="ops-body">
+                  <p class="helper-text">Persistent Purple Touch setups remain here across scanner cycles. Early entry keeps Final monitoring active; Final entry or a fixed 3%/C3+ invalidation ends new entry checking without closing an existing trade.</p>
+                </div>
+                <div class="table-actions">
+                  <label class="table-filter"><span>Scan</span><select id="purpleSetupProfileFilter"><option value="all">All scans</option><option value="month">Monthly</option><option value="week">Weekly</option><option value="day">Daily</option></select></label>
+                  <label class="table-filter"><span>Lifecycle</span><select id="purpleSetupStatusFilter"><option value="all">All states</option><option value="active_waiting">Waiting</option><option value="early_entry_triggered">Early triggered</option><option value="final_entry_triggered">Final triggered</option><option value="discarded_above_3_percent">Discarded above 3%</option><option value="discarded_c1_c2_low_break">Discarded C1/C2 low</option><option value="completed">Completed</option></select></label>
+                  <label class="table-filter"><span>Symbol</span><input id="purpleSetupSymbolFilter" placeholder="All symbols" /></label>
+                  <label class="table-filter"><span>Early</span><select id="purpleSetupEarlyFilter"><option value="all">All</option><option value="waiting">Waiting</option><option value="triggered">Triggered</option><option value="discarded">Discarded</option></select></label>
+                  <label class="table-filter"><span>Final</span><select id="purpleSetupFinalFilter"><option value="all">All</option><option value="waiting">Waiting</option><option value="triggered">Triggered</option><option value="discarded">Discarded</option></select></label>
+                  <label class="table-filter"><span>Sort by</span><select id="purpleSetupSort"><option value="updated_at:desc">Recently updated</option><option value="created_at:desc">Newest touch</option><option value="distance:asc">Distance: nearest</option><option value="distance:desc">Distance: farthest</option><option value="symbol:asc">Symbol</option><option value="profile:asc">Profile</option><option value="status:asc">Lifecycle</option></select></label>
+                </div>
+                <div class="wide-table">
+                  <table class="krishna-table">
+                    <thead><tr><th>Setup ID</th><th>Symbol / Scan</th><th>Touch Time / Captured Purple</th><th>Current / Distance</th><th>Fixed 3% Limit</th><th>Early</th><th>Final</th><th>C1 / C2 Lows</th><th>Invalidation</th><th>Last Checked</th><th>Lifecycle / Reason</th></tr></thead>
+                    <tbody id="purpleSetupBody"></tbody>
+                  </table>
+                </div>
+                <div class="table-pagination"><button id="purpleSetupPrev" type="button">Previous</button><span id="purpleSetupPageLabel">Page 1 of 1</span><button id="purpleSetupNext" type="button">Next</button></div>
               </section>
 
               <section class="table-panel collapsed">
@@ -1085,6 +1127,8 @@
                         <div><dt>Last started</dt><dd id="purpleMonthLastStarted">-</dd></div>
                         <div><dt>Last ended</dt><dd id="purpleMonthLastEnded">-</dd></div>
                         <div><dt>Next trigger</dt><dd id="purpleMonthNextRun">Not scheduled</dd></div>
+                        <div><dt>Queued</dt><dd id="purpleMonthQueued">-</dd></div>
+                        <div><dt>Duration</dt><dd id="purpleMonthDuration">-</dd></div>
                       </dl>
                     </article>
                     <article class="profile-progress-card">
@@ -1095,6 +1139,8 @@
                         <div><dt>Last started</dt><dd id="purpleWeekLastStarted">-</dd></div>
                         <div><dt>Last ended</dt><dd id="purpleWeekLastEnded">-</dd></div>
                         <div><dt>Next trigger</dt><dd id="purpleWeekNextRun">Not scheduled</dd></div>
+                        <div><dt>Queued</dt><dd id="purpleWeekQueued">-</dd></div>
+                        <div><dt>Duration</dt><dd id="purpleWeekDuration">-</dd></div>
                       </dl>
                     </article>
                     <article class="profile-progress-card">
@@ -1105,6 +1151,8 @@
                         <div><dt>Last started</dt><dd id="purpleDayLastStarted">-</dd></div>
                         <div><dt>Last ended</dt><dd id="purpleDayLastEnded">-</dd></div>
                         <div><dt>Next trigger</dt><dd id="purpleDayNextRun">Not scheduled</dd></div>
+                        <div><dt>Queued</dt><dd id="purpleDayQueued">-</dd></div>
+                        <div><dt>Duration</dt><dd id="purpleDayDuration">-</dd></div>
                       </dl>
                     </article>
                   </div>

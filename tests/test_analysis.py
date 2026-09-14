@@ -1328,6 +1328,8 @@ class AnalysisTests(unittest.TestCase):
             patch("trading_analysis.web_services.next_market_open", return_value=next_open),
             patch("trading_analysis.web_services.KrishnaPurpleAlertRepository", return_value=FakePurpleRepo()),
             patch.object(service, "_scan_krishna_purple_profile_once", side_effect=profile_result) as profile_scan,
+            patch.object(service, "check_krishna_purple_entries", return_value={"created": [], "errors": [], "skipped": True}),
+            patch.object(service, "check_krishna_purple_exits", return_value={"closed": [], "errors": [], "skipped": True}),
         ):
             result = service.scan_krishna_purple_touch_alerts(purple_timeframe="all")
 
@@ -1373,6 +1375,8 @@ class AnalysisTests(unittest.TestCase):
             patch("trading_analysis.web_services.next_market_open", return_value=datetime(2026, 8, 24, 9, 15)),
             patch("trading_analysis.web_services.KrishnaPurpleAlertRepository", return_value=FakePurpleRepo()),
             patch.object(service, "_scan_krishna_purple_profile_once", side_effect=profile_result),
+            patch.object(service, "check_krishna_purple_entries", return_value={"created": [], "errors": [], "skipped": True}),
+            patch.object(service, "check_krishna_purple_exits", return_value={"closed": [], "errors": [], "skipped": True}),
         ):
             result = service.scan_krishna_purple_touch_alerts(purple_timeframe="all")
 

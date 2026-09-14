@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
@@ -345,6 +346,100 @@ def initialize_database(path: str | Path = DEFAULT_DB_PATH) -> None:
             ON krishna_purple_trades(status, symbol, purple_timeframe, entry_kind)
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS krishna_purple_setups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                setup_id TEXT NOT NULL UNIQUE,
+                symbol TEXT NOT NULL,
+                purple_timeframe TEXT NOT NULL,
+                touch_candle_timestamp TEXT NOT NULL,
+                touch_detected_at TEXT NOT NULL,
+                captured_purple_ema9 REAL NOT NULL,
+                touch_price REAL,
+                initial_distance_percent REAL,
+                upper_discard_level REAL NOT NULL,
+                current_price REAL,
+                current_distance_percent REAL,
+                candle1_low REAL,
+                candle2_low REAL,
+                invalidation_level REAL,
+                lifecycle_status TEXT NOT NULL,
+                early_status TEXT NOT NULL DEFAULT 'waiting',
+                early_triggered_at TEXT,
+                early_last_candle_timestamp TEXT,
+                final_status TEXT NOT NULL DEFAULT 'waiting',
+                final_triggered_at TEXT,
+                final_last_candle_timestamp TEXT,
+                last_checked_at TEXT,
+                discarded_at TEXT,
+                discard_reason TEXT,
+                score REAL,
+                confidence TEXT,
+                match_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(symbol, purple_timeframe, touch_candle_timestamp)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_krishna_purple_setups_active
+            ON krishna_purple_setups(lifecycle_status, purple_timeframe, symbol)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS candle_refresh_state (
+                symbol TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                status TEXT NOT NULL,
+                queued_at TEXT,
+                refresh_started_at TEXT,
+                last_success_at TEXT,
+                latest_candle_timestamp TEXT,
+                failure_count INTEGER NOT NULL DEFAULT 0,
+                latest_error TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(symbol, timeframe)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_candle_refresh_state_status
+            ON candle_refresh_state(status, timeframe, symbol)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS krishna_purple_scan_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL UNIQUE,
+                purple_timeframe TEXT NOT NULL,
+                status TEXT NOT NULL,
+                scheduled_at TEXT,
+                queued_at TEXT,
+                started_at TEXT,
+                completed_at TEXT,
+                duration_ms INTEGER,
+                symbols_analyzed INTEGER NOT NULL DEFAULT 0,
+                setups_added INTEGER NOT NULL DEFAULT 0,
+                setups_updated INTEGER NOT NULL DEFAULT 0,
+                setups_discarded INTEGER NOT NULL DEFAULT 0,
+                error_count INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                result_json TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_krishna_purple_scan_runs_recent
+            ON krishna_purple_scan_runs(purple_timeframe, started_at DESC)
+            """
+        )
 
 
 class MarketJobRepository:
@@ -537,6 +632,293 @@ class KrishnaPurpleAlertRepository:
         self.db_path = Path(db_path)
         initialize_database(self.db_path)
 
+    def upsert_setup(self, match: dict[str, Any]) -> dict[str, Any]:
+        symbol = str(match.get("symbol") or "").upper()
+        purple_timeframe = str(match.get("purple_timeframe") or "")
+        touch_timestamp = str(match.get("touch_timestamp") or "")
+        captured_ema9 = _optional_float(match.get("purple_ema9"))
+        if not symbol or not purple_timeframe or not touch_timestamp or captured_ema9 is None:
+            raise ValueError("Purple Touch setup requires symbol, profile, touch timestamp, and Purple EMA9.")
+        setup_id = _purple_setup_id(symbol, purple_timeframe, touch_timestamp)
+        now = _now()
+        with _connection(self.db_path) as conn:
+            existing = conn.execute(
+                "SELECT * FROM krishna_purple_setups WHERE setup_id = ?",
+                (setup_id,),
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE krishna_purple_setups
+                    SET score = ?, confidence = ?, match_json = ?, updated_at = ?
+                    WHERE setup_id = ?
+                    """,
+                    (
+                        _optional_float(match.get("score")),
+                        match.get("confidence"),
+                        _json(match),
+                        now,
+                        setup_id,
+                    ),
+                )
+                created = False
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO krishna_purple_setups(
+                        setup_id, symbol, purple_timeframe, touch_candle_timestamp,
+                        touch_detected_at, captured_purple_ema9, touch_price,
+                        initial_distance_percent, upper_discard_level, lifecycle_status,
+                        score, confidence, match_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active_waiting', ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        setup_id,
+                        symbol,
+                        purple_timeframe,
+                        touch_timestamp,
+                        now,
+                        captured_ema9,
+                        _optional_float(match.get("touch_price")) or captured_ema9,
+                        _optional_float(match.get("purple_touch_distance_percent")),
+                        captured_ema9 * 1.03,
+                        _optional_float(match.get("score")),
+                        match.get("confidence"),
+                        _json(match),
+                        now,
+                        now,
+                    ),
+                )
+                created = True
+            row = conn.execute("SELECT * FROM krishna_purple_setups WHERE setup_id = ?", (setup_id,)).fetchone()
+        return {"created": created, "setup": _purple_setup_row(row)}
+
+    def active_setups(self, profiles: list[str] | None = None, limit: int = 2000) -> list[dict[str, Any]]:
+        clauses = ["lifecycle_status IN ('active_waiting', 'early_entry_triggered')"]
+        params: list[Any] = []
+        if profiles:
+            placeholders = ",".join("?" for _ in profiles)
+            clauses.append(f"purple_timeframe IN ({placeholders})")
+            params.extend(profiles)
+        params.append(max(1, int(limit)))
+        with _connection(self.db_path) as conn:
+            rows = conn.execute(
+                f"SELECT * FROM krishna_purple_setups WHERE {' AND '.join(clauses)} ORDER BY created_at, id LIMIT ?",
+                params,
+            ).fetchall()
+        return [_purple_setup_row(row) for row in rows]
+
+    def update_setup_check(
+        self,
+        setup_id: str,
+        *,
+        current_price: float | None,
+        current_distance_percent: float | None,
+        candle1_low: float | None,
+        candle2_low: float | None,
+        invalidation_level: float | None,
+        entry_kind: str | None = None,
+        entry_status: str | None = None,
+        entry_candle_timestamp: str | None = None,
+        entry_triggered_at: str | None = None,
+        lifecycle_status: str | None = None,
+        discard_reason: str | None = None,
+    ) -> dict[str, Any]:
+        now = _now()
+        updates = [
+            "current_price = ?", "current_distance_percent = ?", "candle1_low = ?",
+            "candle2_low = ?", "invalidation_level = ?", "last_checked_at = ?", "updated_at = ?",
+        ]
+        params: list[Any] = [
+            _optional_float(current_price), _optional_float(current_distance_percent),
+            _optional_float(candle1_low), _optional_float(candle2_low),
+            _optional_float(invalidation_level), now, now,
+        ]
+        if entry_kind in {"early", "final"}:
+            updates.extend([
+                f"{entry_kind}_status = ?",
+                f"{entry_kind}_last_candle_timestamp = ?",
+            ])
+            params.extend([entry_status or "waiting", entry_candle_timestamp])
+            if entry_triggered_at:
+                updates.append(f"{entry_kind}_triggered_at = COALESCE({entry_kind}_triggered_at, ?)")
+                params.append(entry_triggered_at)
+        if lifecycle_status:
+            updates.append("lifecycle_status = ?")
+            params.append(lifecycle_status)
+        if discard_reason:
+            updates.extend(["discard_reason = ?", "discarded_at = COALESCE(discarded_at, ?)"])
+            params.extend([discard_reason, now])
+        params.append(setup_id)
+        with _connection(self.db_path) as conn:
+            conn.execute(f"UPDATE krishna_purple_setups SET {', '.join(updates)} WHERE setup_id = ?", params)
+            row = conn.execute("SELECT * FROM krishna_purple_setups WHERE setup_id = ?", (setup_id,)).fetchone()
+        return _purple_setup_row(row) if row else {"setup_id": setup_id, "updated": False}
+
+    def discard_setup(
+        self,
+        setup_id: str,
+        status: str,
+        reason: str,
+        *,
+        current_price: float | None = None,
+        current_distance_percent: float | None = None,
+        candle1_low: float | None = None,
+        candle2_low: float | None = None,
+        invalidation_level: float | None = None,
+    ) -> dict[str, Any]:
+        if status not in {"discarded_above_3_percent", "discarded_c1_c2_low_break"}:
+            raise ValueError(f"Unsupported Purple Touch discard status: {status}")
+        now = _now()
+        with _connection(self.db_path) as conn:
+            conn.execute(
+                """
+                UPDATE krishna_purple_setups SET lifecycle_status = ?, early_status = CASE
+                    WHEN early_status = 'triggered' THEN early_status ELSE 'discarded' END,
+                    final_status = CASE WHEN final_status = 'triggered' THEN final_status ELSE 'discarded' END,
+                    current_price = ?, current_distance_percent = ?, candle1_low = ?, candle2_low = ?,
+                    invalidation_level = ?, discard_reason = ?, discarded_at = COALESCE(discarded_at, ?),
+                    last_checked_at = ?, updated_at = ? WHERE setup_id = ?
+                """,
+                (
+                    status, _optional_float(current_price), _optional_float(current_distance_percent),
+                    _optional_float(candle1_low), _optional_float(candle2_low),
+                    _optional_float(invalidation_level), reason, now, now, now, setup_id,
+                ),
+            )
+            row = conn.execute("SELECT * FROM krishna_purple_setups WHERE setup_id = ?", (setup_id,)).fetchone()
+        return _purple_setup_row(row) if row else {"setup_id": setup_id, "updated": False}
+
+    def list_setups(
+        self,
+        *,
+        limit: int = 25,
+        offset: int = 0,
+        profile: str | None = None,
+        status: str | None = None,
+        symbol: str | None = None,
+        early_status: str | None = None,
+        final_status: str | None = None,
+        sort_by: str = "updated_at",
+        sort_direction: str = "desc",
+    ) -> list[dict[str, Any]]:
+        clauses, params = _purple_setup_filters(profile, status, symbol, early_status, final_status)
+        allowed_sort = {
+            "updated_at": "updated_at", "created_at": "created_at", "symbol": "symbol",
+            "profile": "purple_timeframe", "distance": "current_distance_percent", "status": "lifecycle_status",
+        }
+        order = allowed_sort.get(sort_by, "updated_at")
+        direction = "ASC" if str(sort_direction).lower() == "asc" else "DESC"
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with _connection(self.db_path) as conn:
+            rows = conn.execute(
+                f"SELECT * FROM krishna_purple_setups {where} ORDER BY {order} {direction}, id DESC LIMIT ? OFFSET ?",
+                [*params, max(1, int(limit)), max(0, int(offset))],
+            ).fetchall()
+        return [_purple_setup_row(row) for row in rows]
+
+    def count_setups(
+        self,
+        *,
+        profile: str | None = None,
+        status: str | None = None,
+        symbol: str | None = None,
+        early_status: str | None = None,
+        final_status: str | None = None,
+    ) -> int:
+        clauses, params = _purple_setup_filters(profile, status, symbol, early_status, final_status)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with _connection(self.db_path) as conn:
+            row = conn.execute(f"SELECT COUNT(*) AS count FROM krishna_purple_setups {where}", params).fetchone()
+        return int(row["count"] or 0)
+
+    def record_refresh_queued(self, symbol: str, timeframe: str) -> None:
+        self._upsert_refresh_state(symbol, timeframe, "queued", queued_at=_now())
+
+    def record_refresh_started(self, symbol: str, timeframe: str) -> None:
+        self._upsert_refresh_state(symbol, timeframe, "updating", refresh_started_at=_now())
+
+    def record_refresh_success(self, symbol: str, timeframe: str, latest_candle_timestamp: str | None) -> None:
+        self._upsert_refresh_state(
+            symbol, timeframe, "fresh", last_success_at=_now(),
+            latest_candle_timestamp=latest_candle_timestamp, latest_error=None,
+        )
+
+    def record_refresh_failure(self, symbol: str, timeframe: str, error: str) -> None:
+        now = _now()
+        with _connection(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO candle_refresh_state(symbol, timeframe, status, failure_count, latest_error, updated_at)
+                VALUES (?, ?, 'stale', 1, ?, ?)
+                ON CONFLICT(symbol, timeframe) DO UPDATE SET
+                    status = 'stale', failure_count = failure_count + 1,
+                    latest_error = excluded.latest_error, updated_at = excluded.updated_at
+                """,
+                (symbol.upper(), timeframe, error, now),
+            )
+
+    def _upsert_refresh_state(self, symbol: str, timeframe: str, status: str, **values) -> None:
+        now = _now()
+        columns = ["symbol", "timeframe", "status", "updated_at", *values.keys()]
+        params = [symbol.upper(), timeframe, status, now, *values.values()]
+        assignments = ["status = excluded.status", "updated_at = excluded.updated_at"]
+        assignments.extend(f"{column} = excluded.{column}" for column in values)
+        placeholders = ", ".join("?" for _ in columns)
+        with _connection(self.db_path) as conn:
+            conn.execute(
+                f"INSERT INTO candle_refresh_state({', '.join(columns)}) VALUES ({placeholders}) "
+                f"ON CONFLICT(symbol, timeframe) DO UPDATE SET {', '.join(assignments)}",
+                params,
+            )
+
+    def refresh_states(self, limit: int = 2000) -> list[dict[str, Any]]:
+        with _connection(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT * FROM candle_refresh_state ORDER BY timeframe, symbol LIMIT ?",
+                (max(1, int(limit)),),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def start_scan_run(self, profile: str, scheduled_at: str | None = None, queued_at: str | None = None) -> str:
+        run_id = f"KPS-{profile.upper()}-{datetime.now(IST).strftime('%Y%m%d%H%M%S%f')}"
+        with _connection(self.db_path) as conn:
+            conn.execute(
+                """INSERT INTO krishna_purple_scan_runs(
+                    run_id, purple_timeframe, status, scheduled_at, queued_at, started_at
+                ) VALUES (?, ?, 'running', ?, ?, ?)""",
+                (run_id, profile, scheduled_at, queued_at, _now()),
+            )
+        return run_id
+
+    def finish_scan_run(self, run_id: str, result: dict[str, Any], error: str | None = None) -> None:
+        completed = _now()
+        with _connection(self.db_path) as conn:
+            row = conn.execute("SELECT started_at FROM krishna_purple_scan_runs WHERE run_id = ?", (run_id,)).fetchone()
+            duration = _duration_ms(row["started_at"], completed) if row else None
+            conn.execute(
+                """
+                UPDATE krishna_purple_scan_runs SET status = ?, completed_at = ?, duration_ms = ?,
+                    symbols_analyzed = ?, setups_added = ?, setups_updated = ?, setups_discarded = ?,
+                    error_count = ?, error = ?, result_json = ? WHERE run_id = ?
+                """,
+                (
+                    "failed" if error else "completed", completed, duration,
+                    int(result.get("analyzed_symbols") or 0), int(result.get("setups_added") or 0),
+                    int(result.get("setups_updated") or 0), int(result.get("setups_discarded") or 0),
+                    len(result.get("errors") or []), error, _json(result), run_id,
+                ),
+            )
+
+    def latest_scan_runs(self) -> list[dict[str, Any]]:
+        with _connection(self.db_path) as conn:
+            rows = conn.execute(
+                """SELECT r.* FROM krishna_purple_scan_runs r
+                   JOIN (SELECT purple_timeframe, MAX(id) AS id FROM krishna_purple_scan_runs GROUP BY purple_timeframe) x
+                   ON r.id = x.id ORDER BY CASE r.purple_timeframe WHEN 'month' THEN 1 WHEN 'week' THEN 2 ELSE 3 END"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def open_entry_alert(self, match: dict[str, Any], entry: dict[str, Any], entry_kind: str) -> dict[str, Any]:
         symbol = str(match.get("symbol") or "").upper()
         purple_timeframe = str(match.get("purple_timeframe") or "")
@@ -656,6 +1038,17 @@ class KrishnaPurpleAlertRepository:
         reasons = list(exit_snapshot.get("reasons") or [])
         warnings = list(exit_snapshot.get("warnings") or [])
         with _connection(self.db_path) as conn:
+            current = conn.execute(
+                "SELECT * FROM krishna_purple_trades WHERE trade_id = ?",
+                (trade["trade_id"],),
+            ).fetchone()
+            if not current or current["status"] != "open":
+                return {
+                    "created": False,
+                    "reason": "trade_already_closed" if current else "trade_not_found",
+                    "trade": _purple_trade_row(current) if current else None,
+                    "alert": None,
+                }
             alert = self._insert_alert(
                 conn,
                 trade_id=trade["trade_id"],
@@ -1506,6 +1899,36 @@ def _purple_trade_id(symbol: str, purple_timeframe: str, entry_kind: str) -> str
     return f"KPT-{stamp}-{symbol.upper()}-{purple_timeframe}-{entry_kind}".replace(" ", "_")
 
 
+def _purple_setup_id(symbol: str, purple_timeframe: str, touch_timestamp: str) -> str:
+    identity = f"{symbol.upper()}|{purple_timeframe}|{touch_timestamp}"
+    digest = hashlib.sha1(identity.encode("utf-8")).hexdigest()[:12].upper()
+    return f"KPS-{symbol.upper()}-{purple_timeframe}-{digest}".replace(" ", "_")
+
+
+def _purple_setup_filters(
+    profile: str | None,
+    status: str | None,
+    symbol: str | None,
+    early_status: str | None,
+    final_status: str | None,
+) -> tuple[list[str], list[Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    for column, value in (
+        ("purple_timeframe", profile),
+        ("lifecycle_status", status),
+        ("early_status", early_status),
+        ("final_status", final_status),
+    ):
+        if value and str(value).lower() != "all":
+            clauses.append(f"{column} = ?")
+            params.append(str(value))
+    if symbol:
+        clauses.append("symbol LIKE ?")
+        params.append(f"%{str(symbol).upper().strip()}%")
+    return clauses, params
+
+
 def _get(value: Any, key: str) -> Any:
     if isinstance(value, dict):
         return value.get(key)
@@ -1720,6 +2143,41 @@ def _purple_trade_row(row: sqlite3.Row) -> dict[str, Any]:
         "reasons": _loads(row["reasons_json"], []),
         "warnings": _loads(row["warnings_json"], []),
         "metadata": _loads(row["metadata_json"], {}),
+    }
+
+
+def _purple_setup_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "setup_id": row["setup_id"],
+        "symbol": row["symbol"],
+        "purple_timeframe": row["purple_timeframe"],
+        "touch_candle_timestamp": row["touch_candle_timestamp"],
+        "touch_detected_at": row["touch_detected_at"],
+        "captured_purple_ema9": row["captured_purple_ema9"],
+        "touch_price": row["touch_price"],
+        "initial_distance_percent": row["initial_distance_percent"],
+        "upper_discard_level": row["upper_discard_level"],
+        "current_price": row["current_price"],
+        "current_distance_percent": row["current_distance_percent"],
+        "candle1_low": row["candle1_low"],
+        "candle2_low": row["candle2_low"],
+        "invalidation_level": row["invalidation_level"],
+        "lifecycle_status": row["lifecycle_status"],
+        "early_status": row["early_status"],
+        "early_triggered_at": row["early_triggered_at"],
+        "early_last_candle_timestamp": row["early_last_candle_timestamp"],
+        "final_status": row["final_status"],
+        "final_triggered_at": row["final_triggered_at"],
+        "final_last_candle_timestamp": row["final_last_candle_timestamp"],
+        "last_checked_at": row["last_checked_at"],
+        "discarded_at": row["discarded_at"],
+        "discard_reason": row["discard_reason"],
+        "score": row["score"],
+        "confidence": row["confidence"],
+        "match": _loads(row["match_json"], {}),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
     }
 
 

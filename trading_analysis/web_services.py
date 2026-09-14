@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import queue
 import shutil
 import threading
 import time
@@ -15,6 +16,7 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
+from zoneinfo import ZoneInfo
 
 from trading_analysis.analysis.entry_context import build_entry_context
 from trading_analysis.analysis.backtest import (
@@ -32,6 +34,7 @@ from trading_analysis.analysis.krishna_setup import (
     scan_krishna_purple_exit_status,
     scan_krishna_purple_step1_candidate,
     scan_krishna_purple_touch_setup,
+    _purple_entry_snapshot,
 )
 from trading_analysis.analysis.krishna_purple_backtest import (
     PurpleTouchBacktestConfig,
@@ -149,6 +152,8 @@ INDEX_ALIASES = {
     for alias in definition["aliases"]
 }
 
+IST = ZoneInfo("Asia/Kolkata")
+
 
 class AnalysisService:
     def __init__(
@@ -178,6 +183,18 @@ class AnalysisService:
         self.benchmark_file = benchmark_file
         self._jobs: dict[str, dict[str, Any]] = {}
         self._jobs_lock = threading.Lock()
+        self._purple_monitor_lock = threading.RLock()
+        self._purple_persistence_lock = threading.RLock()
+        self._purple_stop_event = threading.Event()
+        self._purple_monitor_thread: threading.Thread | None = None
+        self._purple_refresh_thread: threading.Thread | None = None
+        self._purple_refresh_queue: queue.PriorityQueue = queue.PriorityQueue()
+        self._purple_refresh_enqueued: set[tuple[str, str]] = set()
+        self._purple_refresh_sequence = 0
+        self._purple_profile_running: set[str] = set()
+        self._purple_entry_checker_running = False
+        self._purple_exit_checker_running = False
+        self._purple_monitor_state = self._new_purple_monitor_state()
 
     def zerodha_status(self) -> dict[str, Any]:
         creds = load_settings().broker_credentials
@@ -313,6 +330,328 @@ class AnalysisService:
             if not job:
                 raise ValueError(f"Unknown job id: {job_id}")
             return dict(job)
+
+    @staticmethod
+    def _new_purple_monitor_state() -> dict[str, Any]:
+        return {
+            "running": False,
+            "started_at": None,
+            "stopped_at": None,
+            "current_refresh": None,
+            "last_refresh_success": None,
+            "latest_failure": None,
+            "refresh_successes": 0,
+            "refresh_failures": 0,
+            "entry_checks": 0,
+            "exit_checks": 0,
+            "intervals": {"month": 7200, "week": 1800, "day": 180},
+            "next_profile_runs": {},
+            "send_telegram": True,
+            "force": False,
+        }
+
+    def start_purple_monitor(
+        self,
+        intervals: dict[str, Any] | None = None,
+        send_telegram: bool = True,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        defaults = {"month": 7200, "week": 1800, "day": 180}
+        configured = dict(defaults)
+        for key, value in (intervals or {}).items():
+            if key in configured:
+                configured[key] = max(30, int(value))
+        with self._purple_monitor_lock:
+            if (
+                (self._purple_monitor_thread and self._purple_monitor_thread.is_alive())
+                or (self._purple_refresh_thread and self._purple_refresh_thread.is_alive())
+            ):
+                return self.purple_monitor_status()
+            self._purple_stop_event = threading.Event()
+            self._purple_refresh_queue = queue.PriorityQueue()
+            self._purple_refresh_enqueued = set()
+            self._purple_profile_running = set()
+            self._purple_entry_checker_running = False
+            self._purple_exit_checker_running = False
+            now = _ist_now()
+            self._purple_monitor_state = self._new_purple_monitor_state()
+            self._purple_monitor_state.update({
+                "running": True,
+                "started_at": now.isoformat(timespec="seconds"),
+                "intervals": configured,
+                "next_profile_runs": {key: now.isoformat(timespec="seconds") for key in configured},
+                "send_telegram": bool(send_telegram),
+                "force": bool(force),
+            })
+            self._purple_refresh_thread = threading.Thread(
+                target=self._purple_refresh_worker,
+                name="purple-candle-refresh",
+                daemon=True,
+            )
+            self._purple_monitor_thread = threading.Thread(
+                target=self._purple_monitor_loop,
+                name="purple-monitor",
+                daemon=True,
+            )
+            self._purple_refresh_thread.start()
+            self._purple_monitor_thread.start()
+        return self.purple_monitor_status()
+
+    def stop_purple_monitor(self) -> dict[str, Any]:
+        self._purple_stop_event.set()
+        with self._purple_monitor_lock:
+            self._purple_monitor_state["running"] = False
+            self._purple_monitor_state["stopped_at"] = _ist_now().isoformat(timespec="seconds")
+            self._purple_monitor_state["next_profile_runs"] = {}
+        for thread in (self._purple_monitor_thread, self._purple_refresh_thread):
+            if thread and thread.is_alive() and thread is not threading.current_thread():
+                thread.join(timeout=5)
+        return self.purple_monitor_status()
+
+    def purple_monitor_status(self) -> dict[str, Any]:
+        repository = KrishnaPurpleAlertRepository()
+        with self._purple_monitor_lock:
+            state = dict(self._purple_monitor_state)
+            state["next_profile_runs"] = dict(self._purple_monitor_state.get("next_profile_runs") or {})
+            state["queue_size"] = self._purple_refresh_queue.qsize()
+            state["queued_sources"] = len(self._purple_refresh_enqueued)
+            state["profile_jobs_running"] = sorted(self._purple_profile_running)
+            state["entry_checker_running"] = self._purple_entry_checker_running
+            state["exit_checker_running"] = self._purple_exit_checker_running
+            state["checker_running"] = self._purple_entry_checker_running or self._purple_exit_checker_running
+        refresh_rows = repository.refresh_states(limit=5000)
+        freshness = _aggregate_refresh_freshness(refresh_rows)
+        return {
+            "type": "krishna_purple_monitor",
+            **state,
+            "freshness": freshness,
+            "refresh_sources": refresh_rows[-100:],
+            "profile_runs": repository.latest_scan_runs(),
+            "active_setup_count": len(repository.active_setups(limit=5000)),
+        }
+
+    def krishna_purple_setups(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 25,
+        profile: str | None = None,
+        status: str | None = None,
+        symbol: str | None = None,
+        early_status: str | None = None,
+        final_status: str | None = None,
+        sort_by: str = "updated_at",
+        sort_order: str = "desc",
+    ) -> dict[str, Any]:
+        repository = KrishnaPurpleAlertRepository()
+        page_size = max(5, min(100, int(page_size)))
+        total = repository.count_setups(
+            profile=profile, status=status, symbol=symbol,
+            early_status=early_status, final_status=final_status,
+        )
+        pages = max(1, (total + page_size - 1) // page_size)
+        page = max(1, min(int(page), pages))
+        rows = repository.list_setups(
+            limit=page_size,
+            offset=(page - 1) * page_size,
+            profile=profile,
+            status=status,
+            symbol=symbol,
+            early_status=early_status,
+            final_status=final_status,
+            sort_by=sort_by,
+            sort_direction=sort_order,
+        )
+        return {
+            "type": "krishna_purple_setups",
+            "setups": rows,
+            "pagination": _page_info(page, page_size, total, len(rows)),
+        }
+
+    def _purple_monitor_loop(self) -> None:
+        repository = KrishnaPurpleAlertRepository()
+        last_entry_checker_start = 0.0
+        last_exit_checker_start = 0.0
+        while not self._purple_stop_event.is_set():
+            try:
+                self._schedule_purple_refreshes(repository)
+                now = _ist_now()
+                with self._purple_monitor_lock:
+                    next_runs = dict(self._purple_monitor_state.get("next_profile_runs") or {})
+                    intervals = dict(self._purple_monitor_state.get("intervals") or {})
+                for profile_key in ("month", "week", "day"):
+                    due_at = datetime.fromisoformat(next_runs.get(profile_key) or now.isoformat())
+                    if now >= due_at and profile_key not in self._purple_profile_running:
+                        with self._purple_monitor_lock:
+                            self._purple_profile_running.add(profile_key)
+                            self._purple_monitor_state["next_profile_runs"][profile_key] = (
+                                now + timedelta(seconds=int(intervals[profile_key]))
+                            ).isoformat(timespec="seconds")
+                        threading.Thread(
+                            target=self._run_purple_profile_monitor_scan,
+                            args=(profile_key, due_at.isoformat(timespec="seconds")),
+                            name=f"purple-{profile_key}-setup",
+                            daemon=True,
+                        ).start()
+                monotonic_now = time.monotonic()
+                if monotonic_now - last_entry_checker_start >= 15 and not self._purple_entry_checker_running:
+                    last_entry_checker_start = monotonic_now
+                    with self._purple_monitor_lock:
+                        self._purple_entry_checker_running = True
+                    threading.Thread(
+                        target=self._run_purple_entry_checker,
+                        name="purple-entry-checker",
+                        daemon=True,
+                    ).start()
+                if monotonic_now - last_exit_checker_start >= 15 and not self._purple_exit_checker_running:
+                    last_exit_checker_start = monotonic_now
+                    with self._purple_monitor_lock:
+                        self._purple_exit_checker_running = True
+                    threading.Thread(
+                        target=self._run_purple_exit_checker,
+                        name="purple-exit-checker",
+                        daemon=True,
+                    ).start()
+            except Exception as exc:
+                with self._purple_monitor_lock:
+                    self._purple_monitor_state["latest_failure"] = str(exc)
+            self._purple_stop_event.wait(2)
+        with self._purple_monitor_lock:
+            self._purple_monitor_state["running"] = False
+
+    def _schedule_purple_refreshes(self, repository: KrishnaPurpleAlertRepository) -> None:
+        states = {(row["symbol"], row["timeframe"]): row for row in repository.refresh_states(limit=5000)}
+        for trade in repository.list_open_trades(limit=500):
+            self._queue_purple_refresh(
+                trade["symbol"], source_timeframe(trade.get("exit_timeframe") or "30minute"), 10, states
+            )
+        for setup in repository.active_setups(limit=2000):
+            profile = krishna_purple_profile(setup["purple_timeframe"])
+            self._queue_purple_refresh(setup["symbol"], source_timeframe(profile.early_timeframe), 20, states)
+            self._queue_purple_refresh(setup["symbol"], source_timeframe(profile.final_timeframe), 20, states)
+        for symbol in self._watchlist_symbols():
+            self._queue_purple_refresh(symbol, "day", 30, states)
+
+    def _queue_purple_refresh(
+        self,
+        symbol: str,
+        timeframe: str,
+        priority: int,
+        states: dict[tuple[str, str], dict[str, Any]],
+    ) -> None:
+        key = (symbol.upper(), normalize_timeframe(timeframe))
+        if key in self._purple_refresh_enqueued or not _refresh_is_due(states.get(key), key[1]):
+            return
+        with self._purple_monitor_lock:
+            if key in self._purple_refresh_enqueued:
+                return
+            self._purple_refresh_sequence += 1
+            self._purple_refresh_enqueued.add(key)
+            self._purple_refresh_queue.put((priority, self._purple_refresh_sequence, key[0], key[1]))
+        KrishnaPurpleAlertRepository().record_refresh_queued(*key)
+
+    def _purple_refresh_worker(self) -> None:
+        repository = KrishnaPurpleAlertRepository()
+        client = None
+        instruments: dict[str, list[dict[str, str]]] = {}
+        while not self._purple_stop_event.is_set():
+            try:
+                _priority, _sequence, symbol, timeframe = self._purple_refresh_queue.get(timeout=1)
+            except queue.Empty:
+                continue
+            key = (symbol, timeframe)
+            try:
+                repository.record_refresh_started(symbol, timeframe)
+                with self._purple_monitor_lock:
+                    self._purple_monitor_state["current_refresh"] = {"symbol": symbol, "timeframe": timeframe}
+                client = client or _zerodha_client()
+                exchange, tradingsymbol, file_stem = self._candle_target(symbol)
+                if exchange not in instruments:
+                    instruments[exchange] = self._instruments_for_exchange(exchange)
+                token = resolve_instrument_token(instruments[exchange], exchange, tradingsymbol)
+                window = candle_window(days=DEFAULT_REFRESH_DAYS[timeframe])
+                candles = client.historical_candles(
+                    instrument_token=token,
+                    interval=fetch_interval(timeframe),
+                    from_time=window.from_time,
+                    to_time=window.to_time,
+                )
+                merge_candles_csv(candle_path(self.daily_data_dir, timeframe, file_stem), candles)
+                latest = candles[-1].timestamp.isoformat() if candles else None
+                repository.record_refresh_success(symbol, timeframe, latest)
+                with self._purple_monitor_lock:
+                    self._purple_monitor_state["refresh_successes"] += 1
+                    self._purple_monitor_state["last_refresh_success"] = _ist_now().isoformat(timespec="seconds")
+                    self._purple_monitor_state["latest_failure"] = None
+            except Exception as exc:
+                repository.record_refresh_failure(symbol, timeframe, str(exc))
+                client = None
+                with self._purple_monitor_lock:
+                    self._purple_monitor_state["refresh_failures"] += 1
+                    self._purple_monitor_state["latest_failure"] = f"{symbol} {timeframe}: {exc}"
+            finally:
+                with self._purple_monitor_lock:
+                    self._purple_refresh_enqueued.discard(key)
+                    self._purple_monitor_state["current_refresh"] = None
+                self._purple_refresh_queue.task_done()
+            self._purple_stop_event.wait(0.35)
+
+    def _run_purple_profile_monitor_scan(self, profile_key: str, scheduled_at: str) -> None:
+        repository = KrishnaPurpleAlertRepository()
+        run_id = repository.start_scan_run(profile_key, scheduled_at=scheduled_at, queued_at=scheduled_at)
+        result: dict[str, Any] = {}
+        error = None
+        try:
+            profile = krishna_purple_profile(profile_key)
+            added = 0
+            updated = 0
+
+            def persist_setup(row: dict[str, Any]) -> None:
+                nonlocal added, updated
+                outcome = repository.upsert_setup(row)
+                added += int(outcome["created"])
+                updated += int(not outcome["created"])
+
+            _step1, scan = self._scan_krishna_purple_profile_once(
+                profile, None, None, None, None, persist_setup, True
+            )
+            result = {
+                **scan,
+                "setups_added": added,
+                "setups_updated": updated,
+                "setups_discarded": 0,
+            }
+            if scan.get("errors"):
+                with self._purple_monitor_lock:
+                    current_due = datetime.fromisoformat(self._purple_monitor_state["next_profile_runs"][profile_key])
+                    retry_due = _ist_now() + timedelta(seconds=30)
+                    if retry_due < current_due:
+                        self._purple_monitor_state["next_profile_runs"][profile_key] = retry_due.isoformat(timespec="seconds")
+        except Exception as exc:
+            error = str(exc)
+            result = {"errors": [{"symbol": "", "error": error}]}
+        finally:
+            repository.finish_scan_run(run_id, result, error)
+            with self._purple_monitor_lock:
+                self._purple_profile_running.discard(profile_key)
+
+    def _run_purple_entry_checker(self) -> None:
+        try:
+            entry_result = self.check_krishna_purple_entries()
+            with self._purple_monitor_lock:
+                self._purple_monitor_state["entry_checks"] += int(entry_result.get("checked") or 0)
+        finally:
+            with self._purple_monitor_lock:
+                self._purple_entry_checker_running = False
+
+    def _run_purple_exit_checker(self) -> None:
+        try:
+            exit_result = self.check_krishna_purple_exits()
+            with self._purple_monitor_lock:
+                self._purple_monitor_state["exit_checks"] += int(exit_result.get("checked") or 0)
+        finally:
+            with self._purple_monitor_lock:
+                self._purple_exit_checker_running = False
 
     def sector_map_status(self) -> dict[str, Any]:
         payload = self._load_or_create_sector_map()
@@ -698,6 +1037,7 @@ class AnalysisService:
 
     def _run_bulk_candle_download(self, job_id: str, targets, timeframes, timeframe_windows, sleep_seconds: float) -> None:
         self._update_job(job_id, status="running", started_at=datetime.now().isoformat(timespec="seconds"))
+        refresh_repository = KrishnaPurpleAlertRepository()
         try:
             if self._job_stop_requested(job_id):
                 self._cancel_bulk_job(job_id)
@@ -712,6 +1052,7 @@ class AnalysisService:
                     current = f"{exchange}:{tradingsymbol} {timeframe}"
                     self._update_job(job_id, current=current)
                     try:
+                        refresh_repository.record_refresh_started(tradingsymbol, timeframe)
                         instruments = self._instruments_for_exchange(exchange)
                         token = resolve_instrument_token(instruments, exchange, tradingsymbol)
                         candles = client.historical_candles(
@@ -725,6 +1066,11 @@ class AnalysisService:
                             return
                         output = candle_path(self.daily_data_dir, timeframe, file_stem)
                         merge_candles_csv(output, candles)
+                        refresh_repository.record_refresh_success(
+                            tradingsymbol,
+                            timeframe,
+                            candles[-1].timestamp.isoformat() if candles else None,
+                        )
                         self._append_job_result(
                             job_id,
                             {
@@ -736,6 +1082,7 @@ class AnalysisService:
                             },
                         )
                     except Exception as exc:
+                        refresh_repository.record_refresh_failure(tradingsymbol, timeframe, str(exc))
                         self._append_job_error(job_id, f"{current}: {exc}")
                     finally:
                         self._increment_job(job_id)
@@ -1349,50 +1696,22 @@ class AnalysisService:
     ) -> dict[str, Any]:
         market_open = is_market_hours()
         repository = KrishnaPurpleAlertRepository()
-        notifier = TelegramNotifier.from_env()
         alerts_allowed = market_open or force
         next_open = next_market_open() if not market_open else None
-        telegram_status = {
-            "configured": notifier.configured(),
-            "enabled": send_telegram and notifier.configured(),
-            "sent": 0,
-            "errors": [],
-        }
         scans: list[dict[str, Any]] = []
         step1_scans: list[dict[str, Any]] = []
-        created_entries: list[dict[str, Any]] = []
-        existing_entries: list[dict[str, Any]] = []
-        closed_trades: list[dict[str, Any]] = []
         errors: list[dict[str, str]] = []
         requested_profile = str(purple_timeframe or "week")
         profiles = _purple_profiles(requested_profile)
-        open_trades = repository.list_open_trades(limit=500) if alerts_allowed else []
-        persistence_lock = threading.Lock()
+        setup_counts = {"added": 0, "updated": 0}
+        persistence_lock = self._purple_persistence_lock
 
-        def persist_entry_row(row: dict[str, Any]) -> None:
-            if not alerts_allowed:
-                return
-            # Final is persisted first so it suppresses a later early entry for the
-            # same setup. Both confirmations are calculated from the same snapshot.
+        def persist_setup_row(row: dict[str, Any]) -> None:
             with persistence_lock:
-                for entry_kind in ("final", "early"):
-                    entry = row.get(f"{entry_kind}_entry") or {}
-                    if entry.get("status") != "entry_candidate":
-                        continue
-                    try:
-                        outcome = repository.open_entry_alert(row, entry, entry_kind)
-                        if outcome.get("created"):
-                            created_entries.append(outcome)
-                            self._notify_purple_alert(outcome, notifier, telegram_status, send_telegram)
-                        else:
-                            existing_entries.append(outcome)
-                    except Exception as exc:
-                        errors.append({"symbol": row.get("symbol") or "", "error": str(exc)})
+                outcome = repository.upsert_setup(row)
+                setup_counts["added" if outcome.get("created") else "updated"] += 1
 
-        # Profile analysis is read-only and independent once candle refresh is complete.
-        # Exit evaluation is independent of new setup discovery, so it runs beside the
-        # profile workers. Database writes stay on this request thread to avoid races.
-        with ThreadPoolExecutor(max_workers=len(profiles) + (1 if alerts_allowed else 0)) as executor:
+        with ThreadPoolExecutor(max_workers=len(profiles)) as executor:
             futures = {
                 executor.submit(
                     self._scan_krishna_purple_profile_once,
@@ -1401,21 +1720,11 @@ class AnalysisService:
                     from_date,
                     to_date,
                     limit,
-                    persist_entry_row,
+                    persist_setup_row,
+                    True,
                 ): ("profile", profile)
                 for profile in profiles
             }
-            if alerts_allowed:
-                futures[
-                    executor.submit(
-                        self._evaluate_krishna_purple_exits,
-                        profiles,
-                        open_trades,
-                        days,
-                        from_date,
-                        to_date,
-                    )
-                ] = ("exits", None)
 
             for future in as_completed(futures):
                 work_type, profile = futures[future]
@@ -1425,25 +1734,6 @@ class AnalysisService:
                     errors.append({"symbol": "", "error": f"{work_type} scan failed: {exc}"})
                     continue
 
-                if work_type == "exits":
-                    for exit_result in result:
-                        trade = exit_result["trade"]
-                        if exit_result.get("error"):
-                            errors.append({"symbol": trade.get("symbol") or "", "error": exit_result["error"]})
-                            continue
-                        exit_snapshot = exit_result["snapshot"]
-                        try:
-                            with persistence_lock:
-                                if exit_snapshot.get("status") == "exit_triggered":
-                                    outcome = repository.close_trade_alert(trade, exit_snapshot)
-                                    closed_trades.append(outcome)
-                                    self._notify_purple_alert(outcome, notifier, telegram_status, send_telegram)
-                                else:
-                                    repository.update_checked(trade["trade_id"])
-                        except Exception as exc:
-                            errors.append({"symbol": trade.get("symbol") or "", "error": str(exc)})
-                    continue
-
                 step1_scan, scan = result
                 step1_scans.append(step1_scan)
                 scans.append(scan)
@@ -1451,6 +1741,16 @@ class AnalysisService:
         profile_order = {"month": 0, "week": 1, "day": 2}
         scans.sort(key=lambda item: profile_order.get(str(item.get("purple_timeframe")), 99))
         step1_scans.sort(key=lambda item: profile_order.get(str(item.get("purple_timeframe")), 99))
+        selected_profile_keys = [profile.purple_timeframe for profile in profiles]
+        entry_result = self.check_krishna_purple_entries(selected_profile_keys, send_telegram, force)
+        exit_result = self.check_krishna_purple_exits(selected_profile_keys, send_telegram, force)
+        created_entries = entry_result.get("created") or []
+        closed_trades = exit_result.get("closed") or []
+        errors.extend(entry_result.get("errors") or [])
+        errors.extend(exit_result.get("errors") or [])
+        telegram_status = entry_result.get("telegram") or exit_result.get("telegram") or {
+            "configured": False, "enabled": False, "sent": 0, "errors": []
+        }
 
         recent_alerts = repository.list_recent_alerts(limit=50)
         open_trades = repository.list_open_trades(limit=200)
@@ -1473,10 +1773,10 @@ class AnalysisService:
             "step1_scans": step1_scans,
             "step1_results": [row for scan in step1_scans for row in (scan.get("results") or [])],
             "entry_alerts_created": len(created_entries),
-            "entry_alerts_existing": len(existing_entries),
+            "entry_alerts_existing": 0,
             "exit_alerts_created": len(closed_trades),
             "created_entries": created_entries,
-            "existing_entries": existing_entries[:20],
+            "existing_entries": [],
             "closed_trades": closed_trades,
             "telegram": telegram_status,
             "recent_alerts": recent_alerts,
@@ -1484,10 +1784,14 @@ class AnalysisService:
             "alert_counts": alert_counts,
             "recent_alert_limit": 50,
             "errors": errors[:20],
+            "setups_added": setup_counts["added"],
+            "setups_updated": setup_counts["updated"],
+            "entry_checker": entry_result,
+            "exit_checker": exit_result,
             "summary": {
                 "points": [
                     "Monthly, Weekly, and Daily Purple Touch profiles are enabled and use their own supporting timeframes.",
-                    "Profile analysis runs concurrently after candle refresh; each symbol is loaded once for Step 1, strict setup, Early, and Final evaluation.",
+                    "Profile setup scans analyze the latest completed cache independently; active setup Entry checks run separately without waiting for a full-universe refresh.",
                     "Open-trade exit evaluation runs concurrently with profile analysis and does not wait for a new shortlist.",
                     "Entry alerts get a trade ID and remain open until the configured exit timeframe closes below yellow.",
                     "Within each profile, a stock can hold one early trade and one final trade; final confirmation suppresses any later early entry for the same setup.",
@@ -1510,6 +1814,7 @@ class AnalysisService:
         to_date: str | None,
         limit: int | None,
         on_strict_row=None,
+        require_fresh: bool = False,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Build Step 1 and strict results in one candle-file traversal."""
         window = candle_window(from_date=from_date, to_date=to_date, days=days or profile.minimum_days)
@@ -1518,15 +1823,34 @@ class AnalysisService:
         errors: list[dict[str, str]] = []
         analyzed_symbols = 0
         symbols = self._watchlist_symbols()
+        refresh_states = {
+            (row["symbol"], row["timeframe"]): row
+            for row in KrishnaPurpleAlertRepository().refresh_states(limit=5000)
+        } if require_fresh else {}
 
         for symbol in symbols:
             if not self._has_candles(symbol, profile.purple_timeframe):
                 continue
+            if require_fresh and not _refresh_state_is_fresh(
+                refresh_states.get((symbol.upper(), source_timeframe(profile.purple_timeframe))),
+                source_timeframe(profile.purple_timeframe),
+                max_age_seconds=int(self._purple_monitor_state.get("intervals", {}).get(profile.purple_timeframe, 300)),
+            ):
+                errors.append({"symbol": symbol, "error": "Setup scan skipped because required candle data is stale."})
+                continue
             try:
                 touch_candles, touch_source = self._load_timeframe_with_summary(symbol, profile.purple_timeframe, window)
                 analyzed_symbols += 1
-                early_candles, early_source = self._load_optional_timeframe_with_summary(symbol, profile.early_timeframe, window)
-                final_candles, final_source = self._load_optional_timeframe_with_summary(symbol, profile.final_timeframe, window)
+                early_candles = None
+                final_candles = None
+                early_source = _missing_candle_source_summary(
+                    symbol, profile.early_timeframe,
+                    candle_path(self.daily_data_dir, profile.early_timeframe, self._data_stem(symbol)),
+                )
+                final_source = _missing_candle_source_summary(
+                    symbol, profile.final_timeframe,
+                    candle_path(self.daily_data_dir, profile.final_timeframe, self._data_stem(symbol)),
+                )
                 confirmation_candles, confirmation_source = self._load_purple_confirmation_with_summary(symbol, profile, window)
                 structure = analyze_market_structure(touch_candles) if len(touch_candles) >= 10 else None
                 shared_args = {
@@ -1595,6 +1919,234 @@ class AnalysisService:
             }
 
         return payload("krishna_purple_touch_step1", step1_rows), payload("krishna_purple_touch_entry", strict_rows)
+
+    def check_krishna_purple_entries(
+        self,
+        profiles: list[str] | None = None,
+        send_telegram: bool | None = None,
+        force: bool | None = None,
+    ) -> dict[str, Any]:
+        repository = KrishnaPurpleAlertRepository()
+        selected_profiles = profiles or ["month", "week", "day"]
+        setups = repository.active_setups(selected_profiles, limit=2000)
+        refresh_states = {
+            (row["symbol"], row["timeframe"]): row for row in repository.refresh_states(limit=5000)
+        }
+        with self._purple_monitor_lock:
+            monitor_send = bool(self._purple_monitor_state.get("send_telegram", True))
+            monitor_force = bool(self._purple_monitor_state.get("force", False))
+        send_telegram = monitor_send if send_telegram is None else bool(send_telegram)
+        force = monitor_force if force is None else bool(force)
+        alerts_allowed = is_market_hours() or force
+        notifier = TelegramNotifier.from_env()
+        telegram_status = {"configured": notifier.configured(), "enabled": send_telegram, "sent": 0, "errors": []}
+        checked = 0
+        created: list[dict[str, Any]] = []
+        discarded: list[dict[str, Any]] = []
+        stale: list[dict[str, str]] = []
+        errors: list[dict[str, str]] = []
+
+        if not alerts_allowed:
+            return {
+                "checked": 0, "created": [], "discarded": [], "stale": [], "errors": [],
+                "skipped": True, "reason": "Entry alerts are paused outside NSE market hours.",
+                "telegram": telegram_status,
+            }
+
+        for setup in setups:
+            profile = krishna_purple_profile(setup["purple_timeframe"])
+            window = candle_window(days=profile.minimum_days)
+            try:
+                snapshots: dict[str, dict[str, Any]] = {}
+                latest_prices: list[tuple[datetime, float]] = []
+                for entry_kind, timeframe in (("early", profile.early_timeframe), ("final", profile.final_timeframe)):
+                    source = source_timeframe(timeframe)
+                    state = refresh_states.get((setup["symbol"], source))
+                    if not _refresh_state_is_fresh(state, source):
+                        stale.append({
+                            "symbol": setup["symbol"],
+                            "timeframe": timeframe,
+                            "reason": "Required entry candle data is stale or missing.",
+                        })
+                        continue
+                    candles, _summary = self._load_optional_timeframe_with_summary(setup["symbol"], timeframe, window)
+                    closed = _closed_candles(candles or [], timeframe)
+                    if not closed:
+                        stale.append({
+                            "symbol": setup["symbol"], "timeframe": timeframe,
+                            "reason": "No completed entry candle is available.",
+                        })
+                        continue
+                    latest_prices.append((closed[-1].timestamp, closed[-1].close))
+                    snapshots[entry_kind] = _purple_entry_snapshot(
+                        setup["symbol"],
+                        closed,
+                        timeframe,
+                        entry_kind,
+                        purple_timeframe=profile.purple_timeframe,
+                        purple_ema9=float(setup["captured_purple_ema9"]),
+                        touch_timestamp=datetime.fromisoformat(setup["touch_candle_timestamp"]),
+                        touch_tolerance_percent=3.0,
+                    )
+
+                if not latest_prices:
+                    continue
+                checked += 1
+                _latest_time, current_price = max(latest_prices, key=lambda item: _timestamp_sort_key(item[0]))
+                captured_ema9 = float(setup["captured_purple_ema9"])
+                current_distance = ((current_price - captured_ema9) / captured_ema9) * 100
+                lifecycle_snapshot = snapshots.get("early") or snapshots.get("final") or {}
+                candle1_low = lifecycle_snapshot.get("candle1_low")
+                candle2_low = lifecycle_snapshot.get("candle2_low")
+                invalidation_level = lifecycle_snapshot.get("invalidation_level")
+
+                if current_price > float(setup["upper_discard_level"]):
+                    reason = (
+                        f"Latest price {current_price:.2f} is {current_distance:.2f}% above captured Purple EMA9 "
+                        f"{captured_ema9:.2f}, exceeding fixed limit {setup['upper_discard_level']:.2f}."
+                    )
+                    discarded.append(repository.discard_setup(
+                        setup["setup_id"], "discarded_above_3_percent", reason,
+                        current_price=current_price, current_distance_percent=current_distance,
+                        candle1_low=candle1_low, candle2_low=candle2_low,
+                        invalidation_level=invalidation_level,
+                    ))
+                    continue
+
+                if lifecycle_snapshot.get("setup_discarded"):
+                    reason = "A Candle 3 or later candle broke the lower of the stored Candle 1 and Candle 2 lows."
+                    discarded.append(repository.discard_setup(
+                        setup["setup_id"], "discarded_c1_c2_low_break", reason,
+                        current_price=current_price, current_distance_percent=current_distance,
+                        candle1_low=candle1_low, candle2_low=candle2_low,
+                        invalidation_level=invalidation_level,
+                    ))
+                    continue
+
+                final_triggered_now = False
+                for entry_kind in ("final", "early"):
+                    snapshot = snapshots.get(entry_kind)
+                    if not snapshot:
+                        continue
+                    if entry_kind == "early" and (
+                        setup.get("final_status") == "triggered"
+                        or final_triggered_now
+                    ):
+                        continue
+                    trigger_timestamp = str(snapshot.get("trigger_date") or "")
+                    last_timestamp = setup.get(f"{entry_kind}_last_candle_timestamp")
+                    if trigger_timestamp and trigger_timestamp == last_timestamp:
+                        continue
+                    lifecycle_status = setup["lifecycle_status"]
+                    triggered_at = None
+                    entry_status = "waiting"
+                    if snapshot.get("status") == "entry_candidate":
+                        match = dict(setup.get("match") or {})
+                        match.update({
+                            "symbol": setup["symbol"],
+                            "purple_timeframe": setup["purple_timeframe"],
+                            "purple_ema9": captured_ema9,
+                            "touch_timestamp": setup["touch_candle_timestamp"],
+                        })
+                        with self._purple_persistence_lock:
+                            outcome = repository.open_entry_alert(match, snapshot, entry_kind)
+                        if outcome.get("created"):
+                            created.append({**outcome, "entry_kind": entry_kind, "setup_id": setup["setup_id"]})
+                            self._notify_purple_alert(outcome, notifier, telegram_status, send_telegram)
+                        entry_status = "triggered"
+                        triggered_at = trigger_timestamp or _ist_now().isoformat(timespec="seconds")
+                        lifecycle_status = "final_entry_triggered" if entry_kind == "final" else "early_entry_triggered"
+                        final_triggered_now = entry_kind == "final"
+                    repository.update_setup_check(
+                        setup["setup_id"],
+                        current_price=current_price,
+                        current_distance_percent=current_distance,
+                        candle1_low=snapshot.get("candle1_low"),
+                        candle2_low=snapshot.get("candle2_low"),
+                        invalidation_level=snapshot.get("invalidation_level"),
+                        entry_kind=entry_kind,
+                        entry_status=entry_status,
+                        entry_candle_timestamp=trigger_timestamp or None,
+                        entry_triggered_at=triggered_at,
+                        lifecycle_status=lifecycle_status,
+                    )
+                    if entry_kind == "final" and entry_status == "triggered":
+                        break
+            except Exception as exc:
+                errors.append({"symbol": setup.get("symbol") or "", "error": str(exc)})
+
+        return {
+            "type": "krishna_purple_entry_checker",
+            "checked": checked,
+            "active_setups": len(setups),
+            "entry_alerts_created": len(created),
+            "setups_discarded": len(discarded),
+            "created": created,
+            "discarded": discarded,
+            "stale": stale[:100],
+            "errors": errors[:100],
+            "skipped": False,
+            "telegram": telegram_status,
+        }
+
+    def check_krishna_purple_exits(
+        self,
+        profiles: list[str] | None = None,
+        send_telegram: bool | None = None,
+        force: bool | None = None,
+    ) -> dict[str, Any]:
+        repository = KrishnaPurpleAlertRepository()
+        selected_profiles = profiles or ["month", "week", "day"]
+        trades = [
+            trade for trade in repository.list_open_trades(limit=500)
+            if trade.get("purple_timeframe") in selected_profiles
+        ]
+        refresh_states = {
+            (row["symbol"], row["timeframe"]): row for row in repository.refresh_states(limit=5000)
+        }
+        with self._purple_monitor_lock:
+            monitor_send = bool(self._purple_monitor_state.get("send_telegram", True))
+            monitor_force = bool(self._purple_monitor_state.get("force", False))
+        send_telegram = monitor_send if send_telegram is None else bool(send_telegram)
+        force = monitor_force if force is None else bool(force)
+        if not (is_market_hours() or force):
+            return {"checked": 0, "closed": [], "stale": [], "errors": [], "skipped": True}
+        notifier = TelegramNotifier.from_env()
+        telegram_status = {"configured": notifier.configured(), "enabled": send_telegram, "sent": 0, "errors": []}
+        closed: list[dict[str, Any]] = []
+        stale: list[dict[str, str]] = []
+        errors: list[dict[str, str]] = []
+        checked = 0
+        for trade in trades:
+            try:
+                timeframe = trade.get("exit_timeframe") or krishna_purple_profile(trade["purple_timeframe"]).exit_timeframe
+                source = source_timeframe(timeframe)
+                if not _refresh_state_is_fresh(refresh_states.get((trade["symbol"], source)), source):
+                    stale.append({"symbol": trade["symbol"], "timeframe": timeframe, "reason": "Exit data is stale."})
+                    continue
+                candles, _summary = self._load_optional_timeframe_with_summary(
+                    trade["symbol"], timeframe, candle_window(days=DEFAULT_REFRESH_DAYS[normalize_timeframe(timeframe)])
+                )
+                completed = _closed_candles(candles or [], timeframe)
+                if not completed:
+                    continue
+                checked += 1
+                snapshot = scan_krishna_purple_exit_status(trade["symbol"], completed, timeframe)
+                with self._purple_persistence_lock:
+                    if snapshot.get("status") == "exit_triggered":
+                        outcome = repository.close_trade_alert(trade, snapshot)
+                        if outcome.get("created"):
+                            closed.append(outcome)
+                            self._notify_purple_alert(outcome, notifier, telegram_status, send_telegram)
+                    else:
+                        repository.update_checked(trade["trade_id"])
+            except Exception as exc:
+                errors.append({"symbol": trade.get("symbol") or "", "error": str(exc)})
+        return {
+            "type": "krishna_purple_exit_checker", "checked": checked, "open_trades": len(trades),
+            "exit_alerts_created": len(closed), "closed": closed, "stale": stale, "errors": errors,
+            "skipped": False, "telegram": telegram_status,
+        }
 
     def _evaluate_krishna_purple_exits(
         self,
@@ -2839,6 +3391,128 @@ def _scan_sort_key(row: dict[str, Any], scan_type: str) -> float:
     if scan_type == "neutral":
         return -abs(score - 50)
     return score
+
+
+def _ist_now() -> datetime:
+    return datetime.now(IST)
+
+
+def _as_ist(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=IST)
+    return value.astimezone(IST)
+
+
+def _timestamp_sort_key(value: datetime) -> float:
+    return _as_ist(value).timestamp()
+
+
+def _refresh_max_age_seconds(timeframe: str) -> int:
+    return {
+        "10minute": 90,
+        "15minute": 120,
+        "30minute": 180,
+        "60minute": 300,
+        "day": 300,
+    }.get(source_timeframe(timeframe), 300)
+
+
+def _refresh_state_is_fresh(
+    state: dict[str, Any] | None,
+    timeframe: str,
+    now: datetime | None = None,
+    max_age_seconds: int | None = None,
+) -> bool:
+    if not state or not state.get("last_success_at") or not state.get("latest_candle_timestamp"):
+        return False
+    now = now or _ist_now()
+    try:
+        success = _as_ist(datetime.fromisoformat(str(state["last_success_at"])))
+    except ValueError:
+        return False
+    return (now - success).total_seconds() <= (max_age_seconds or _refresh_max_age_seconds(timeframe))
+
+
+def _refresh_is_due(state: dict[str, Any] | None, timeframe: str) -> bool:
+    return not _refresh_state_is_fresh(state, timeframe)
+
+
+def _closed_candles(candles, timeframe: str, now: datetime | None = None):
+    now = now or _ist_now()
+    normalized = normalize_timeframe(timeframe)
+    if normalized in {"month", "week"}:
+        return list(candles)
+    output = []
+    minutes = {"10minute": 10, "15minute": 15, "30minute": 30, "60minute": 60, "120minute": 120}
+    for candle in candles:
+        timestamp = _as_ist(candle.timestamp)
+        if normalized == "day":
+            market_close = timestamp.replace(hour=15, minute=30, second=0, microsecond=0)
+            if timestamp.date() < now.date() or (timestamp.date() == now.date() and now >= market_close):
+                output.append(candle)
+        elif timestamp + timedelta(minutes=minutes[normalized]) <= now:
+            output.append(candle)
+    return output
+
+
+def _expected_closed_candle(timeframe: str, now: datetime | None = None) -> str:
+    now = now or _ist_now()
+    normalized = source_timeframe(timeframe)
+    market_open = now.replace(hour=9, minute=15, second=0, microsecond=0)
+    market_close = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    reference = now
+    if now.weekday() >= 5 or now < market_open:
+        reference = market_close - timedelta(days=1 if now.weekday() < 5 else now.weekday() - 4)
+        while reference.weekday() >= 5:
+            reference -= timedelta(days=1)
+    elif now >= market_close:
+        reference = market_close
+
+    if normalized == "day":
+        expected = reference.replace(hour=0, minute=0, second=0, microsecond=0)
+        if reference.date() == now.date() and now < market_close:
+            expected -= timedelta(days=1)
+            while expected.weekday() >= 5:
+                expected -= timedelta(days=1)
+        return expected.isoformat(timespec="seconds")
+    minutes = {"10minute": 10, "15minute": 15, "30minute": 30, "60minute": 60}[normalized]
+    session_start = reference.replace(hour=9, minute=15, second=0, microsecond=0)
+    elapsed = max(0, int((reference - session_start).total_seconds() // 60))
+    # At the closing bell, Zerodha's final partial interval is also complete.
+    completed = elapsed // minutes if reference.time() >= market_close.time() else max(0, (elapsed // minutes) - 1)
+    return (session_start + timedelta(minutes=completed * minutes)).isoformat(timespec="seconds")
+
+
+def _aggregate_refresh_freshness(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(str(row.get("timeframe") or ""), []).append(row)
+    output = []
+    for timeframe in ("day", "60minute", "30minute", "10minute"):
+        items = grouped.get(timeframe, [])
+        counts = Counter(
+            "fresh" if _refresh_state_is_fresh(item, timeframe) else
+            "updating" if item.get("status") in {"queued", "updating"} else
+            "missing" if not item.get("last_success_at") else "stale"
+            for item in items
+        )
+        if not items:
+            counts["missing"] = 1
+        latest_success = max((str(item.get("last_success_at")) for item in items if item.get("last_success_at")), default=None)
+        latest_candle = max((str(item.get("latest_candle_timestamp")) for item in items if item.get("latest_candle_timestamp")), default=None)
+        output.append({
+            "timeframe": timeframe,
+            "label": timeframe_label(timeframe),
+            "fresh": counts["fresh"],
+            "updating": counts["updating"],
+            "stale": counts["stale"],
+            "missing": counts["missing"],
+            "tracked": len(items),
+            "last_success_at": latest_success,
+            "latest_candle_timestamp": latest_candle,
+            "expected_latest_closed_candle": _expected_closed_candle(timeframe),
+        })
+    return output
 
 
 def _strategy_for_scan(scan_type: str) -> str:

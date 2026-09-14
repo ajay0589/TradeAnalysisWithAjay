@@ -179,6 +179,23 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         trade_order=params.get("trade_order", ["desc"])[0],
                     )
                 )
+            elif parsed.path == "/api/krishna-purple-monitor/status":
+                self._send_json(self.service.purple_monitor_status())
+            elif parsed.path == "/api/krishna-purple-setups":
+                params = parse_qs(parsed.query)
+                self._send_json(
+                    self.service.krishna_purple_setups(
+                        page=_optional_int(params.get("page", ["1"])[0]) or 1,
+                        page_size=_optional_int(params.get("page_size", ["25"])[0]) or 25,
+                        profile=params.get("profile", [None])[0] or None,
+                        status=params.get("status", [None])[0] or None,
+                        symbol=params.get("symbol", [None])[0] or None,
+                        early_status=params.get("early_status", [None])[0] or None,
+                        final_status=params.get("final_status", [None])[0] or None,
+                        sort_by=params.get("sort", ["updated_at"])[0],
+                        sort_order=params.get("order", ["desc"])[0],
+                    )
+                )
             elif parsed.path == "/api/krishna-setup-backtest":
                 params = parse_qs(parsed.query)
                 self._send_json(
@@ -354,6 +371,36 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         limit=_optional_limit(str(payload.get("limit") or "all")),
                         force=bool(payload.get("force")),
                         send_telegram=bool(payload.get("send_telegram", True)),
+                    )
+                )
+            elif parsed.path == "/api/krishna-purple-monitor/start":
+                payload = self._read_json()
+                self._send_json(
+                    self.service.start_purple_monitor(
+                        intervals=dict(payload.get("intervals") or {}),
+                        send_telegram=bool(payload.get("send_telegram", True)),
+                        force=bool(payload.get("force")),
+                    )
+                )
+            elif parsed.path == "/api/krishna-purple-monitor/stop":
+                self._read_json()
+                self._send_json(self.service.stop_purple_monitor())
+            elif parsed.path == "/api/krishna-purple-entry-checker/run":
+                payload = self._read_json()
+                self._send_json(
+                    self.service.check_krishna_purple_entries(
+                        profiles=list(payload.get("profiles") or []),
+                        send_telegram=bool(payload.get("send_telegram", True)),
+                        force=bool(payload.get("force")),
+                    )
+                )
+            elif parsed.path == "/api/krishna-purple-exit-checker/run":
+                payload = self._read_json()
+                self._send_json(
+                    self.service.check_krishna_purple_exits(
+                        profiles=list(payload.get("profiles") or []),
+                        send_telegram=bool(payload.get("send_telegram", True)),
+                        force=bool(payload.get("force")),
                     )
                 )
             elif parsed.path == "/api/krishna-purple-touch-backtest":
