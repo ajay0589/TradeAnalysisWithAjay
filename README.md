@@ -196,7 +196,7 @@ Use this same URL going forward on `scanner-audit-and-v4`. The script stops any 
 
 ### Purple Touch implementation guide
 
-The visual workflow, confirmed rules, timeframe matrix, entry/exit lifecycle, UI count reconciliation, and Krishna review checklist are documented in [Purple Touch Implementation Guide](docs/Purple_Touch_Implementation_Guide_v1_2.pdf).
+The latest v4 architecture, Windows installation, visual workflow, confirmed filters, timeframe matrix, freshness handling, persistent setup lifecycle, independent entry/exit checks, UI interpretation, and review checklist are documented in [Purple Touch Implementation Guide v1.3](docs/Purple_Touch_Implementation_Guide_v1_3.pdf). The [previous v1.2 guide](docs/Purple_Touch_Implementation_Guide_v1_2.pdf) is retained for comparison.
 
 The current Weekly-only execution rules, valid/invalid candle diagrams, exact boundaries, live monitoring guide, alert gates, and audit worksheet are documented in [Weekly Purple Touch Validation Guide v1.1](docs/Weekly_Purple_Touch_Validation_Guide_v1_1.pdf). The [previous v1.0 guide](docs/Weekly_Purple_Touch_Validation_Guide_v1_0.pdf) is retained for comparison.
 
@@ -207,7 +207,7 @@ Purple Touch entry alerts and trade lifecycle records are retained in local SQLi
 Purple Touch setup lifecycle precedence:
 
 - A strict Monthly, Weekly, or Daily setup is persisted by symbol, profile, and touch-candle timestamp.
-- Purple EMA9 and the upper discard level (`captured EMA9 × 1.03`) are fixed when the touch is first stored; later EMA9 changes do not move that limit.
+- Purple EMA9 and the upper discard level (`captured EMA9 x 1.03`) are fixed when the touch is first stored; later EMA9 changes do not move that limit.
 - Exactly 3.00% remains active. A price strictly above the fixed limit discards further entry checking, but does not close an existing trade.
 - Candle 1 and Candle 2 can trigger entries. From Candle 3 onward, a break below the lower C1/C2 low discards the setup.
 - Early entry keeps the setup active for Final. Final entry stops later Early checks. Each resulting trade keeps its own exit lifecycle.
@@ -226,6 +226,7 @@ Regenerate the PDF after material rule changes:
 
 ```powershell
 python -m pip install reportlab
+python -m scripts.generate_purple_touch_v4_guide
 python scripts\generate_purple_touch_guide.py
 python scripts\generate_weekly_purple_touch_validation_guide.py
 ```
@@ -285,8 +286,9 @@ UI usage:
 4. Keep `Include option chain` and `Include IV context` checked when those datasets are available.
 5. Click `Run NIFTY Analysis` for market, OI, and IV context.
 6. Click `Suggest Strategies` to see strategy candidates with suitability score, reasons, risks, and required confirmations.
-7. Use `Payoff` only after reviewing or editing exact legs/premiums; default UI legs are illustrative placeholders.
-8. Use `Backtest` as a context-only historical simulation unless historical option premiums are available.
+7. Start `NIFTY Live Scanner` during market hours to monitor Intraday, Swing, and Positional entries and exits.
+8. Review `NIFTY Trades: Open & Closed` for entry time, exit time, open duration, stop, target, and directional result.
+9. Use `NIFTY Scanner Backtest` to test the closed-candle rules by date range, horizon, direction, target R, and maximum holding bars.
 
 CLI examples:
 
@@ -297,9 +299,18 @@ python -m trading_analysis.cli nifty-payoff --spot 24500 --legs '[{"side":"buy",
 python -m trading_analysis.cli nifty-backtest --strategy nifty_short_strangle --mode swing --days 365 --params "{}"
 ```
 
-## NIFTY Auto Scan
+## NIFTY Live Scanner
 
-NIFTY Auto Scan is a local market-hour scheduler for the NIFTY Desk. It uses SQLite storage at `data\db\trading_analysis.db`, enables WAL mode, and stores job history, raw market-data snapshots, derived context, generated alert candidates, and alert outcomes. It is read-only: it refreshes local data caches where configured, analyzes context, records IV observations, creates alert candidates, and never places orders.
+NIFTY Live Scanner is a local market-hour scheduler for the NIFTY Desk. It uses SQLite storage at `data\db\trading_analysis.db`, enables WAL mode, and stores job history, market-data snapshots, context, entry/exit alerts, and complete trade lifecycles. It is read-only and never places orders.
+
+Configure its separate Telegram destination in `.env`:
+
+```text
+NIFTY_TELEGRAM_BOT_TOKEN=...
+NIFTY_TELEGRAM_CHAT_ID=...
+```
+
+The bot token may be reused, but the chat ID should identify the dedicated NIFTY chat or group.
 
 Default scan behavior:
 
@@ -307,8 +318,18 @@ Default scan behavior:
 - Candles: every 1 minute.
 - NIFTY option chain: every 3 minutes when refresh is available through the attached analysis service.
 - IV snapshot/context: every 5 minutes.
-- NIFTY context and opportunity scan: every 1 minute.
+- Intraday, Swing, and Positional entry checks: every selected UI interval, default 1 minute.
+- Open-trade exit checks: independently at the selected UI interval.
 - Job cleanup: every 30 minutes, keeping recent job history.
+
+Horizon rules:
+
+- Intraday: 15-minute closed candles; default maximum hold 8 bars.
+- Swing: 60-minute closed candles; default maximum hold 12 bars.
+- Positional: Daily closed candles; default maximum hold 10 bars.
+- Entry requires aligned EMA20/EMA50 trend, RSI, candle direction, a score of at least 70, and option-chain bias that is aligned or neutral.
+- Stop uses the nearest valid support/resistance, then ATR/fallback risk when no valid level exists. Default target is 2R.
+- Exit occurs at stop, target, EMA20 reversal, or maximum holding period. If stop and target occur within the same candle, the backtest takes the conservative stop-first result.
 
 SQLite tables:
 
@@ -317,7 +338,8 @@ SQLite tables:
 - `nifty_option_chain_snapshots`: option-chain snapshot summary rows, including expiry, PCR, max pain, ATM IV, OI totals, and raw CSV file path.
 - `nifty_option_chain_rows`: strike-level CE/PE rows linked to each option snapshot, including OI, IV, volume, bid/ask, and build-up label.
 - `nifty_iv_observations`: ATM IV observations linked to the option snapshot/source file when available.
-- `nifty_alerts`: generated NIFTY context/setup alerts, reasons, risks, trigger/invalidation levels, and acknowledgement state.
+- `nifty_alerts`: NIFTY entry/exit events, linked trade ID, Telegram status, context, reasons, and risk levels.
+- `nifty_trades`: open and closed trades with entry/exit timestamps, open duration, stop, target, result, and exit reason.
 - `nifty_context_snapshots`: exact technical, option-chain, IV, summary, warning, and error context captured during Auto Scan.
 - `nifty_strategy_candidates`: strategy candidates linked to the context snapshot that produced them.
 - `nifty_alert_outcomes`: saved signal-quality backtest outcomes for stored alerts.
@@ -326,21 +348,21 @@ Alert traceability:
 
 - Raw input layer: `nifty_candles`, `nifty_option_chain_snapshots`, `nifty_option_chain_rows`, and `nifty_iv_observations`.
 - Derived context layer: `nifty_context_snapshots` and linked `nifty_strategy_candidates`.
-- Alert layer: `nifty_alerts` stores `context_snapshot_id` and metadata links to the latest candle timestamp, option snapshot id, and IV observation id when available.
+- Alert layer: `nifty_alerts` stores the event kind, trade ID, `context_snapshot_id`, Telegram state, and source-data links.
+- Trade layer: `nifty_trades` independently tracks each Intraday, Swing, and Positional lifecycle.
 - Outcome layer: `nifty_alert_outcomes` stores signal-quality backtest rows for stored alerts.
 - Every newly generated alert can link to a `context_snapshot_id`.
 - Use the NIFTY Desk `View Context` action to inspect the exact technical/options/IV context behind an alert.
-- Recent context snapshots are shown in the NIFTY Desk so you can audit what Auto Scan saw at that time.
 - Data Freshness cards in the NIFTY Desk show the latest 15-minute candle, latest option-chain snapshot, latest ATM IV observation, and local DB row counts.
 - CSV remains the fallback/source cache for candle and option-chain data. SQLite is the local audit database, not a shared server database.
 
 Web UI usage:
 
 1. Open `NIFTY Desk`.
-2. Use `Start Auto Scan` during market hours to start the local scheduler in the web server process.
-3. Use `Run Once` to test one forced scan cycle outside market hours.
-4. Review `Auto Scan` job history to see what data was refreshed/analyzed.
-5. Review `Alerts`; use `Acknowledge` after you have reviewed an alert candidate.
+2. Choose the live scan interval and use `Start scanner` during market hours.
+3. Confirm the Started, Next Entry Check, Next Exit Check, and Telegram status values.
+4. Use `Run one cycle` for a forced diagnostic outside market hours; stale inputs cannot create an entry.
+5. Review `NIFTY Entry & Exit Alerts`, `NIFTY Trades: Open & Closed`, and linked context.
 
 CLI examples:
 
@@ -352,19 +374,19 @@ python -m trading_analysis.cli nifty-alerts --limit 20
 python -m trading_analysis.cli nifty-alert-backtest --timeframe 15minute --limit 500 --horizons 3,5,10,15
 ```
 
-Alert signal-quality backtest:
+NIFTY scanner backtest:
 
-- Evaluates stored NIFTY alerts against cached NIFTY spot candles.
-- Uses the next candle after the alert as the entry reference to avoid look-ahead bias.
-- Reports directional accuracy, average forward move, average directional move, max favorable move, and max adverse move by holding window.
-- Saves evaluated alert outcomes to local SQLite so each alert can build a review history over time.
-- This is not an option strategy P&L backtest. It does not model option premium, IV decay, margin, slippage, or exact strike selection.
+- Replays closed-candle EMA20, EMA50, RSI14, ATR14, candle direction, stop, target, EMA reversal, and maximum-hold rules.
+- Reports win rate, average/total R, expectancy, profit factor, maximum drawdown in R, entry/exit times, and open duration.
+- Uses a date range and separate Intraday, Swing, or Positional source timeframe.
+- Historical option-chain confirmation is not replayed unless timestamped historical snapshots are available.
+- This is a NIFTY spot signal test, not option premium P&L; brokerage, slippage, IV decay, margin, and strike-level payoff are not modeled.
 
 Auto-scan limitations:
 
-- Alerts are analysis candidates only and require confirmation and manual risk review.
+- Alerts are read-only signals and require manual risk review.
 - Option-chain and IV context depend on cached snapshots/source availability.
-- Duplicate alerts are suppressed for 15 minutes unless severity increases or score improves materially.
+- Only one open trade per horizon is allowed, preventing duplicate same-horizon entries.
 - Historical IV rank needs accumulated IV history.
 - Alert signal-quality backtest is not options P&L. Accurate options P&L still requires reliable historical option premiums.
 - SQLite is intended for local single-user storage.

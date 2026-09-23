@@ -17,11 +17,12 @@ class TelegramNotifier:
     timeout_seconds: int = 8
 
     @classmethod
-    def from_env(cls) -> "TelegramNotifier":
+    def from_env(cls, prefix: str = "") -> "TelegramNotifier":
         load_dotenv()
+        normalized = prefix.upper()
         return cls(
-            bot_token=os.getenv("TELEGRAM_BOT_TOKEN") or None,
-            chat_id=os.getenv("TELEGRAM_CHAT_ID") or None,
+            bot_token=os.getenv(f"{normalized}TELEGRAM_BOT_TOKEN") or None,
+            chat_id=os.getenv(f"{normalized}TELEGRAM_CHAT_ID") or None,
         )
 
     def configured(self) -> bool:
@@ -78,6 +79,43 @@ def purple_alert_message(alert: dict[str, Any], trade: dict[str, Any] | None = N
     if warnings:
         parts.append("Risk context: " + "; ".join(str(warning) for warning in warnings[:2]))
     return "\n".join(part for part in parts if part)
+
+
+def nifty_trade_message(event_kind: str, trade: dict[str, Any], alert: dict[str, Any] | None = None) -> str:
+    event = event_kind.upper()
+    parts = [
+        f"NIFTY {event} ALERT",
+        f"Trade ID: {trade.get('trade_id') or '-'}",
+        f"Horizon: {str(trade.get('horizon') or '-').title()} ({trade.get('entry_timeframe') or '-'})",
+        f"Direction / Strategy: {str(trade.get('direction') or '-').title()} / {trade.get('strategy_id') or '-'}",
+        f"Entry: {_fmt(trade.get('entry_price'))} at {trade.get('entry_time') or '-'}",
+    ]
+    if event_kind.lower() == "exit":
+        parts.extend(
+            [
+                f"Exit: {_fmt(trade.get('exit_price'))} at {trade.get('exit_time') or '-'}",
+                f"Open time: {trade.get('open_duration') or '-'}",
+                f"Result: {_fmt(trade.get('directional_return_percent'))}%",
+                f"Reason: {trade.get('exit_reason') or '-'}",
+            ]
+        )
+    else:
+        parts.extend(
+            [
+                f"Stop / Target: {_fmt(trade.get('stop_level'))} / {_fmt(trade.get('target_level'))}",
+                f"Risk/Reward: 1:{_fmt(trade.get('target_r_multiple'))}",
+                f"Score: {_fmt(trade.get('score'))} ({trade.get('confidence') or '-'})",
+            ]
+        )
+    if alert and alert.get("message"):
+        parts.append(str(alert["message"]))
+    metadata = trade.get("metadata") or {}
+    parts.append(
+        "Context: "
+        f"option {metadata.get('option_bias') or '-'}, PCR {_fmt(metadata.get('pcr_oi'))}, "
+        f"IV {metadata.get('iv_regime') or '-'} (rank {_fmt(metadata.get('iv_rank'))})"
+    )
+    return "\n".join(parts)
 
 
 def _profile_label(value: Any) -> str:

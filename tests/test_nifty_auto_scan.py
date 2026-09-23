@@ -13,6 +13,7 @@ from trading_analysis.models import Candle
 from trading_analysis.nifty.alert_backtest import backtest_nifty_alert_signals
 from trading_analysis.nifty.iv_context import build_nifty_iv_context
 from trading_analysis.nifty.auto_scan_service import NiftyAutoScanService
+from trading_analysis.nifty.live_scanner import backtest_nifty_live_rules, build_live_entry_signal, evaluate_live_exit
 from trading_analysis.scheduler.alerts import generate_nifty_alerts
 from trading_analysis.scheduler.jobs import NiftyMarketJobs
 from trading_analysis.scheduler.market_hours import is_market_hours
@@ -26,6 +27,7 @@ from trading_analysis.storage import (
     NiftyContextRepository,
     NiftyIVObservationRepository,
     NiftyOptionChainRepository,
+    NiftyTradeRepository,
 )
 from trading_analysis.web_app import ReusableThreadingHTTPServer, TradingRequestHandler
 from trading_analysis.web_services import AnalysisService
@@ -293,7 +295,7 @@ class NiftyAutoScanTests(unittest.TestCase):
         result = scheduler.run_once()
 
         self.assertTrue(result["ran"])
-        self.assertEqual(fake.calls, ["candles", "option_chain", "iv", "context", "scan", "cleanup"])
+        self.assertEqual(fake.calls, ["candles", "option_chain", "iv", "exit", "scan", "cleanup"])
 
     def test_api_status_alerts_and_acknowledge_return_json(self) -> None:
         class FakeAutoService:
@@ -335,7 +337,13 @@ class NiftyAutoScanTests(unittest.TestCase):
             def iv_history(self, lookback_days=252):
                 return {"observations": [{"atm_iv": 15}], "count": 1, "lookback_days": lookback_days}
 
-            def start(self):
+            def trades(self, status=None, limit=200):
+                return {"trades": [], "count": 0, "counts": {"open": 0, "closed": 0, "total": 0}}
+
+            def scanner_backtest(self, **kwargs):
+                return {"horizon": kwargs["horizon"], "trade_count": 0, "trades": [], "metrics": {}}
+
+            def start(self, scan_interval_seconds=None):
                 return self.status()
 
             def stop(self):
@@ -361,8 +369,10 @@ class NiftyAutoScanTests(unittest.TestCase):
             self.assertEqual(_http_json(f"{base}/api/nifty/option-snapshots")["count"], 1)
             self.assertEqual(_http_json(f"{base}/api/nifty/option-snapshots/3")["row_count"], 1)
             self.assertEqual(_http_json(f"{base}/api/nifty/iv-history?lookback_days=30")["lookback_days"], 30)
+            self.assertEqual(_http_json(f"{base}/api/nifty/trades")["count"], 0)
             self.assertFalse(_http_json(f"{base}/api/nifty/alerts/7/ack", {})["alert"]["is_active"])
             self.assertTrue(_http_json(f"{base}/api/nifty/auto/run-once", {"force": True})["ran"])
+            self.assertEqual(_http_json(f"{base}/api/nifty/scanner-backtest", {"horizon": "intraday"})["horizon"], "intraday")
         finally:
             server.shutdown()
             server.server_close()
@@ -468,6 +478,70 @@ class NiftyAutoScanTests(unittest.TestCase):
             self.assertEqual(len(rows), 2)
             self.assertEqual(rows[0]["option_type"], "CE")
 
+    def test_nifty_trade_repository_records_entry_exit_and_open_time(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = NiftyTradeRepository(Path(tmp) / "trades.db")
+            signal = {
+                "horizon": "intraday",
+                "direction": "bullish",
+                "strategy_id": "nifty_bull_call_spread",
+                "title": "Bull Call Spread",
+                "entry_time": "2026-07-06T09:30:00+05:30",
+                "entry_price": 100,
+                "entry_timeframe": "15minute",
+                "entry_candle_timestamp": "2026-07-06T09:15:00+05:30",
+                "stop_level": 98,
+                "target_level": 104,
+                "risk_points": 2,
+                "target_r_multiple": 2,
+                "score": 82,
+                "confidence": "high",
+            }
+
+            opened = repo.open_trade(signal)
+            duplicate = repo.open_trade(signal)
+            closed = repo.close_trade(
+                opened["trade"]["trade_id"],
+                exit_time="2026-07-06T10:30:00+05:30",
+                exit_price=104,
+                exit_reason="target_reached",
+            )
+
+            self.assertTrue(opened["created"])
+            self.assertFalse(duplicate["created"])
+            self.assertEqual(closed["open_seconds"], 3600)
+            self.assertEqual(closed["open_duration"], "1h 0m")
+            self.assertEqual(repo.counts(), {"open": 0, "closed": 1, "total": 1})
+
+    def test_live_entry_requires_closed_candle_and_option_alignment(self) -> None:
+        candles = _candles([100 + index for index in range(60)])
+        context = _context("bullish")
+        context["summary"] = {"data_links": {"latest_option_snapshot_at": "2026-07-07T00:10:00+05:30"}}
+        signal = build_live_entry_signal(
+            context,
+            [_candidate("nifty_bull_call_spread", "bullish", 85)],
+            "intraday",
+            candles,
+            now=datetime(2026, 7, 7, 0, 15),
+        )
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal["horizon"], "intraday")
+        self.assertGreater(signal["target_level"], signal["entry_price"])
+        context["options"]["option_bias"] = "bearish"
+        self.assertIsNone(build_live_entry_signal(context, [_candidate("nifty_bull_call_spread", "bullish", 85)], "intraday", candles, now=datetime(2026, 7, 7, 0, 15)))
+
+    def test_nifty_scanner_backtest_returns_entry_exit_and_risk_metrics(self) -> None:
+        candles = _candles([100 + index * 0.5 for index in range(140)])
+
+        payload = backtest_nifty_live_rules(candles, "intraday", target_r_multiple=1.5, max_holding_bars=6)
+
+        self.assertGreater(payload["trade_count"], 0)
+        self.assertIn("entry_time", payload["trades"][0])
+        self.assertIn("exit_time", payload["trades"][0])
+        self.assertIn("open_duration", payload["trades"][0])
+        self.assertIn("average_r", payload["metrics"])
+
     def test_iv_observation_repository_save_load(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = NiftyIVObservationRepository(Path(tmp) / "iv.db")
@@ -530,8 +604,12 @@ class NiftyAutoScanTests(unittest.TestCase):
             candle_repo = NiftyCandleRepository(db_path)
             option_repo = NiftyOptionChainRepository(db_path)
             iv_repo = NiftyIVObservationRepository(db_path)
-            candle_repo.upsert_candles("NIFTY", "15minute", _candles([100, 101, 102]))
-            snapshot_id = option_repo.save_snapshot({"symbol": "NIFTY", "expiry": "2026-07-09", "rows": _option_rows()})
+            start = datetime.now() - timedelta(minutes=15 * 60)
+            candle_repo.upsert_candles("NIFTY", "15minute", _candles([100 + index for index in range(60)], start=start))
+            snapshot_id = option_repo.save_snapshot(
+                {"symbol": "NIFTY", "expiry": "2026-07-09", "rows": _option_rows()},
+                captured_at=datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(timespec="seconds"),
+            )
             iv_id = iv_repo.record_observation(expiry="2026-07-09", atm_iv=15.5, source_snapshot_id=snapshot_id)
             jobs = NiftyMarketJobs(
                 nifty_service=FakeNiftyDeskForJobs(Path(tmp), None),
@@ -575,12 +653,19 @@ class FakeJobs:
         self.calls.append("scan")
         return {"job": {"status": "completed"}, "result": {"mode": mode}}
 
+    def run_nifty_exit_scan_job(self):
+        self.calls.append("exit")
+        return {"job": {"status": "completed"}, "result": {}}
+
     def cleanup_market_jobs_job(self, days=7):
         self.calls.append("cleanup")
         return {"job": {"status": "completed"}, "result": {"days": days}}
 
 
 class FakeScheduler:
+    def configure(self, intervals):
+        return None
+
     def start(self):
         return {"running": True, "market_hours": True}
 
@@ -685,6 +770,7 @@ def _alert(score: int, severity: str) -> dict:
         "confidence": "high",
         "reasons": ["Context alignment"],
         "risks": ["Invalidation can change"],
+        "event_kind": "entry",
     }
 
 

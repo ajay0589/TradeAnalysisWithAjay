@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from statistics import mean
 from typing import Any
 
 from trading_analysis.candles import candle_path
 from trading_analysis.data_sources.csv_loader import load_candles
 from trading_analysis.nifty.alert_backtest import DEFAULT_ALERT_HORIZONS, backtest_nifty_alert_signals
 from trading_analysis.nifty.models import to_jsonable
+from trading_analysis.nifty.live_scanner import HORIZON_CONFIG, backtest_nifty_live_rules
 from trading_analysis.nifty.service import NiftyDeskService
 from trading_analysis.scheduler.jobs import NiftyMarketJobs
 from trading_analysis.scheduler.market_hours import is_market_hours
@@ -20,6 +22,7 @@ from trading_analysis.storage import (
     NiftyContextRepository,
     NiftyIVObservationRepository,
     NiftyOptionChainRepository,
+    NiftyTradeRepository,
 )
 
 
@@ -37,6 +40,7 @@ class NiftyAutoScanService:
         self.candle_repository = NiftyCandleRepository(db_path)
         self.option_repository = NiftyOptionChainRepository(db_path)
         self.iv_repository = NiftyIVObservationRepository(db_path)
+        self.trade_repository = NiftyTradeRepository(db_path)
         self.nifty_service = nifty_service or NiftyDeskService()
         self.job_runner = NiftyMarketJobs(
             nifty_service=self.nifty_service,
@@ -46,10 +50,14 @@ class NiftyAutoScanService:
             candle_repository=self.candle_repository,
             option_repository=self.option_repository,
             iv_repository=self.iv_repository,
+            trade_repository=self.trade_repository,
         )
         self.scheduler = scheduler or MarketScanScheduler(job_runner=self.job_runner)
 
-    def start(self) -> dict[str, Any]:
+    def start(self, scan_interval_seconds: int | None = None) -> dict[str, Any]:
+        if scan_interval_seconds is not None:
+            seconds = max(30, int(scan_interval_seconds))
+            self.scheduler.configure({"opportunity_scan": seconds, "trade_exit": seconds})
         return self._with_repository_context(self.scheduler.start())
 
     def stop(self) -> dict[str, Any]:
@@ -63,7 +71,8 @@ class NiftyAutoScanService:
         return self._with_repository_context(result)
 
     def recent_alerts(self, limit: int = 50, active_only: bool = False) -> dict[str, Any]:
-        alerts = self.alert_repository.list_recent_alerts(limit=limit, active_only=active_only)
+        stored = self.alert_repository.list_recent_alerts(limit=max(limit * 5, 100), active_only=active_only)
+        alerts = [row for row in stored if row.get("event_kind") in {"entry", "exit"}][:limit]
         return {
             "alerts": alerts,
             "count": len(alerts),
@@ -73,6 +82,45 @@ class NiftyAutoScanService:
 
     def acknowledge_alert(self, alert_id: int) -> dict[str, Any]:
         return {"alert": self.alert_repository.acknowledge_alert(alert_id)}
+
+    def trades(self, status: str | None = None, limit: int = 200) -> dict[str, Any]:
+        rows = self.trade_repository.list_trades(status=status, limit=limit)
+        all_rows = self.trade_repository.list_trades(status="all", limit=100000)
+        return {
+            "trades": rows,
+            "count": len(rows),
+            "counts": self.trade_repository.counts(),
+            "performance": _trade_performance(all_rows),
+        }
+
+    def scanner_backtest(
+        self,
+        *,
+        horizon: str,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        direction: str = "both",
+        target_r_multiple: float = 2.0,
+        max_holding_bars: int | None = None,
+    ) -> dict[str, Any]:
+        if horizon not in HORIZON_CONFIG:
+            raise ValueError("Horizon must be intraday, swing, or positional.")
+        timeframe = str(HORIZON_CONFIG[horizon]["timeframe"])
+        path = candle_path(self.nifty_service.candle_root, timeframe, "NIFTY_50")
+        try:
+            candles = load_candles(path)
+        except FileNotFoundError:
+            candles = self.candle_repository.load_candles("NIFTY", timeframe)
+        payload = backtest_nifty_live_rules(
+            candles,
+            horizon,
+            from_date=from_date,
+            to_date=to_date,
+            direction=direction,
+            target_r_multiple=target_r_multiple,
+            max_holding_bars=max_holding_bars,
+        )
+        return to_jsonable({**payload, "candle_file": str(path)})
 
     def context_snapshots(self, limit: int = 50) -> dict[str, Any]:
         rows = self.context_repository.list_context_snapshots(limit=limit)
@@ -102,6 +150,7 @@ class NiftyAutoScanService:
                 "candles": self.candle_repository.counts("NIFTY"),
                 "context_snapshots": context_count,
                 "alerts": alert_count,
+                "trades": self.trade_repository.counts(),
             },
         }
 
@@ -181,6 +230,11 @@ class NiftyAutoScanService:
             "recent_jobs": recent_jobs,
             "recent_alerts": recent_alerts,
             "active_alerts_count": len(active_alerts),
+            "trade_counts": self.trade_repository.counts(),
+            "telegram": {
+                "configured": self.job_runner.notifier.configured(),
+                "destination": "NIFTY_TELEGRAM_CHAT_ID" if self.job_runner.notifier.configured() else None,
+            },
         }
 
 
@@ -188,3 +242,25 @@ def _matches(alert: dict[str, Any], key: str, expected: str | None) -> bool:
     if not expected:
         return True
     return str(alert.get(key) or "").lower() == expected.lower()
+
+
+def _trade_performance(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    closed = [row for row in trades if row.get("status") == "closed" and row.get("directional_return_percent") is not None]
+
+    def metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        returns = [float(row["directional_return_percent"]) for row in rows]
+        return {
+            "trades": len(rows),
+            "wins": sum(1 for value in returns if value > 0),
+            "win_rate": (sum(1 for value in returns if value > 0) / len(rows) * 100) if rows else None,
+            "average_return_percent": mean(returns) if returns else None,
+            "average_open_seconds": mean(float(row.get("open_seconds") or 0) for row in rows) if rows else None,
+        }
+
+    return {
+        "overall": metrics(closed),
+        "by_horizon": {
+            horizon: metrics([row for row in closed if row.get("horizon") == horizon])
+            for horizon in HORIZON_CONFIG
+        },
+    }

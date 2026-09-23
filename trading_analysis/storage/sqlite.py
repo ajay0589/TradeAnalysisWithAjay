@@ -73,6 +73,9 @@ def initialize_database(path: str | Path = DEFAULT_DB_PATH) -> None:
         )
         _ensure_column(conn, "nifty_alerts", "horizon", "TEXT")
         _ensure_column(conn, "nifty_alerts", "metadata_json", "TEXT")
+        _ensure_column(conn, "nifty_alerts", "event_kind", "TEXT")
+        _ensure_column(conn, "nifty_alerts", "trade_id", "TEXT")
+        _ensure_column(conn, "nifty_alerts", "telegram_status", "TEXT")
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_nifty_alerts_recent
@@ -106,6 +109,49 @@ def initialize_database(path: str | Path = DEFAULT_DB_PATH) -> None:
                 warnings_json TEXT,
                 errors_json TEXT
             )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nifty_trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_id TEXT NOT NULL UNIQUE,
+                symbol TEXT NOT NULL DEFAULT 'NIFTY',
+                horizon TEXT NOT NULL,
+                status TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                strategy_id TEXT,
+                title TEXT,
+                entry_alert_id INTEGER,
+                exit_alert_id INTEGER,
+                context_snapshot_id INTEGER,
+                entry_time TEXT NOT NULL,
+                entry_price REAL NOT NULL,
+                exit_time TEXT,
+                exit_price REAL,
+                open_seconds INTEGER,
+                entry_timeframe TEXT NOT NULL,
+                entry_candle_timestamp TEXT,
+                last_candle_timestamp TEXT,
+                stop_level REAL NOT NULL,
+                target_level REAL NOT NULL,
+                risk_points REAL NOT NULL,
+                target_r_multiple REAL NOT NULL,
+                score REAL,
+                confidence TEXT,
+                latest_price REAL,
+                last_checked_at TEXT,
+                exit_reason TEXT,
+                metadata_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_nifty_trades_status_horizon
+            ON nifty_trades(status, horizon, entry_time DESC)
             """
         )
         conn.execute(
@@ -535,6 +581,9 @@ class NiftyAlertRepository:
         risks: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         context_snapshot_id: int | None = None,
+        event_kind: str | None = None,
+        trade_id: str | None = None,
+        telegram_status: str | None = None,
     ) -> dict[str, Any]:
         with _connection(self.db_path) as conn:
             cursor = conn.execute(
@@ -542,9 +591,10 @@ class NiftyAlertRepository:
                 INSERT INTO nifty_alerts(
                     created_at, alert_type, mode, horizon, severity, symbol, spot, strategy_id, direction,
                     score, confidence, title, message, trigger_level, invalidation_level, expiry,
-                    reasons_json, risks_json, metadata_json, context_snapshot_id
+                    reasons_json, risks_json, metadata_json, context_snapshot_id,
+                    event_kind, trade_id, telegram_status
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _now(),
@@ -567,6 +617,9 @@ class NiftyAlertRepository:
                     _json(risks or []),
                     _json(metadata or {}),
                     context_snapshot_id,
+                    event_kind,
+                    trade_id,
+                    telegram_status,
                 ),
             )
             row = conn.execute("SELECT * FROM nifty_alerts WHERE id = ?", (cursor.lastrowid,)).fetchone()
@@ -588,6 +641,12 @@ class NiftyAlertRepository:
                 "UPDATE nifty_alerts SET is_active = 0, acknowledged_at = ? WHERE id = ?",
                 (now, alert_id),
             )
+            row = conn.execute("SELECT * FROM nifty_alerts WHERE id = ?", (alert_id,)).fetchone()
+        return _alert_row(row) if row else {"id": alert_id, "updated": False}
+
+    def update_telegram_status(self, alert_id: int, status: str) -> dict[str, Any]:
+        with _connection(self.db_path) as conn:
+            conn.execute("UPDATE nifty_alerts SET telegram_status = ? WHERE id = ?", (status, alert_id))
             row = conn.execute("SELECT * FROM nifty_alerts WHERE id = ?", (alert_id,)).fetchone()
         return _alert_row(row) if row else {"id": alert_id, "updated": False}
 
@@ -625,6 +684,154 @@ class NiftyAlertRepository:
             if not materially_better and not more_severe:
                 return True
         return False
+
+
+class NiftyTradeRepository:
+    def __init__(self, db_path: str | Path = DEFAULT_DB_PATH) -> None:
+        self.db_path = Path(db_path)
+        initialize_database(self.db_path)
+
+    def open_trade(self, signal: dict[str, Any], entry_alert_id: int | None = None) -> dict[str, Any]:
+        horizon = str(signal.get("horizon") or "").lower()
+        direction = str(signal.get("direction") or "").lower()
+        entry_time = _string_or_none(signal.get("entry_time"))
+        entry_price = _optional_float(signal.get("entry_price"))
+        if horizon not in {"intraday", "swing", "positional"} or direction not in {"bullish", "bearish"}:
+            raise ValueError("NIFTY trade requires a directional intraday, swing, or positional signal.")
+        if not entry_time or entry_price is None:
+            raise ValueError("NIFTY trade requires entry time and price.")
+        now = _now()
+        trade_id = str(signal.get("trade_id") or _nifty_trade_id(horizon, entry_time))
+        with _connection(self.db_path) as conn:
+            existing = conn.execute(
+                "SELECT * FROM nifty_trades WHERE status = 'open' AND horizon = ? ORDER BY entry_time DESC LIMIT 1",
+                (horizon,),
+            ).fetchone()
+            if existing:
+                return {"created": False, "trade": _nifty_trade_row(existing)}
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO nifty_trades(
+                    trade_id, symbol, horizon, status, direction, strategy_id, title,
+                    entry_alert_id, context_snapshot_id, entry_time, entry_price,
+                    entry_timeframe, entry_candle_timestamp, last_candle_timestamp,
+                    stop_level, target_level, risk_points, target_r_multiple,
+                    score, confidence, latest_price, last_checked_at, metadata_json,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    trade_id,
+                    "NIFTY",
+                    horizon,
+                    "open",
+                    direction,
+                    signal.get("strategy_id"),
+                    signal.get("title"),
+                    entry_alert_id,
+                    signal.get("context_snapshot_id"),
+                    entry_time,
+                    entry_price,
+                    signal.get("entry_timeframe"),
+                    _string_or_none(signal.get("entry_candle_timestamp")),
+                    _string_or_none(signal.get("entry_candle_timestamp")),
+                    _optional_float(signal.get("stop_level")),
+                    _optional_float(signal.get("target_level")),
+                    _optional_float(signal.get("risk_points")),
+                    _optional_float(signal.get("target_r_multiple")) or 2.0,
+                    _optional_float(signal.get("score")),
+                    signal.get("confidence"),
+                    entry_price,
+                    now,
+                    _json(signal.get("metadata") or {}),
+                    now,
+                    now,
+                ),
+            )
+            row = conn.execute("SELECT * FROM nifty_trades WHERE trade_id = ?", (trade_id,)).fetchone()
+        return {"created": bool(cursor.rowcount), "trade": _nifty_trade_row(row) if row else {}}
+
+    def attach_entry_alert(self, trade_id: str, alert_id: int) -> dict[str, Any]:
+        with _connection(self.db_path) as conn:
+            conn.execute(
+                "UPDATE nifty_trades SET entry_alert_id = ?, updated_at = ? WHERE trade_id = ?",
+                (alert_id, _now(), trade_id),
+            )
+            row = conn.execute("SELECT * FROM nifty_trades WHERE trade_id = ?", (trade_id,)).fetchone()
+        return _nifty_trade_row(row) if row else {}
+
+    def list_trades(self, status: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if status and status.lower() != "all":
+            clauses.append("status = ?")
+            params.append(status.lower())
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(max(1, int(limit)))
+        with _connection(self.db_path) as conn:
+            rows = conn.execute(
+                f"SELECT * FROM nifty_trades {where} ORDER BY entry_time DESC, id DESC LIMIT ?",
+                params,
+            ).fetchall()
+        return [_nifty_trade_row(row) for row in rows]
+
+    def open_trades(self) -> list[dict[str, Any]]:
+        return self.list_trades(status="open", limit=100)
+
+    def mark_checked(self, trade_id: str, candle_timestamp: Any, latest_price: float) -> dict[str, Any]:
+        with _connection(self.db_path) as conn:
+            conn.execute(
+                """
+                UPDATE nifty_trades
+                SET last_candle_timestamp = ?, latest_price = ?, last_checked_at = ?, updated_at = ?
+                WHERE trade_id = ? AND status = 'open'
+                """,
+                (_string_or_none(candle_timestamp), latest_price, _now(), _now(), trade_id),
+            )
+            row = conn.execute("SELECT * FROM nifty_trades WHERE trade_id = ?", (trade_id,)).fetchone()
+        return _nifty_trade_row(row) if row else {}
+
+    def close_trade(
+        self,
+        trade_id: str,
+        *,
+        exit_time: Any,
+        exit_price: float,
+        exit_reason: str,
+        exit_alert_id: int | None = None,
+    ) -> dict[str, Any]:
+        closed_at = _string_or_none(exit_time) or _now()
+        with _connection(self.db_path) as conn:
+            existing = conn.execute("SELECT * FROM nifty_trades WHERE trade_id = ?", (trade_id,)).fetchone()
+            if not existing or existing["status"] != "open":
+                return _nifty_trade_row(existing) if existing else {}
+            open_seconds = max(0, int((datetime.fromisoformat(closed_at) - datetime.fromisoformat(existing["entry_time"])).total_seconds()))
+            conn.execute(
+                """
+                UPDATE nifty_trades
+                SET status = 'closed', exit_alert_id = ?, exit_time = ?, exit_price = ?,
+                    open_seconds = ?, latest_price = ?, last_checked_at = ?, exit_reason = ?, updated_at = ?
+                WHERE trade_id = ?
+                """,
+                (exit_alert_id, closed_at, exit_price, open_seconds, exit_price, _now(), exit_reason, _now(), trade_id),
+            )
+            row = conn.execute("SELECT * FROM nifty_trades WHERE trade_id = ?", (trade_id,)).fetchone()
+        return _nifty_trade_row(row) if row else {}
+
+    def attach_exit_alert(self, trade_id: str, alert_id: int) -> dict[str, Any]:
+        with _connection(self.db_path) as conn:
+            conn.execute(
+                "UPDATE nifty_trades SET exit_alert_id = ?, updated_at = ? WHERE trade_id = ?",
+                (alert_id, _now(), trade_id),
+            )
+            row = conn.execute("SELECT * FROM nifty_trades WHERE trade_id = ?", (trade_id,)).fetchone()
+        return _nifty_trade_row(row) if row else {}
+
+    def counts(self) -> dict[str, int]:
+        with _connection(self.db_path) as conn:
+            rows = conn.execute("SELECT status, COUNT(*) AS count FROM nifty_trades GROUP BY status").fetchall()
+        values = {str(row["status"]): int(row["count"]) for row in rows}
+        return {"open": values.get("open", 0), "closed": values.get("closed", 0), "total": sum(values.values())}
 
 
 class KrishnaPurpleAlertRepository:
@@ -1913,6 +2120,12 @@ def _candidate_direction(candidate: dict[str, Any]) -> str | None:
     return None
 
 
+def _nifty_trade_id(horizon: str, entry_time: str) -> str:
+    identity = f"NIFTY|{horizon}|{entry_time}"
+    digest = hashlib.sha1(identity.encode("utf-8")).hexdigest()[:10].upper()
+    return f"NFT-{horizon[:3].upper()}-{digest}"
+
+
 def _purple_trade_id(symbol: str, purple_timeframe: str, entry_kind: str) -> str:
     stamp = datetime.now(IST).strftime("%Y%m%d%H%M%S")
     return f"KPT-{stamp}-{symbol.upper()}-{purple_timeframe}-{entry_kind}".replace(" ", "_")
@@ -2027,9 +2240,75 @@ def _alert_row(row: sqlite3.Row) -> dict[str, Any]:
         "risks": _loads(row["risks_json"], []),
         "metadata": _loads(row["metadata_json"] if "metadata_json" in row.keys() else None, {}),
         "context_snapshot_id": row["context_snapshot_id"],
+        "event_kind": row["event_kind"] if "event_kind" in row.keys() else None,
+        "trade_id": row["trade_id"] if "trade_id" in row.keys() else None,
+        "telegram_status": row["telegram_status"] if "telegram_status" in row.keys() else None,
         "is_active": bool(row["is_active"]),
         "acknowledged_at": row["acknowledged_at"],
     }
+
+
+def _nifty_trade_row(row: sqlite3.Row) -> dict[str, Any]:
+    entry_time = datetime.fromisoformat(row["entry_time"])
+    if row["status"] == "closed" and row["open_seconds"] is not None:
+        open_seconds = int(row["open_seconds"])
+    else:
+        now = datetime.now(IST)
+        if entry_time.tzinfo is None:
+            entry_time = entry_time.replace(tzinfo=IST)
+        open_seconds = max(0, int((now - entry_time).total_seconds()))
+    entry_price = float(row["entry_price"])
+    latest_price = row["exit_price"] if row["status"] == "closed" else row["latest_price"]
+    move = None
+    if latest_price is not None and entry_price:
+        raw = ((float(latest_price) - entry_price) / entry_price) * 100
+        move = raw if row["direction"] == "bullish" else -raw
+    return {
+        "id": row["id"],
+        "trade_id": row["trade_id"],
+        "symbol": row["symbol"],
+        "horizon": row["horizon"],
+        "status": row["status"],
+        "direction": row["direction"],
+        "strategy_id": row["strategy_id"],
+        "title": row["title"],
+        "entry_alert_id": row["entry_alert_id"],
+        "exit_alert_id": row["exit_alert_id"],
+        "context_snapshot_id": row["context_snapshot_id"],
+        "entry_time": row["entry_time"],
+        "entry_price": row["entry_price"],
+        "exit_time": row["exit_time"],
+        "exit_price": row["exit_price"],
+        "open_seconds": open_seconds,
+        "open_duration": _human_duration(open_seconds),
+        "entry_timeframe": row["entry_timeframe"],
+        "entry_candle_timestamp": row["entry_candle_timestamp"],
+        "last_candle_timestamp": row["last_candle_timestamp"],
+        "stop_level": row["stop_level"],
+        "target_level": row["target_level"],
+        "risk_points": row["risk_points"],
+        "target_r_multiple": row["target_r_multiple"],
+        "score": row["score"],
+        "confidence": row["confidence"],
+        "latest_price": latest_price,
+        "directional_return_percent": move,
+        "last_checked_at": row["last_checked_at"],
+        "exit_reason": row["exit_reason"],
+        "metadata": _loads(row["metadata_json"], {}),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _human_duration(seconds: int) -> str:
+    days, remainder = divmod(max(0, int(seconds)), 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if days:
+        return f"{days}d {hours}h {minutes}m"
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m {secs}s"
 
 
 def _purple_history_filters(

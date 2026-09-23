@@ -34,10 +34,8 @@ const state = {
   nifty: {
     context: null,
     candidates: [],
-    payoff: null,
-    backtest: null,
-    alertBacktest: null,
-    snapshots: [],
+    scannerBacktest: null,
+    trades: [],
     latestData: null,
     autoStatus: null,
     alerts: [],
@@ -59,7 +57,7 @@ function activateTab(name) {
   if (name === "nifty") {
     loadNiftyAutoStatus();
     loadNiftyAlerts();
-    loadNiftyContextSnapshots();
+    loadNiftyTrades();
     loadNiftyLatestData();
     startNiftyAutoPolling();
   } else {
@@ -3190,7 +3188,7 @@ function refreshResultText(rows) {
 function renderNiftyStrategies(candidates) {
   $("niftyStrategyMeta").textContent = `${candidates.length} candidate(s)`;
   $("niftyStrategyBody").innerHTML = candidates
-    .map((candidate, index) => `
+    .map((candidate) => `
       <tr>
         <td>${candidate.label}</td>
         <td>${candidate.horizon}</td>
@@ -3203,113 +3201,9 @@ function renderNiftyStrategies(candidates) {
         <td>${(candidate.reasons || []).join("; ")}</td>
         <td>${(candidate.risks || []).join("; ") || "-"}</td>
         <td>${(candidate.required_confirmations || []).join("; ") || "-"}</td>
-        <td>
-          <button class="linkBtn nifty-payoff-btn" data-index="${index}">Payoff</button>
-          <button class="linkBtn nifty-backtest-btn" data-index="${index}">Backtest</button>
-        </td>
       </tr>
     `)
     .join("");
-  document.querySelectorAll(".nifty-payoff-btn").forEach((button) => {
-    button.addEventListener("click", () => runNiftyPayoff(candidates[Number(button.dataset.index)]));
-  });
-  document.querySelectorAll(".nifty-backtest-btn").forEach((button) => {
-    button.addEventListener("click", () => runNiftyBacktest(candidates[Number(button.dataset.index)]));
-  });
-}
-
-async function runNiftyPayoff(candidate) {
-  const spot = Number((state.nifty.context && state.nifty.context.technical && state.nifty.context.technical.spot) || 24500);
-  const legs = defaultNiftyPayoffLegs(candidate, spot);
-  try {
-    const data = await postApi("/api/nifty/payoff", { spot, lot_size: 75, legs });
-    state.nifty.payoff = data;
-    renderNiftyPayoff(data);
-  } catch (error) {
-    setNotes([error.message], true);
-  }
-}
-
-function defaultNiftyPayoffLegs(candidate, spot) {
-  const base = Math.round(spot / 50) * 50;
-  if ((candidate.strategy_id || "").includes("bull_call")) {
-    return [
-      { side: "buy", option_type: "CE", strike: base, premium: 120 },
-      { side: "sell", option_type: "CE", strike: base + 200, premium: 50 },
-    ];
-  }
-  if ((candidate.strategy_id || "").includes("bear_put")) {
-    return [
-      { side: "buy", option_type: "PE", strike: base, premium: 120 },
-      { side: "sell", option_type: "PE", strike: base - 200, premium: 50 },
-    ];
-  }
-  if ((candidate.strategy_id || "").includes("strangle")) {
-    return [
-      { side: "sell", option_type: "PE", strike: base - 300, premium: 80 },
-      { side: "sell", option_type: "CE", strike: base + 300, premium: 80 },
-    ];
-  }
-  return [
-    { side: "sell", option_type: "PE", strike: base - 200, premium: 70 },
-    { side: "buy", option_type: "PE", strike: base - 400, premium: 30 },
-    { side: "sell", option_type: "CE", strike: base + 200, premium: 70 },
-    { side: "buy", option_type: "CE", strike: base + 400, premium: 30 },
-  ];
-}
-
-function renderNiftyPayoff(data) {
-  $("niftyPayoffMeta").textContent = `Net premium ${fmt(data.net_premium)} / lot ${data.lot_size}`;
-  $("niftyPayoffNotes").innerHTML = [data.max_profit_note, data.max_loss_note, data.breakeven_note]
-    .map((item) => `<div>${item}</div>`)
-    .join("");
-  $("niftyPayoffBody").innerHTML = (data.payoff_table || [])
-    .map((row) => `<tr><td>${fmt(row.spot)}</td><td>${fmt(row.payoff)}</td></tr>`)
-    .join("");
-}
-
-async function runNiftyBacktest(candidate) {
-  $("niftyBacktestMeta").textContent = "Running";
-  try {
-    const data = await postApi("/api/nifty/backtest", {
-      strategy_id: candidate.strategy_id,
-      mode: candidate.horizon || $("niftyMode").value,
-      days: 365,
-      exit_rules: { holding_bars: 5 },
-    });
-    state.nifty.backtest = data;
-    renderNiftyBacktest(data);
-  } catch (error) {
-    $("niftyBacktestMeta").textContent = "Failed";
-    setNotes([error.message], true);
-  }
-}
-
-function renderNiftyBacktest(data) {
-  const metrics = data.metrics || {};
-  $("niftyBacktestMeta").textContent = `${metrics.signals || 0} signal(s) / context-only`;
-  $("niftyBacktestCards").innerHTML = [
-    ["Signals", fmtInt(metrics.signals)],
-    ["Forward Accuracy", fmtPct(metrics.accuracy)],
-    ["Avg Forward Move", fmtPct(metrics.avg_forward_return)],
-    ["Trades", fmtInt(metrics.trade_count)],
-  ]
-    .map(([label, value]) => `<div class="metric"><span>${label}</span><strong>${value}</strong></div>`)
-    .join("");
-  $("niftyBacktestBody").innerHTML = (data.context_forward_returns || [])
-    .slice(-25)
-    .map((row) => `
-      <tr>
-        <td>${fmtDateTime(row.signal_date)}</td>
-        <td>${row.side}</td>
-        <td>${fmt(row.entry_reference)}</td>
-        <td>${fmt(row.exit_reference)}</td>
-        <td>${fmtPct(row.forward_return)}</td>
-        <td>${row.success ? "favorable" : "unfavorable"}</td>
-      </tr>
-    `)
-    .join("");
-  if ((data.warnings || []).length) setNotes(data.warnings);
 }
 
 async function loadNiftyAutoStatus() {
@@ -3348,7 +3242,9 @@ async function loadNiftyLatestData() {
 async function startNiftyAutoScan() {
   $("niftyAutoMeta").textContent = "Starting";
   try {
-    const data = await postApi("/api/nifty/auto/start", {});
+    const data = await postApi("/api/nifty/auto/start", {
+      scan_interval_seconds: Number($("niftyScanInterval").value || 60),
+    });
     state.nifty.autoStatus = data;
     renderNiftyAutoStatus(data);
     startNiftyAutoPolling();
@@ -3376,6 +3272,7 @@ async function runNiftyAutoOnce() {
     state.nifty.autoStatus = data;
     renderNiftyAutoStatus(data);
     await loadNiftyAlerts();
+    await loadNiftyTrades();
   } catch (error) {
     setNotes([error.message], true);
   }
@@ -3396,7 +3293,7 @@ function startNiftyAutoPolling() {
   state.nifty.autoPollTimer = window.setInterval(() => {
     loadNiftyAutoStatus();
     loadNiftyAlerts();
-    loadNiftyContextSnapshots();
+    loadNiftyTrades();
     loadNiftyLatestData();
   }, 20000);
 }
@@ -3410,11 +3307,21 @@ function stopNiftyAutoPolling() {
 function renderNiftyAutoStatus(data) {
   const running = Boolean(data.running);
   $("niftyAutoMeta").textContent = `${running ? "Running" : "Stopped"} / market ${data.market_hours ? "open" : "closed"}`;
+  $("niftyAutoStartBtn").disabled = running;
+  $("niftyAutoStopBtn").disabled = !running;
+  const telegram = data.telegram || {};
+  $("niftyTelegramStatus").textContent = telegram.configured
+    ? "Configured for the separate NIFTY Telegram chat"
+    : "Set NIFTY_TELEGRAM_BOT_TOKEN and NIFTY_TELEGRAM_CHAT_ID";
   $("niftyAutoCards").innerHTML = [
     ["Status", running ? "Running" : "Stopped"],
     ["Market Hours", data.market_hours ? "Open" : "Closed"],
-    ["Last Run", fmtDateTime(data.last_job_run)],
-    ["Active Alerts", fmtInt(data.active_alerts_count)],
+    ["Started", fmtDateTime(data.started_at)],
+    ["Stopped", fmtDateTime(data.stopped_at)],
+    ["Last Completed", fmtDateTime(data.last_cycle_completed_at || data.last_job_run)],
+    ["Next Entry Check", fmtDateTime((data.next_runs || {}).opportunity_scan)],
+    ["Next Exit Check", fmtDateTime((data.next_runs || {}).trade_exit)],
+    ["Open Trades", fmtInt((data.trade_counts || {}).open)],
   ]
     .map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${value}</strong></div>`)
     .join("");
@@ -3444,6 +3351,7 @@ function renderNiftyLatestData(data) {
     ["Latest ATM IV", iv.captured_at ? `${fmt(iv.atm_iv)} / ${fmtDateTime(iv.captured_at)}` : "-"],
     ["Context Snapshots", fmtInt(counts.context_snapshots)],
     ["Alerts", fmtInt(counts.alerts)],
+    ["Trades", `${fmtInt((counts.trades || {}).open)} open / ${fmtInt((counts.trades || {}).closed)} closed`],
     ["DB Candle Rows", Object.entries(candleCounts).map(([frame, count]) => `${frame}: ${fmtInt(count)}`).join(", ") || "-"],
   ]
     .map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${value}</strong></div>`)
@@ -3452,109 +3360,136 @@ function renderNiftyLatestData(data) {
 
 function renderNiftyAlerts(data) {
   const alerts = data.alerts || [];
-  $("niftyAlertsMeta").textContent = `${alerts.length} shown / ${fmtInt(data.active_count)} active`;
+  $("niftyAlertsMeta").textContent = `${alerts.length} entry/exit event(s)`;
   $("niftyAlertsBody").innerHTML = alerts
     .map((alert) => `
       <tr class="alert-${statusKey(alert.severity)}">
         <td>${fmtDateTime(alert.created_at)}</td>
-        <td><span class="status-badge status-${statusKey(alert.severity)}">${statusLabel(alert.severity)}</span></td>
-        <td>${alert.direction || "-"}</td>
+        <td><span class="status-badge status-${statusKey(alert.event_kind)}">${statusLabel(alert.event_kind || alert.alert_type)}</span></td>
+        <td>${alert.trade_id || "-"}</td>
         <td>${alert.horizon || alert.mode || "-"}</td>
+        <td>${alert.direction || "-"}</td>
         <td>${alert.strategy_id || "-"}</td>
-        <td>${alert.context_snapshot_id || "-"}</td>
-        <td>${fmt(alert.score)}</td>
-        <td>${escapeHtml(alert.title)}</td>
-        <td>${escapeHtml(alert.message)}</td>
-        <td>${escapeHtml((alert.reasons || []).join("; ") || "-")}</td>
-        <td>${escapeHtml((alert.risks || []).join("; ") || "-")}</td>
-        <td>${fmt(alert.trigger_level)}</td>
+        <td>${fmt(alert.spot)}</td>
         <td>${fmt(alert.invalidation_level)}</td>
+        <td>${fmt(alert.score)}</td>
+        <td>${escapeHtml(alert.message)}</td>
+        <td>${alert.telegram_status || "-"}</td>
         <td>
           ${alert.context_snapshot_id ? `<button class="linkBtn nifty-context-view" data-context-id="${alert.context_snapshot_id}">View Context</button>` : ""}
-          ${alert.is_active ? `<button class="linkBtn nifty-alert-ack" data-alert-id="${alert.id}">Acknowledge</button>` : "Ack"}
         </td>
       </tr>
     `)
     .join("");
-  document.querySelectorAll(".nifty-alert-ack").forEach((button) => {
-    button.addEventListener("click", () => acknowledgeNiftyAlert(Number(button.dataset.alertId)));
-  });
   document.querySelectorAll(".nifty-context-view").forEach((button) => {
     button.addEventListener("click", () => viewNiftyContextSnapshot(Number(button.dataset.contextId)));
   });
 }
 
-async function runNiftyAlertBacktest() {
-  $("niftyAlertBacktestMeta").textContent = "Running";
-  const params = new URLSearchParams({
-    timeframe: $("niftyAlertBacktestFrame").value,
-    limit: $("niftyAlertBacktestLimit").value || "500",
-    horizons: "3,5,10,15",
-  });
+async function loadNiftyTrades() {
   try {
-    const data = await api(`/api/nifty/alerts/backtest?${params.toString()}`);
-    state.nifty.alertBacktest = data;
-    renderNiftyAlertBacktest(data);
-    await loadNiftyAlerts();
+    const data = await api("/api/nifty/trades?status=all&limit=200");
+    state.nifty.trades = data.trades || [];
+    renderNiftyTrades(data);
   } catch (error) {
-    $("niftyAlertBacktestMeta").textContent = "Failed";
+    $("niftyTradesMeta").textContent = "Failed";
+  }
+}
+
+function renderNiftyTrades(data) {
+  const counts = data.counts || {};
+  const performance = data.performance || {};
+  const overall = performance.overall || {};
+  $("niftyTradesMeta").textContent = `${fmtInt(counts.open)} open / ${fmtInt(counts.closed)} closed`;
+  $("niftyTradePerformanceCards").innerHTML = [
+    ["Closed Trades", fmtInt(overall.trades)],
+    ["Win Rate", fmtPct(overall.win_rate)],
+    ["Average Return", fmtPct(overall.average_return_percent)],
+    ["Average Open Time", formatSeconds(overall.average_open_seconds)],
+    ...Object.entries(performance.by_horizon || {}).map(([horizon, row]) => [
+      `${capitalize(horizon)} Win Rate`,
+      `${fmtPct(row.win_rate)} / ${fmtInt(row.trades)} trades`,
+    ]),
+  ].map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${value}</strong></div>`).join("");
+  $("niftyTradesBody").innerHTML = (data.trades || []).map((trade) => `
+    <tr>
+      <td>${trade.trade_id}</td>
+      <td><span class="status-badge status-${statusKey(trade.status)}">${statusLabel(trade.status)}</span></td>
+      <td>${trade.horizon}</td><td>${trade.direction}</td><td>${trade.strategy_id || "-"}</td>
+      <td>${fmtDateTime(trade.entry_time)}</td><td>${fmt(trade.entry_price)}</td>
+      <td>${fmtDateTime(trade.exit_time)}</td><td>${fmt(trade.exit_price)}</td>
+      <td>${trade.open_duration || "-"}</td><td>${fmt(trade.stop_level)}</td><td>${fmt(trade.target_level)}</td>
+      <td>${fmtPct(trade.directional_return_percent)}</td><td>${trade.exit_reason || "-"}</td>
+    </tr>
+  `).join("");
+}
+
+function formatSeconds(value) {
+  if (value === null || value === undefined) return "-";
+  const seconds = Math.max(0, Math.round(Number(value)));
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days) return `${days}d ${hours}h ${minutes}m`;
+  if (hours) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+async function runNiftyScannerBacktest() {
+  $("niftyScannerBacktestMeta").textContent = "Running";
+  try {
+    const data = await postApi("/api/nifty/scanner-backtest", {
+      horizon: $("niftyBacktestHorizon").value,
+      direction: $("niftyBacktestDirection").value,
+      from_date: $("niftyBacktestFrom").value || null,
+      to_date: $("niftyBacktestTo").value || null,
+      target_r_multiple: Number($("niftyBacktestTargetR").value || 2),
+      max_holding_bars: Number($("niftyBacktestMaxBars").value || 8),
+    });
+    state.nifty.scannerBacktest = data;
+    renderNiftyScannerBacktest(data);
+  } catch (error) {
+    $("niftyScannerBacktestMeta").textContent = "Failed";
     setNotes([error.message], true);
   }
 }
 
-function renderNiftyAlertBacktest(data) {
-  const overall = (data.metrics && data.metrics.overall) || {};
-  $("niftyAlertBacktestMeta").textContent = `${data.evaluated_alerts || 0} alert(s) evaluated / ${data.timeframe}`;
-  $("niftyAlertBacktestCards").innerHTML = [
-    ["Alerts", fmtInt(data.alert_count)],
-    ["Rows", fmtInt(overall.signals)],
-    ["Accuracy", fmtPct(overall.accuracy)],
-    ["Avg Directional", fmtPct(overall.avg_directional_return)],
-    ["Saved Outcomes", fmtInt(data.saved_outcomes)],
+function renderNiftyScannerBacktest(data) {
+  const metrics = data.metrics || {};
+  $("niftyScannerBacktestMeta").textContent = `${fmtInt(data.trade_count)} trade(s) / ${data.horizon} / ${data.timeframe}`;
+  $("niftyScannerBacktestCards").innerHTML = [
+    ["Trades", fmtInt(data.trade_count)],
+    ["Win Rate", fmtPct(metrics.win_rate)],
+    ["Average R", fmt(metrics.average_r)],
+    ["Profit Factor", fmt(metrics.profit_factor)],
+    ["Net R", fmt(metrics.net_r)],
+    ["Max Drawdown", `${fmt(metrics.max_drawdown_r)} R`],
   ]
     .map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${value}</strong></div>`)
     .join("");
-  const byHold = (data.metrics && data.metrics.by_holding_bars) || [];
-  $("niftyAlertBacktestMetricBody").innerHTML = byHold
+  const coverage = data.coverage || {};
+  $("niftyScannerBacktestCoverage").innerHTML = [
+    `Technicals: ${coverage.technicals || "-"}`,
+    `Option chain: ${coverage.option_chain || "-"}`,
+    `Costs: ${coverage.costs || "-"}`,
+    ...(data.warnings || []),
+  ].map((item) => `<div>${escapeHtml(item)}</div>`).join("");
+  $("niftyScannerBacktestBody").innerHTML = (data.trades || [])
+    .slice(-100).reverse()
     .map((row) => `
       <tr>
-        <td>${row.group} candle(s)</td>
-        <td>${fmtInt(row.signals)}</td>
-        <td>${fmtPct(row.accuracy)}</td>
-        <td>${fmtPct(row.avg_directional_return)}</td>
-        <td>${fmtPct(row.avg_max_favorable)}</td>
-        <td>${fmtPct(row.avg_max_adverse)}</td>
-      </tr>
-    `)
-    .join("");
-  $("niftyAlertBacktestBody").innerHTML = (data.rows || [])
-    .slice(0, 50)
-    .map((row) => `
-      <tr>
-        <td>${fmtDateTime(row.alert_time)}</td>
-        <td>${row.horizon || "-"}</td>
-        <td>${row.strategy_id || "-"}</td>
-        <td>${row.direction || "-"}</td>
-        <td>${row.holding_bars || "-"}</td>
+        <td>${fmtDateTime(row.entry_time)}</td>
+        <td>${row.direction}</td>
         <td>${fmt(row.entry_price)}</td>
+        <td>${fmtDateTime(row.exit_time)}</td>
         <td>${fmt(row.exit_price)}</td>
-        <td>${fmtPct(row.forward_return_percent)}</td>
-        <td>${fmtPct(row.directional_return_percent)}</td>
-        <td>${row.status}${row.reason ? `: ${escapeHtml(row.reason)}` : ""}</td>
+        <td>${row.open_duration}</td>
+        <td>${fmt(row.r_multiple)}</td>
+        <td>${fmtPct(row.return_percent)}</td>
+        <td>${statusLabel(row.exit_reason)}</td>
       </tr>
     `)
     .join("");
-  if ((data.warnings || []).length) setNotes(data.warnings);
-}
-
-async function loadNiftyContextSnapshots() {
-  try {
-    const data = await api("/api/nifty/context-snapshots?limit=10");
-    state.nifty.snapshots = data.snapshots || [];
-    renderNiftyContextSnapshots(data);
-  } catch (error) {
-    $("niftySnapshotMeta").textContent = "Failed";
-  }
 }
 
 async function viewNiftyContextSnapshot(contextId) {
@@ -3571,31 +3506,14 @@ async function viewNiftyContextSnapshot(contextId) {
   }
 }
 
-function renderNiftyContextSnapshots(data) {
-  const rows = data.snapshots || [];
-  $("niftySnapshotMeta").textContent = `${rows.length} shown`;
-  $("niftySnapshotBody").innerHTML = rows
-    .map((row) => `
-      <tr>
-        <td>${row.id}</td>
-        <td>${fmtDateTime(row.captured_at)}</td>
-        <td>${row.mode || "-"}</td>
-        <td>${fmt(row.spot)}</td>
-        <td>${row.intraday_bias || "-"}</td>
-        <td>${row.swing_bias || "-"}</td>
-        <td>${row.positional_bias || "-"}</td>
-        <td>${row.option_bias || "-"}</td>
-        <td>${row.iv_regime || "-"}</td>
-      </tr>
-    `)
-    .join("");
-}
-
 function autoJobSummary(job) {
   if (job.error) return escapeHtml(job.error);
   const result = job.result && job.result.result ? job.result.result : job.result || {};
   if (result.alerts_created !== undefined) {
-    return `${result.alerts_created} alert(s), ${result.alerts_suppressed || 0} duplicate(s) suppressed`;
+    return `${result.alerts_created} entry alert(s) across Intraday, Swing, and Positional`;
+  }
+  if (result.trades_closed !== undefined) {
+    return `${result.open_checked || 0} open trade(s) checked, ${result.trades_closed} closed`;
   }
   if (result.candle_sources) {
     return candleSourceText(result.candle_sources);
@@ -3778,7 +3696,11 @@ $("niftySuggestBtn").addEventListener("click", runNiftySuggestions);
 $("niftyAutoStartBtn").addEventListener("click", startNiftyAutoScan);
 $("niftyAutoStopBtn").addEventListener("click", stopNiftyAutoScan);
 $("niftyAutoRunOnceBtn").addEventListener("click", runNiftyAutoOnce);
-$("niftyAlertBacktestBtn").addEventListener("click", runNiftyAlertBacktest);
+$("niftyScannerBacktestBtn").addEventListener("click", runNiftyScannerBacktest);
+$("niftyBacktestHorizon").addEventListener("change", () => {
+  const defaults = { intraday: 8, swing: 12, positional: 10 };
+  $("niftyBacktestMaxBars").value = defaults[$("niftyBacktestHorizon").value] || 8;
+});
 $("startOptionMonitorBtn").addEventListener("click", startOptionMonitor);
 $("stopOptionMonitorBtn").addEventListener("click", stopOptionMonitor);
 $("optionMonitorSymbols").addEventListener("keydown", (event) => {

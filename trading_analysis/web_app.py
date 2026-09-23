@@ -245,6 +245,14 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(self.nifty_auto_service.status())
             elif parsed.path == "/api/nifty/data/latest":
                 self._send_json(self.nifty_auto_service.latest_data())
+            elif parsed.path == "/api/nifty/trades":
+                params = parse_qs(parsed.query)
+                self._send_json(
+                    self.nifty_auto_service.trades(
+                        status=params.get("status", [None])[0] or None,
+                        limit=_optional_int(params.get("limit", ["200"])[0]) or 200,
+                    )
+                )
             elif parsed.path == "/api/nifty/option-snapshots":
                 params = parse_qs(parsed.query)
                 self._send_json(
@@ -463,12 +471,29 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/nifty/backtest":
                 self._send_json(self.nifty_service.nifty_backtest(self._read_json()))
             elif parsed.path == "/api/nifty/auto/start":
-                self._send_json(self.nifty_auto_service.start())
+                payload = self._read_json()
+                self._send_json(
+                    self.nifty_auto_service.start(
+                        scan_interval_seconds=_optional_int(payload.get("scan_interval_seconds")),
+                    )
+                )
             elif parsed.path == "/api/nifty/auto/stop":
                 self._send_json(self.nifty_auto_service.stop())
             elif parsed.path == "/api/nifty/auto/run-once":
                 payload = self._read_json()
                 self._send_json(self.nifty_auto_service.run_once(force=bool(payload.get("force"))))
+            elif parsed.path == "/api/nifty/scanner-backtest":
+                payload = self._read_json()
+                self._send_json(
+                    self.nifty_auto_service.scanner_backtest(
+                        horizon=str(payload.get("horizon") or "intraday"),
+                        from_date=payload.get("from_date") or None,
+                        to_date=payload.get("to_date") or None,
+                        direction=str(payload.get("direction") or "both"),
+                        target_r_multiple=float(payload.get("target_r_multiple") or 2.0),
+                        max_holding_bars=_optional_int(payload.get("max_holding_bars")),
+                    )
+                )
             elif parsed.path.startswith("/api/nifty/alerts/") and parsed.path.endswith("/ack"):
                 alert_id = _alert_id_from_path(parsed.path)
                 self._send_json(self.nifty_auto_service.acknowledge_alert(alert_id))

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from trading_analysis.scheduler.jobs import NiftyMarketJobs
@@ -13,8 +13,8 @@ DEFAULT_INTERVALS = {
     "candles": 60,
     "option_chain": 180,
     "iv_snapshot": 300,
-    "context": 60,
     "opportunity_scan": 60,
+    "trade_exit": 60,
     "cleanup": 1800,
 }
 
@@ -36,13 +36,20 @@ class MarketScanScheduler:
         self._lock = threading.Lock()
         self._active_jobs: set[str] = set()
         self._last_started: dict[str, float] = {}
+        self._last_started_at: dict[str, datetime] = {}
         self._last_results: dict[str, dict[str, Any]] = {}
         self._errors: list[str] = []
+        self._started_at: str | None = None
+        self._stopped_at: str | None = None
+        self._last_cycle_started_at: str | None = None
+        self._last_cycle_completed_at: str | None = None
 
     def start(self) -> dict[str, Any]:
         if self._thread and self._thread.is_alive():
             return self.status()
         self._stop_event.clear()
+        self._started_at = self.clock().isoformat(timespec="seconds")
+        self._stopped_at = None
         self._thread = threading.Thread(target=self._loop, name="nifty-market-scan", daemon=True)
         self._thread.start()
         return self.status()
@@ -51,6 +58,7 @@ class MarketScanScheduler:
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=5)
+        self._stopped_at = self.clock().isoformat(timespec="seconds")
         return self.status()
 
     def configure(self, intervals: dict[str, int]) -> None:
@@ -68,6 +76,15 @@ class MarketScanScheduler:
             "active_jobs": sorted(self._active_jobs),
             "last_results": self._last_results,
             "last_job_run": _latest_job_time(self._last_results),
+            "started_at": self._started_at,
+            "stopped_at": self._stopped_at,
+            "last_cycle_started_at": self._last_cycle_started_at,
+            "last_cycle_completed_at": self._last_cycle_completed_at,
+            "next_runs": {
+                name: (started + timedelta(seconds=self.intervals[name])).isoformat(timespec="seconds")
+                for name, started in self._last_started_at.items()
+                if name in self.intervals
+            },
             "errors": list(self._errors[-10:]),
         }
 
@@ -82,8 +99,10 @@ class MarketScanScheduler:
                 "results": {},
             }
         results: dict[str, Any] = {}
-        for name in ("candles", "option_chain", "iv_snapshot", "context", "opportunity_scan", "cleanup"):
+        self._last_cycle_started_at = now.isoformat(timespec="seconds")
+        for name in ("candles", "option_chain", "iv_snapshot", "trade_exit", "opportunity_scan", "cleanup"):
             results[name] = self._run_job(name)
+        self._last_cycle_completed_at = self.clock().isoformat(timespec="seconds")
         return {"ran": True, "market_hours": is_market_hours(now), "results": results}
 
     def _loop(self) -> None:
@@ -98,11 +117,17 @@ class MarketScanScheduler:
 
     def _run_due_jobs(self) -> None:
         current = time.monotonic()
-        for name in ("candles", "context", "opportunity_scan", "option_chain", "iv_snapshot", "cleanup"):
+        for name in ("candles", "trade_exit", "opportunity_scan", "option_chain", "iv_snapshot", "cleanup"):
             last = self._last_started.get(name, 0.0)
             if current - last >= self.intervals[name]:
                 self._last_started[name] = current
-                self._run_job(name)
+                self._last_started_at[name] = self.clock()
+                threading.Thread(
+                    target=self._run_job,
+                    args=(name,),
+                    name=f"nifty-{name}",
+                    daemon=True,
+                ).start()
 
     def _run_job(self, name: str) -> dict[str, Any]:
         with self._lock:
@@ -110,8 +135,10 @@ class MarketScanScheduler:
                 return {"status": "skipped", "reason": "already_running"}
             self._active_jobs.add(name)
         try:
+            started_at = self.clock().isoformat(timespec="seconds")
             result = self._call_job(name)
             self._last_results[name] = {
+                "started_at": started_at,
                 "finished_at": datetime.now().isoformat(timespec="seconds"),
                 "status": _result_status(result),
                 "result": result,
@@ -123,6 +150,7 @@ class MarketScanScheduler:
             error = {"status": "failed", "error": str(exc)}
             self._errors.append(str(exc))
             self._last_results[name] = {
+                "started_at": self.clock().isoformat(timespec="seconds"),
                 "finished_at": datetime.now().isoformat(timespec="seconds"),
                 "status": "failed",
                 "result": error,
@@ -139,10 +167,10 @@ class MarketScanScheduler:
             return self.job_runner.update_nifty_option_chain_job(refresh=True)
         if name == "iv_snapshot":
             return self.job_runner.record_nifty_iv_job()
-        if name == "context":
-            return self.job_runner.run_nifty_context_job(mode="auto")
         if name == "opportunity_scan":
             return self.job_runner.run_nifty_opportunity_scan_job(mode="auto")
+        if name == "trade_exit":
+            return self.job_runner.run_nifty_exit_scan_job()
         if name == "cleanup":
             return self.job_runner.cleanup_market_jobs_job(days=7)
         raise ValueError(f"Unknown scheduler job: {name}")
