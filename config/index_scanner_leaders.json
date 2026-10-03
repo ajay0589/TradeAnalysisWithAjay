@@ -1,0 +1,34 @@
+{
+  "BANKNIFTY": {
+    "label": "Nifty Bank",
+    "exchange": "NSE",
+    "tradingsymbol": "NIFTY BANK",
+    "candle_stem": "NIFTY_BANK",
+    "option_exchange": "NFO",
+    "source_date": "2026-09-30",
+    "source_url": "https://www.niftyindices.com/Factsheet/ind_nifty_bank.pdf",
+    "leaders": [
+      {"symbol": "HDFCBANK", "weight_pct": 18.61},
+      {"symbol": "ICICIBANK", "weight_pct": 14.18},
+      {"symbol": "KOTAKBANK", "weight_pct": 10.20},
+      {"symbol": "AXISBANK", "weight_pct": 10.06},
+      {"symbol": "SBIN", "weight_pct": 9.93}
+    ]
+  },
+  "SENSEX": {
+    "label": "BSE Sensex",
+    "exchange": "BSE",
+    "tradingsymbol": "SENSEX",
+    "candle_stem": "SENSEX",
+    "option_exchange": "BFO",
+    "source_date": null,
+    "source_url": "https://www.bseindices.com/indices-details/code/16/",
+    "leaders": [
+      {"symbol": "HDFCBANK", "weight_pct": null},
+      {"symbol": "ICICIBANK", "weight_pct": null},
+      {"symbol": "RELIANCE", "weight_pct": null},
+      {"symbol": "BHARTIARTL", "weight_pct": null},
+      {"symbol": "INFY", "weight_pct": null}
+    ]
+  }
+}

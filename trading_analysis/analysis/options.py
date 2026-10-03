@@ -16,10 +16,11 @@ class OptionContract:
     strike: float
     option_type: str
     lot_size: int
+    exchange: str = "NFO"
 
     @property
     def kite_key(self) -> str:
-        return f"NFO:{self.tradingsymbol}"
+        return f"{self.exchange}:{self.tradingsymbol}"
 
 
 @dataclass(frozen=True)
@@ -65,8 +66,10 @@ def option_contracts_for_symbol(
     instruments: list[dict[str, str]],
     symbol: str,
     expiry: date | None = None,
+    exchange: str = "NFO",
 ) -> list[OptionContract]:
     symbol = symbol.upper()
+    exchange = exchange.upper()
     contracts = [
         OptionContract(
             tradingsymbol=row["tradingsymbol"],
@@ -75,10 +78,11 @@ def option_contracts_for_symbol(
             strike=float(row["strike"]),
             option_type=row["instrument_type"].upper(),
             lot_size=int(float(row["lot_size"])),
+            exchange=exchange,
         )
         for row in instruments
-        if row.get("exchange", "").upper() == "NFO"
-        and row.get("segment", "").upper() == "NFO-OPT"
+        if row.get("exchange", "").upper() == exchange
+        and row.get("segment", "").upper() == f"{exchange}-OPT"
         and row.get("name", "").upper() == symbol
         and row.get("instrument_type", "").upper() in {"CE", "PE"}
         and row.get("expiry")

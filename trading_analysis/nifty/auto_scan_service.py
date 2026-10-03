@@ -9,6 +9,7 @@ from trading_analysis.data_sources.csv_loader import load_candles
 from trading_analysis.nifty.alert_backtest import DEFAULT_ALERT_HORIZONS, backtest_nifty_alert_signals
 from trading_analysis.nifty.models import to_jsonable
 from trading_analysis.nifty.live_scanner import HORIZON_CONFIG, backtest_nifty_live_rules
+from trading_analysis.nifty.technical_backtest import backtest_technical_setup
 from trading_analysis.nifty.service import NiftyDeskService
 from trading_analysis.scheduler.jobs import NiftyMarketJobs
 from trading_analysis.scheduler.market_hours import is_market_hours
@@ -97,29 +98,47 @@ class NiftyAutoScanService:
         self,
         *,
         horizon: str,
+        method: str = "scanner",
+        strategy: str = "ema_pullback",
         from_date: str | None = None,
         to_date: str | None = None,
         direction: str = "both",
         target_r_multiple: float = 2.0,
         max_holding_bars: int | None = None,
+        cost_bps_per_side: float = 2.0,
     ) -> dict[str, Any]:
         if horizon not in HORIZON_CONFIG:
             raise ValueError("Horizon must be intraday, swing, or positional.")
+        if method not in {"scanner", "technical"}:
+            raise ValueError("Method must be scanner or technical.")
         timeframe = str(HORIZON_CONFIG[horizon]["timeframe"])
         path = candle_path(self.nifty_service.candle_root, timeframe, "NIFTY_50")
         try:
             candles = load_candles(path)
         except FileNotFoundError:
             candles = self.candle_repository.load_candles("NIFTY", timeframe)
-        payload = backtest_nifty_live_rules(
-            candles,
-            horizon,
-            from_date=from_date,
-            to_date=to_date,
-            direction=direction,
-            target_r_multiple=target_r_multiple,
-            max_holding_bars=max_holding_bars,
-        )
+        if method == "technical":
+            payload = backtest_technical_setup(
+                candles,
+                horizon,
+                strategy=strategy,
+                from_date=from_date,
+                to_date=to_date,
+                direction=direction,
+                target_r_multiple=target_r_multiple,
+                max_holding_bars=max_holding_bars or int(HORIZON_CONFIG[horizon]["max_bars"]),
+                cost_bps_per_side=cost_bps_per_side,
+            )
+        else:
+            payload = backtest_nifty_live_rules(
+                candles,
+                horizon,
+                from_date=from_date,
+                to_date=to_date,
+                direction=direction,
+                target_r_multiple=target_r_multiple,
+                max_holding_bars=max_holding_bars,
+            )
         return to_jsonable({**payload, "candle_file": str(path)})
 
     def context_snapshots(self, limit: int = 50) -> dict[str, Any]:

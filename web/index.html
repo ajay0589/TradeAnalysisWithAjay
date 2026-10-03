@@ -22,6 +22,7 @@
       <nav class="activity-tabs" aria-label="Decision desk activities">
         <button class="tab-btn active" data-tab-target="analyze" type="button">Analyze</button>
         <button class="tab-btn" data-tab-target="nifty" type="button">NIFTY Desk</button>
+        <button class="tab-btn" data-tab-target="index" type="button">Bank Nifty &amp; Sensex</button>
         <button class="tab-btn" data-tab-target="scans" type="button">Scans</button>
         <button class="tab-btn" data-tab-target="krishna" type="button">Krishna Setup</button>
         <button class="tab-btn" data-tab-target="purple" type="button">Purple Touch</button>
@@ -644,21 +645,85 @@
 
               <section class="table-panel">
                 <div class="panel-head">
-                  <h2>NIFTY Scanner Backtest</h2>
+                  <h2>NIFTY Spot Backtest</h2>
                   <span id="niftyScannerBacktestMeta">Not run</span>
                 </div>
                 <div class="date-grid compact-controls">
-                  <div><label for="niftyBacktestHorizon">Horizon</label><select id="niftyBacktestHorizon"><option value="intraday">Intraday (15m)</option><option value="swing">Swing (1h)</option><option value="positional">Positional (Daily)</option></select></div>
+                  <div><label for="niftyBacktestMethod">Method</label><select id="niftyBacktestMethod"><option value="technical">Technical setup (next candle)</option><option value="scanner">Existing scanner rules</option></select></div>
+                  <div><label for="niftyBacktestStrategy">Entry setup</label><select id="niftyBacktestStrategy"><option value="ema_pullback">EMA20 pullback</option><option value="trend_breakout">10-candle breakout</option><option value="rsi_reversal">RSI reversal</option><option value="opening_range">Opening range (15m)</option></select></div>
+                  <div><label for="niftyBacktestHorizon">Horizon</label><select id="niftyBacktestHorizon"><option value="intraday">Intraday (15m)</option><option value="swing">Swing (1h)</option><option value="positional" selected>Positional (Daily)</option></select></div>
                   <div><label for="niftyBacktestDirection">Direction</label><select id="niftyBacktestDirection"><option value="both">Bullish &amp; Bearish</option><option value="bullish">Bullish</option><option value="bearish">Bearish</option></select></div>
                   <div><label for="niftyBacktestFrom">From</label><input id="niftyBacktestFrom" type="date" /></div>
                   <div><label for="niftyBacktestTo">To</label><input id="niftyBacktestTo" type="date" /></div>
-                  <div><label for="niftyBacktestTargetR">Target R</label><input id="niftyBacktestTargetR" type="number" min="0.5" step="0.5" value="2" /></div>
-                  <div><label for="niftyBacktestMaxBars">Maximum bars</label><input id="niftyBacktestMaxBars" type="number" min="1" step="1" value="8" /></div>
+                  <div><label for="niftyBacktestTargetR">Target R</label><input id="niftyBacktestTargetR" type="number" min="0.5" step="0.5" value="1" /></div>
+                  <div><label for="niftyBacktestMaxBars">Maximum bars</label><input id="niftyBacktestMaxBars" type="number" min="1" step="1" value="10" /></div>
+                  <div><label for="niftyBacktestCostBps">Cost per side (bps)</label><input id="niftyBacktestCostBps" type="number" min="0" max="100" step="0.5" value="2" /></div>
                 </div>
-                <button id="niftyScannerBacktestBtn">Run scanner backtest</button>
+                <button id="niftyScannerBacktestBtn">Run backtest</button>
                 <div id="niftyScannerBacktestCards" class="compact-metrics"></div>
                 <div id="niftyScannerBacktestCoverage" class="mini-list"></div>
                 <div class="wide-table"><table class="readable-table"><thead><tr><th>Entry Time</th><th>Direction</th><th>Entry</th><th>Exit Time</th><th>Exit</th><th>Open Time</th><th>R</th><th>Return</th><th>Exit Reason</th></tr></thead><tbody id="niftyScannerBacktestBody"></tbody></table></div>
+              </section>
+            </section>
+          </section>
+        </section>
+
+        <section id="tab-index" class="tab-pane" data-tab-panel="index">
+          <section class="index-monitor-band">
+            <div class="index-monitor-inner">
+              <div class="panel-head"><h2>NIFTY, Bank Nifty &amp; Sensex Monitors</h2><span id="allIndexMeta">Loading</span></div>
+              <div class="index-monitor-controls">
+                <div><label for="allNiftyInterval">NIFTY interval</label><select id="allNiftyInterval"><option value="60" selected>Every minute</option><option value="180">Every 3 minutes</option><option value="300">Every 5 minutes</option></select></div>
+                <div><label for="allBankInterval">Bank Nifty interval</label><select id="allBankInterval"><option value="60">Every minute</option><option value="180" selected>Every 3 minutes</option><option value="300">Every 5 minutes</option></select></div>
+                <div><label for="allSensexInterval">Sensex interval</label><select id="allSensexInterval"><option value="60">Every minute</option><option value="180" selected>Every 3 minutes</option><option value="300">Every 5 minutes</option></select></div>
+                <div class="button-row"><button id="allIndexStart" type="button">Start all three</button><button id="allIndexStop" type="button">Stop all three</button></div>
+              </div>
+              <div class="wide-table"><table class="readable-table"><thead><tr><th>Scanner</th><th>Status</th><th>Started</th><th>Last completed</th><th>Stopped</th><th>Telegram</th><th>Latest issue</th></tr></thead><tbody id="allIndexStatusBody"></tbody></table></div>
+              <div id="allIndexMessage" class="mini-status"></div>
+            </div>
+          </section>
+          <section class="workspace">
+            <aside class="sidebar">
+              <div class="panel">
+                <label for="indexScannerSymbol">Index</label>
+                <select id="indexScannerSymbol"><option value="BANKNIFTY">Bank Nifty</option><option value="SENSEX">Sensex</option></select>
+                <label for="indexScannerInterval">Check interval</label>
+                <select id="indexScannerInterval"><option value="60">Every minute</option><option value="180" selected>Every 3 minutes</option><option value="300">Every 5 minutes</option></select>
+                <div class="button-row">
+                  <button id="indexScannerStart" type="button">Start scanner</button>
+                  <button id="indexScannerStop" type="button">Stop</button>
+                </div>
+                <button id="indexScannerRunOnce" type="button">Analyze now</button>
+                <p id="indexScannerStatus" class="cell-note">Loading...</p>
+                <p id="indexScannerTiming" class="cell-note"></p>
+                <p id="indexScannerTelegram" class="cell-note"></p>
+              </div>
+            </aside>
+            <section class="content">
+              <section class="table-panel">
+                <div class="panel-head"><h2>Index Setup</h2><span id="indexScannerMeta"></span></div>
+                <div id="indexScannerMetrics" class="compact-metrics"></div>
+                <div id="indexScannerHorizon" class="wide-table"></div>
+              </section>
+              <section class="table-panel">
+                <div class="panel-head"><h2>Option Footprint</h2><span>Compared with previous snapshot</span></div>
+                <div id="indexScannerFootprint" class="wide-table"></div>
+              </section>
+              <section class="table-panel">
+                <div class="panel-head"><h2>Tracked Stocks</h2><span id="indexScannerLeadersMeta"></span></div>
+                <div class="wide-table"><table class="readable-table"><thead><tr><th>Stock</th><th>Weight</th><th>Technical</th><th>Option OI</th><th>Change</th><th>Put OI change</th><th>Call OI change</th></tr></thead><tbody id="indexScannerLeaders"></tbody></table></div>
+              </section>
+              <section class="table-panel">
+                <div class="panel-head"><h2>Alerts</h2><span>Entry and exit</span></div>
+                <div class="wide-table"><table class="readable-table"><thead><tr><th>Time</th><th>Horizon</th><th>Event</th><th>Trade ID</th><th>Telegram</th></tr></thead><tbody id="indexScannerAlerts"></tbody></table></div>
+              </section>
+              <section class="table-panel">
+                <div class="panel-head"><h2>Trades</h2><span>Index spot signals, not option P&amp;L</span></div>
+                <div class="wide-table"><table class="readable-table"><thead><tr><th>ID</th><th>Horizon</th><th>Direction</th><th>Entry</th><th>Entry time</th><th>Exit</th><th>Exit time</th><th>Open time</th><th>Status</th></tr></thead><tbody id="indexScannerTrades"></tbody></table></div>
+              </section>
+              <section class="table-panel">
+                <div class="panel-head"><h2>Data Issues</h2><span id="indexScannerErrorCount"></span></div>
+                <div id="indexScannerErrors" class="mini-list"></div>
               </section>
             </section>
           </section>
@@ -1928,6 +1993,15 @@
             </aside>
 
             <section class="content">
+              <section class="table-panel">
+                <div class="panel-head"><h2>Zerodha Instrument Masters</h2><span id="instrumentMasterMeta">Loading</span></div>
+                <div class="ops-body">
+                  <button id="instrumentMasterRefresh" type="button">Refresh NSE, NFO, BSE, BFO</button>
+                  <div id="instrumentMasterProgress" class="mini-status"></div>
+                  <div class="wide-table"><table class="readable-table"><thead><tr><th>Exchange</th><th>State</th><th>Last updated</th><th>Size</th><th>Latest result</th></tr></thead><tbody id="instrumentMasterBody"></tbody></table></div>
+                  <div id="instrumentMasterErrors" class="mini-list"></div>
+                </div>
+              </section>
               <section class="ops-grid">
                 <div class="table-panel ops-panel">
                   <div class="panel-head">
@@ -1982,54 +2056,6 @@
                 </div>
               </section>
 
-              <section class="table-panel">
-                <div class="panel-head">
-                  <h2>15-min Option Chain Monitor</h2>
-                  <span id="optionMonitorMeta">Idle</span>
-                </div>
-                <div class="ops-body">
-                  <div class="date-grid">
-                    <div>
-                      <label for="optionMonitorSymbols">Stocks / indexes</label>
-                      <input id="optionMonitorSymbols" list="optionMonitorSymbolList" placeholder="NIFTY, BANKNIFTY, RELIANCE" autocomplete="off" />
-                      <datalist id="optionMonitorSymbolList"></datalist>
-                    </div>
-                    <div>
-                      <label for="optionMonitorExpiry">Expiry</label>
-                      <select id="optionMonitorExpiry">
-                        <option value="">Nearest expiry</option>
-                      </select>
-                      <div id="optionMonitorExpiryStatus" class="cell-note">Enter a stock/index to load expiries.</div>
-                    </div>
-                  </div>
-                  <div class="date-grid">
-                    <div>
-                      <label for="optionMonitorInterval">Interval minutes</label>
-                      <input id="optionMonitorInterval" type="number" min="1" step="1" value="15" />
-                    </div>
-                    <div>
-                      <label for="optionMonitorKeep">Keep snapshots</label>
-                      <input id="optionMonitorKeep" type="number" min="1" step="1" value="5" />
-                    </div>
-                  </div>
-                  <div class="date-grid">
-                    <div>
-                      <label for="optionMonitorStrikes">Strikes around spot</label>
-                      <input id="optionMonitorStrikes" type="number" min="0" step="1" value="10" />
-                    </div>
-                    <label class="check-row compact-check">
-                      <input id="optionMonitorRunOnce" type="checkbox" />
-                      Pull once now
-                    </label>
-                  </div>
-                  <div class="auth-actions">
-                    <button id="startOptionMonitorBtn">Start monitor</button>
-                    <button id="stopOptionMonitorBtn">Stop monitor</button>
-                  </div>
-                  <div id="optionMonitorStatus" class="mini-status">Stores timestamped snapshots and build-up analysis under data\raw\option_chain.</div>
-                  <div id="optionMonitorResults" class="mini-list"></div>
-                </div>
-              </section>
             </section>
           </section>
         </section>

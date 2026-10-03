@@ -753,7 +753,9 @@ class AnalysisService:
     def option_expiries(self, symbol: str) -> dict[str, Any]:
         symbol = self.resolve_symbol(symbol)
         option_underlying = self._option_underlying(symbol)
-        contracts = option_contracts_for_symbol(load_instruments_csv(self.nfo_instruments_path), option_underlying)
+        option_exchange = "BFO" if symbol == "SENSEX" else "NFO"
+        instrument_path = self.nfo_instruments_path if option_exchange == "NFO" else self.nfo_instruments_path.with_name("instruments_BFO.csv")
+        contracts = option_contracts_for_symbol(load_instruments_csv(instrument_path), option_underlying, exchange=option_exchange)
         expiries = sorted({contract.expiry.isoformat() for contract in contracts})
         return {
             "symbol": symbol,
@@ -794,6 +796,7 @@ class AnalysisService:
             "expiry": snapshot.get("expiry"),
             "latest_snapshot": snapshot.get("latest_snapshot"),
             "history_snapshot": snapshot.get("history_snapshot"),
+            "archived_previous_latest": snapshot.get("archived_previous_latest"),
             "previous_snapshot": snapshot.get("previous_snapshot"),
             "previous_snapshot_found": snapshot.get("previous_snapshot_found"),
             "contracts": getattr(analysis, "contract_count", None),
@@ -2755,14 +2758,18 @@ class AnalysisService:
         max_snapshots: int = 5,
     ) -> Any:
         client = _zerodha_client()
-        instruments = load_instruments_csv(self.nfo_instruments_path)
+        option_exchange = "BFO" if symbol == "SENSEX" else "NFO"
+        instrument_path = self.nfo_instruments_path if option_exchange == "NFO" else self.nfo_instruments_path.with_name("instruments_BFO.csv")
+        instruments = load_instruments_csv(instrument_path)
         option_underlying = self._option_underlying(symbol)
-        contracts = option_contracts_for_symbol(instruments, option_underlying)
+        contracts = option_contracts_for_symbol(instruments, option_underlying, exchange=option_exchange)
         if not contracts:
-            raise ValueError(f"No NFO option contracts found for {option_underlying}")
+            raise ValueError(f"No {option_exchange} option contracts found for {option_underlying}; refresh {instrument_path}.")
 
         selected_expiry = date.fromisoformat(expiry) if expiry else nearest_expiry(contracts)
-        contracts = option_contracts_for_symbol(instruments, option_underlying, expiry=selected_expiry)
+        if selected_expiry < date.today():
+            raise ValueError(f"{option_exchange} instrument cache has only expired {option_underlying} contracts; refresh {instrument_path}.")
+        contracts = option_contracts_for_symbol(instruments, option_underlying, expiry=selected_expiry, exchange=option_exchange)
         spot_key = self._spot_quote_key(symbol)
         spot_quote = client.quotes([spot_key]).get(spot_key, {})
         spot_price = _optional_float(spot_quote.get("last_price"))
@@ -2820,7 +2827,9 @@ class AnalysisService:
             return date.fromisoformat(expiry)
         try:
             option_underlying = self._option_underlying(symbol)
-            contracts = option_contracts_for_symbol(load_instruments_csv(self.nfo_instruments_path), option_underlying)
+            option_exchange = "BFO" if symbol == "SENSEX" else "NFO"
+            instrument_path = self.nfo_instruments_path if option_exchange == "NFO" else self.nfo_instruments_path.with_name("instruments_BFO.csv")
+            contracts = option_contracts_for_symbol(load_instruments_csv(instrument_path), option_underlying, exchange=option_exchange)
             return nearest_expiry(contracts) if contracts else None
         except Exception:
             return None

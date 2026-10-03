@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
@@ -17,6 +18,9 @@ from trading_analysis.models import Candle
 
 QUOTE_LIMIT = 500
 _CANDLE_MERGE_LOCK = threading.RLock()
+_REQUEST_LOCK = threading.Lock()
+_LAST_REQUEST_AT = 0.0
+_MIN_REQUEST_GAP_SECONDS = 0.45
 HISTORICAL_MAX_DAYS = {
     "day": 1900,
     "60minute": 390,
@@ -93,6 +97,7 @@ class ZerodhaKiteClient:
         return json.loads(self._get_text(path, params=params))
 
     def _get_text(self, path: str, params: dict[str, str] | list[tuple[str, str]] | None = None) -> str:
+        global _LAST_REQUEST_AT
         query = f"?{urlencode(params)}" if params else ""
         request = Request(
             f"{self.base_url}{path}{query}",
@@ -102,8 +107,15 @@ class ZerodhaKiteClient:
             },
             method="GET",
         )
-        with urlopen(request, timeout=self.timeout_seconds) as response:
-            return response.read().decode("utf-8")
+        with _REQUEST_LOCK:
+            wait = _MIN_REQUEST_GAP_SECONDS - (time.monotonic() - _LAST_REQUEST_AT)
+            if wait > 0:
+                time.sleep(wait)
+            try:
+                with urlopen(request, timeout=self.timeout_seconds) as response:
+                    return response.read().decode("utf-8")
+            finally:
+                _LAST_REQUEST_AT = time.monotonic()
 
 
 def build_login_url(api_key: str, redirect_params: dict[str, str] | None = None) -> str:
@@ -175,15 +187,21 @@ def load_instruments_csv(path: str | Path) -> list[dict[str, str]]:
 def write_instruments_csv(path: str | Path, instruments: list[dict[str, str]]) -> None:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    if not instruments:
-        output_path.write_text("", encoding="utf-8")
-        return
-
-    fieldnames = list(instruments[0].keys())
-    with output_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(instruments)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="", delete=False,
+                                         dir=output_path.parent, prefix=f".{output_path.name}.", suffix=".tmp") as handle:
+            temporary_path = Path(handle.name)
+            if instruments:
+                writer = csv.DictWriter(handle, fieldnames=list(instruments[0].keys()))
+                writer.writeheader()
+                writer.writerows(instruments)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, output_path)
+    finally:
+        if temporary_path and temporary_path.exists():
+            temporary_path.unlink()
 
 
 def resolve_instrument_token(

@@ -9,6 +9,9 @@ from urllib.parse import parse_qs, urlparse
 
 from trading_analysis.nifty.auto_scan_service import NiftyAutoScanService
 from trading_analysis.nifty.service import NiftyDeskService
+from trading_analysis.index_scanner import IndexScannerService
+from trading_analysis.instrument_master_service import InstrumentMasterService
+from trading_analysis.all_index_monitor import AllIndexMonitor
 from trading_analysis.web_services import AnalysisService
 
 
@@ -24,6 +27,9 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
     service = AnalysisService()
     nifty_service = NiftyDeskService(analysis_service=service)
     nifty_auto_service = NiftyAutoScanService(nifty_service=nifty_service)
+    index_scanner_service = IndexScannerService(analysis_service=service)
+    instrument_master_service = InstrumentMasterService(analysis_service=service)
+    all_index_monitor = AllIndexMonitor(nifty_auto_service, index_scanner_service, instrument_master_service)
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -243,6 +249,13 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 )
             elif parsed.path == "/api/nifty/auto/status":
                 self._send_json(self.nifty_auto_service.status())
+            elif parsed.path == "/api/index-scanners/status":
+                params = parse_qs(parsed.query)
+                self._send_json(self.index_scanner_service.status(params.get("symbol", ["BANKNIFTY"])[0]))
+            elif parsed.path == "/api/instrument-masters/status":
+                self._send_json(self.instrument_master_service.status())
+            elif parsed.path == "/api/index-scanners/all/status":
+                self._send_json(self.all_index_monitor.status())
             elif parsed.path == "/api/nifty/data/latest":
                 self._send_json(self.nifty_auto_service.latest_data())
             elif parsed.path == "/api/nifty/trades":
@@ -319,6 +332,33 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 if not request_token:
                     raise ValueError("Paste the redirected Zerodha URL or request_token.")
                 self._send_json(self.service.update_zerodha_access_token(request_token))
+            elif parsed.path == "/api/index-scanners/start":
+                payload = self._read_json()
+                self._send_json(self.index_scanner_service.start(
+                    str(payload.get("symbol") or "BANKNIFTY"),
+                    int(payload.get("interval_seconds") or 180),
+                ))
+            elif parsed.path == "/api/index-scanners/stop":
+                payload = self._read_json()
+                self._send_json(self.index_scanner_service.stop(str(payload.get("symbol") or "BANKNIFTY")))
+            elif parsed.path == "/api/index-scanners/run-once":
+                payload = self._read_json()
+                self._send_json(self.index_scanner_service.run_once(
+                    str(payload.get("symbol") or "BANKNIFTY"), refresh=bool(payload.get("refresh", True))))
+            elif parsed.path == "/api/instrument-masters/refresh":
+                self._read_json()
+                if self.all_index_monitor.status()["any_running"]:
+                    raise ValueError("Stop NIFTY, Bank Nifty, and Sensex monitors before refreshing instrument masters.")
+                self._send_json(self.instrument_master_service.start_refresh())
+            elif parsed.path == "/api/index-scanners/all/start":
+                payload = self._read_json()
+                self._send_json(self.all_index_monitor.start(
+                    nifty_seconds=int(payload.get("nifty_seconds") or 60),
+                    bank_seconds=int(payload.get("bank_seconds") or 180),
+                    sensex_seconds=int(payload.get("sensex_seconds") or 180)))
+            elif parsed.path == "/api/index-scanners/all/stop":
+                self._read_json()
+                self._send_json(self.all_index_monitor.stop())
             elif parsed.path == "/api/bulk-candles":
                 payload = self._read_json()
                 self._send_json(
@@ -487,11 +527,14 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(
                     self.nifty_auto_service.scanner_backtest(
                         horizon=str(payload.get("horizon") or "intraday"),
+                        method=str(payload.get("method") or "scanner"),
+                        strategy=str(payload.get("strategy") or "ema_pullback"),
                         from_date=payload.get("from_date") or None,
                         to_date=payload.get("to_date") or None,
                         direction=str(payload.get("direction") or "both"),
                         target_r_multiple=float(payload.get("target_r_multiple") or 2.0),
                         max_holding_bars=_optional_int(payload.get("max_holding_bars")),
+                        cost_bps_per_side=float(payload.get("cost_bps_per_side") if payload.get("cost_bps_per_side") is not None else 2.0),
                     )
                 )
             elif parsed.path.startswith("/api/nifty/alerts/") and parsed.path.endswith("/ack"):

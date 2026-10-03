@@ -162,6 +162,36 @@ label {
   padding: 16px 24px 24px;
 }
 
+.index-monitor-band {
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.index-monitor-inner {
+  padding: 12px 24px;
+}
+
+.index-monitor-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(140px, 1fr)) minmax(220px, auto);
+  gap: 12px;
+  align-items: end;
+  margin: 12px 0;
+}
+
+.index-monitor-controls label {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.index-monitor-controls select {
+  width: 100%;
+}
+
+.index-monitor-controls .button-row {
+  margin: 0;
+}
+
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -1166,6 +1196,14 @@ tr:last-child td {
 }
 
 @media (max-width: 980px) {
+  .index-monitor-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .index-monitor-inner {
+    padding: 12px;
+  }
+
   .workspace,
   .report-grid,
   .ops-grid,
@@ -1201,5 +1239,11 @@ tr:last-child td {
 
   .notes {
     margin: 12px 12px 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .index-monitor-controls {
+    grid-template-columns: 1fr;
   }
 }

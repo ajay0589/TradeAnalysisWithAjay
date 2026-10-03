@@ -29,8 +29,6 @@ const state = {
   lastBacktest: null,
   strategies: [],
   lastGenericBacktest: null,
-  optionMonitorJobId: null,
-  optionMonitorPollTimer: null,
   nifty: {
     context: null,
     candidates: [],
@@ -41,6 +39,9 @@ const state = {
     alerts: [],
     autoPollTimer: null,
   },
+  indexScanner: { pollTimer: null },
+  indexGroup: { pollTimer: null },
+  instrumentMaster: { pollTimer: null },
 };
 
 const $ = (id) => document.getElementById(id);
@@ -62,6 +63,24 @@ function activateTab(name) {
     startNiftyAutoPolling();
   } else {
     stopNiftyAutoPolling();
+  }
+  if (name === "index") {
+    loadIndexScannerStatus();
+    loadAllIndexStatus();
+    if (!state.indexScanner.pollTimer) state.indexScanner.pollTimer = setInterval(loadIndexScannerStatus, 15000);
+    if (!state.indexGroup.pollTimer) state.indexGroup.pollTimer = setInterval(loadAllIndexStatus, 15000);
+  } else if (state.indexScanner.pollTimer) {
+    clearInterval(state.indexScanner.pollTimer);
+    state.indexScanner.pollTimer = null;
+    clearInterval(state.indexGroup.pollTimer);
+    state.indexGroup.pollTimer = null;
+  }
+  if (name === "data") {
+    loadInstrumentMasterStatus();
+    if (!state.instrumentMaster.pollTimer) state.instrumentMaster.pollTimer = setInterval(loadInstrumentMasterStatus, 2500);
+  } else if (state.instrumentMaster.pollTimer) {
+    clearInterval(state.instrumentMaster.pollTimer);
+    state.instrumentMaster.pollTimer = null;
   }
 }
 
@@ -294,18 +313,12 @@ async function loadSymbols() {
   $("dataStatus").textContent = `${data.total_fno_symbols || data.total} F&O stocks + ${data.total_indexes || 0} indexes tracked`;
 
   const list = $("symbolList");
-  const monitorList = $("optionMonitorSymbolList");
   list.innerHTML = "";
-  monitorList.innerHTML = "";
   data.symbols.forEach((row) => {
     const option = document.createElement("option");
     option.value = row.symbol;
     option.label = row.name || row.symbol;
     list.appendChild(option);
-    const monitorOption = document.createElement("option");
-    monitorOption.value = row.symbol;
-    monitorOption.label = row.name || row.symbol;
-    monitorList.appendChild(monitorOption);
   });
 }
 
@@ -388,52 +401,6 @@ async function loadOptionExpiries() {
   } catch (error) {
     setNotes([error.message], true);
   }
-}
-
-async function loadOptionMonitorExpiries() {
-  const firstSymbol = firstMonitorSymbol();
-  const select = $("optionMonitorExpiry");
-  select.innerHTML = `<option value="">Nearest expiry</option>`;
-  if (!firstSymbol) {
-    $("optionMonitorExpiryStatus").textContent = "Enter a stock/index to load expiries.";
-    return;
-  }
-  $("optionMonitorExpiryStatus").textContent = `Loading expiries for ${firstSymbol.toUpperCase()}...`;
-  try {
-    const data = await api(`/api/option-expiries?symbol=${encodeURIComponent(firstSymbol)}`);
-    if (data.symbol && firstSymbol.toUpperCase() !== data.symbol) {
-      replaceFirstMonitorSymbol(data.symbol);
-    }
-    (data.expiries || []).forEach((expiry) => {
-      const option = document.createElement("option");
-      option.value = expiry;
-      option.textContent = expiry === data.nearest ? `${expiry} (nearest)` : expiry;
-      select.appendChild(option);
-    });
-    $("optionMonitorExpiryStatus").textContent = (data.expiries || []).length
-      ? `${data.expiries.length} expiry date(s) loaded for ${data.symbol}.`
-      : `No expiries found for ${data.symbol}.`;
-  } catch (error) {
-    $("optionMonitorExpiryStatus").textContent = error.message;
-  }
-}
-
-function firstMonitorSymbol() {
-  return ($("optionMonitorSymbols").value || "")
-    .split(",")
-    .map((value) => value.trim())
-    .find(Boolean) || "";
-}
-
-function replaceFirstMonitorSymbol(symbol) {
-  const input = $("optionMonitorSymbols");
-  const parts = input.value.split(",").map((value) => value.trim());
-  if (!parts.length) {
-    input.value = symbol;
-    return;
-  }
-  parts[0] = symbol;
-  input.value = parts.filter(Boolean).join(", ");
 }
 
 async function loadOptionSnapshots() {
@@ -582,75 +549,6 @@ function bulkWindowSummary(job) {
   return entries
     .map(([timeframe, window]) => `${BULK_TIMEFRAME_LABELS[timeframe] || timeframe} ${window.days || "-"}d`)
     .join(", ");
-}
-
-async function startOptionMonitor() {
-  const symbols = $("optionMonitorSymbols").value.trim() || $("symbolInput").value.trim();
-  if (!symbols) {
-    setNotes(["Enter at least one stock/index for the option-chain monitor."], true);
-    return;
-  }
-  const payload = {
-    symbols,
-    expiry: $("optionMonitorExpiry").value || null,
-    interval_minutes: Number($("optionMonitorInterval").value || 15),
-    max_snapshots: Number($("optionMonitorKeep").value || 5),
-    strikes_around: Number($("optionMonitorStrikes").value || 10),
-    run_once: $("optionMonitorRunOnce").checked,
-  };
-  try {
-    const job = await postApi("/api/option-chain-monitor/start", payload);
-    state.optionMonitorJobId = job.job_id;
-    renderOptionMonitorJob(job);
-    pollOptionMonitorJob();
-    setNotes("Option-chain monitor started. Keep this web UI server running for recurring pulls.");
-  } catch (error) {
-    setNotes([error.message], true);
-  }
-}
-
-async function stopOptionMonitor() {
-  if (!state.optionMonitorJobId) {
-    $("optionMonitorStatus").textContent = "No option-chain monitor job is active.";
-    return;
-  }
-  try {
-    const job = await postApi("/api/option-chain-monitor/stop", { job_id: state.optionMonitorJobId });
-    renderOptionMonitorJob(job);
-  } catch (error) {
-    setNotes([error.message], true);
-  }
-}
-
-async function pollOptionMonitorJob() {
-  if (!state.optionMonitorJobId) return;
-  clearTimeout(state.optionMonitorPollTimer);
-  try {
-    const job = await api(`/api/job?job_id=${encodeURIComponent(state.optionMonitorJobId)}`);
-    renderOptionMonitorJob(job);
-    if (["queued", "running", "sleeping", "stopping"].includes(job.status)) {
-      state.optionMonitorPollTimer = setTimeout(pollOptionMonitorJob, 2500);
-    }
-  } catch (error) {
-    $("optionMonitorStatus").textContent = error.message;
-  }
-}
-
-function renderOptionMonitorJob(job) {
-  const nextRun = job.next_run_at ? ` | next ${fmtDateTime(job.next_run_at)}` : "";
-  $("optionMonitorMeta").textContent = `${job.status} / pulls ${job.completed || 0}`;
-  $("optionMonitorStatus").textContent = `${job.status}: ${(job.symbols || []).join(", ")} | success ${job.successes || 0} | failures ${job.failures || 0}${nextRun}`;
-  $("optionMonitorResults").innerHTML = (job.results || [])
-    .slice(-6)
-    .reverse()
-    .map((row) => `<div>${row.symbol} ${row.expiry}: ${row.contracts} contracts, PCR ${fmt(row.pcr_oi)}, max pain ${fmt(row.max_pain)}<div class="cell-note">${row.history_snapshot || ""}</div></div>`)
-    .join("");
-  if ((job.errors || []).length) {
-    $("optionMonitorResults").innerHTML += (job.errors || [])
-      .slice(-4)
-      .map((error) => `<div class="error">${error}</div>`)
-      .join("");
-  }
 }
 
 async function saveReport() {
@@ -3439,12 +3337,15 @@ async function runNiftyScannerBacktest() {
   $("niftyScannerBacktestMeta").textContent = "Running";
   try {
     const data = await postApi("/api/nifty/scanner-backtest", {
+      method: $("niftyBacktestMethod").value,
+      strategy: $("niftyBacktestStrategy").value,
       horizon: $("niftyBacktestHorizon").value,
       direction: $("niftyBacktestDirection").value,
       from_date: $("niftyBacktestFrom").value || null,
       to_date: $("niftyBacktestTo").value || null,
       target_r_multiple: Number($("niftyBacktestTargetR").value || 2),
       max_holding_bars: Number($("niftyBacktestMaxBars").value || 8),
+      cost_bps_per_side: Number($("niftyBacktestCostBps").value || 0),
     });
     state.nifty.scannerBacktest = data;
     renderNiftyScannerBacktest(data);
@@ -3456,7 +3357,8 @@ async function runNiftyScannerBacktest() {
 
 function renderNiftyScannerBacktest(data) {
   const metrics = data.metrics || {};
-  $("niftyScannerBacktestMeta").textContent = `${fmtInt(data.trade_count)} trade(s) / ${data.horizon} / ${data.timeframe}`;
+  const method = data.method === "technical" ? (data.strategy || "technical setup").replaceAll("_", " ") : "scanner rules";
+  $("niftyScannerBacktestMeta").textContent = `${fmtInt(data.trade_count)} trade(s) / ${data.horizon} / ${method}`;
   $("niftyScannerBacktestCards").innerHTML = [
     ["Trades", fmtInt(data.trade_count)],
     ["Win Rate", fmtPct(metrics.win_rate)],
@@ -3464,6 +3366,7 @@ function renderNiftyScannerBacktest(data) {
     ["Profit Factor", fmt(metrics.profit_factor)],
     ["Net R", fmt(metrics.net_r)],
     ["Max Drawdown", `${fmt(metrics.max_drawdown_r)} R`],
+    ...(data.data_through ? [["Data Through", data.horizon === "positional" ? String(data.data_through).slice(0, 10) : fmtDateTime(data.data_through)]] : []),
   ]
     .map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${value}</strong></div>`)
     .join("");
@@ -3578,6 +3481,168 @@ function fmtDateTime(value) {
     second: "2-digit",
     timeZone: "Asia/Kolkata",
   })} IST`;
+}
+
+function indexScannerSymbol() {
+  return $("indexScannerSymbol").value;
+}
+
+async function loadAllIndexStatus() {
+  try {
+    renderAllIndexStatus(await api("/api/index-scanners/all/status"));
+  } catch (error) {
+    $("allIndexMessage").textContent = error.message;
+    $("allIndexMessage").classList.add("points-negative");
+  }
+}
+
+function renderAllIndexStatus(data) {
+  const rows = data.scanners || {};
+  const running = Object.values(rows).filter((row) => row.running).length;
+  $("allIndexMeta").textContent = `${running} of 3 running | masters ${data.masters_ready ? "ready" : "need refresh"}`;
+  $("allIndexStart").disabled = data.all_running;
+  $("allIndexStop").disabled = !data.any_running;
+  $("allIndexStatusBody").innerHTML = ["NIFTY", "BANKNIFTY", "SENSEX"].map((symbol) => {
+    const row = rows[symbol] || {};
+    const issue = (row.errors || []).at(-1) || "-";
+    return `<tr><td>${escapeHtml(symbol)}</td><td>${row.running ? "Running" : "Stopped"}<div class="cell-note">${escapeHtml(row.phase || "-")}</div></td><td>${fmtDateTime(row.started_at)}</td><td>${fmtDateTime(row.last_cycle_at)}</td><td>${fmtDateTime(row.stopped_at)}</td><td>${row.telegram_configured ? "Configured" : "Not configured"}</td><td>${escapeHtml(issue)}</td></tr>`;
+  }).join("");
+  if (!data.masters_ready && !$("allIndexMessage").classList.contains("points-negative")) $("allIndexMessage").textContent = "Refresh instrument masters in Data Ops before starting all three.";
+  else if (!$("allIndexMessage").classList.contains("points-negative")) $("allIndexMessage").textContent = "";
+}
+
+async function controlAllIndexScanners(action) {
+  const message = $("allIndexMessage");
+  message.classList.remove("points-negative");
+  message.textContent = `${action === "start" ? "Starting" : "Stopping"} all three scanners...`;
+  try {
+    const payload = action === "start" ? {
+      nifty_seconds: Number($("allNiftyInterval").value),
+      bank_seconds: Number($("allBankInterval").value),
+      sensex_seconds: Number($("allSensexInterval").value),
+    } : {};
+    const result = await postApi(`/api/index-scanners/all/${action}`, payload);
+    renderAllIndexStatus(result);
+    if (action === "stop" && Object.keys(result.stop_errors || {}).length) {
+      message.textContent = Object.entries(result.stop_errors).map(([symbol, error]) => `${symbol}: ${error}`).join("; ");
+      message.classList.add("points-negative");
+    } else {
+      const missingChats = result.unconfigured_telegram || [];
+      message.textContent = action === "start"
+        ? `All three monitors started.${missingChats.length ? ` Telegram not configured for ${missingChats.join(", ")}.` : ""}`
+        : "All three monitors stopped.";
+    }
+    loadIndexScannerStatus();
+  } catch (error) {
+    message.textContent = error.message;
+    message.classList.add("points-negative");
+    loadAllIndexStatus();
+  }
+}
+
+async function loadInstrumentMasterStatus() {
+  try {
+    renderInstrumentMasters(await api("/api/instrument-masters/status"));
+  } catch (error) {
+    $("instrumentMasterProgress").textContent = error.message;
+    $("instrumentMasterProgress").classList.add("points-negative");
+  }
+}
+
+function renderInstrumentMasters(data) {
+  const job = data.job || {};
+  $("instrumentMasterMeta").textContent = data.ready_for_all ? "All ready" : "Refresh required";
+  $("instrumentMasterRefresh").disabled = Boolean(job.running);
+  $("instrumentMasterProgress").textContent = job.running ? `Refreshing ${job.current_exchange || "instrument files"}...` : `Last completed ${fmtDateTime(job.completed_at)}`;
+  $("instrumentMasterProgress").classList.remove("points-negative");
+  $("instrumentMasterBody").innerHTML = ["NSE", "NFO", "BSE", "BFO"].map((exchange) => {
+    const row = data.masters?.[exchange] || {};
+    const count = job.results?.[exchange];
+    return `<tr><td>${exchange}</td><td>${escapeHtml(row.state || "missing")}</td><td>${fmtDateTime(row.updated_at)}</td><td>${row.size_bytes ? `${fmtInt(row.size_bytes)} bytes` : "-"}</td><td>${count == null ? "-" : `${fmtInt(count)} instruments`}</td></tr>`;
+  }).join("");
+  $("instrumentMasterErrors").innerHTML = Object.entries(job.errors || {}).map(([exchange, error]) => `<div>${escapeHtml(exchange)}: ${escapeHtml(error)}</div>`).join("");
+  if (state.indexGroup.pollTimer) loadAllIndexStatus();
+}
+
+async function refreshInstrumentMasters() {
+  $("instrumentMasterProgress").textContent = "Starting instrument refresh...";
+  try {
+    renderInstrumentMasters(await postApi("/api/instrument-masters/refresh", {}));
+  } catch (error) {
+    $("instrumentMasterProgress").textContent = error.message;
+    $("instrumentMasterProgress").classList.add("points-negative");
+  }
+}
+
+function indexScannerMessage(message, error = false) {
+  const node = $("indexScannerStatus");
+  node.textContent = message;
+  node.classList.toggle("points-negative", error);
+}
+
+async function loadIndexScannerStatus() {
+  const symbol = indexScannerSymbol();
+  try {
+    const data = await api(`/api/index-scanners/status?symbol=${encodeURIComponent(symbol)}`);
+    if (symbol === indexScannerSymbol()) renderIndexScanner(data);
+  } catch (error) {
+    indexScannerMessage(error.message, true);
+  }
+}
+
+async function controlIndexScanner(action) {
+  const symbol = indexScannerSymbol();
+  indexScannerMessage(action === "run-once" ? "Analyzing cached data..." : `${action}ing scanner...`);
+  try {
+    const payload = { symbol, interval_seconds: Number($("indexScannerInterval").value) };
+    if (action === "run-once") payload.refresh = true;
+    const result = await postApi(`/api/index-scanners/${action}`, payload);
+    if (symbol === indexScannerSymbol()) {
+      if (result.status === "failed") indexScannerMessage((result.errors || []).join("; "), true);
+      await loadIndexScannerStatus();
+    }
+  } catch (error) {
+    indexScannerMessage(error.message, true);
+  }
+}
+
+function indexScannerTableRow(message, columns) {
+  return `<tr><td colspan="${columns}" class="cell-note">${escapeHtml(message)}</td></tr>`;
+}
+
+function renderIndexScanner(data) {
+  const result = data.last_result || {};
+  const horizons = result.horizons || {};
+  const history = data.history || {};
+  const marketState = data.market_hours ? "market open" : data.scan_window ? "post-close finalization" : "market closed";
+  indexScannerMessage(`${data.running ? "Running" : "Stopped"} | ${data.phase || "idle"} | ${marketState}`);
+  $("indexScannerStart").disabled = data.running;
+  $("indexScannerStop").disabled = !data.running;
+  if (data.running && data.interval_seconds) $("indexScannerInterval").value = String(data.interval_seconds);
+  $("indexScannerTiming").textContent = `Started ${fmtDateTime(data.started_at)} | Last cycle ${fmtDateTime(data.last_cycle_at)} | Next ${fmtDateTime(data.next_run)} | Stopped ${fmtDateTime(data.stopped_at)}`;
+  $("indexScannerTelegram").textContent = data.telegram_destination ? `Telegram: ${data.telegram_destination}` : "Telegram: no destination configured";
+  $("indexScannerMeta").textContent = `${data.profile.label} | ${fmtDateTime(result.as_of)}`;
+  $("indexScannerMetrics").innerHTML = [
+    ["New entries", result.entries_created ?? 0], ["New exits", result.exits_created ?? 0],
+    ["Open trades", (history.trades || []).filter((row) => row.status === "open").length],
+    ["Tracked stocks", (data.profile.leaders || []).length],
+  ].map(([label, value]) => `<div class="compact-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+  const horizonRows = ["intraday", "swing", "positional"].map((name) => {
+    const row = horizons[name];
+    if (!row) return indexScannerTableRow(`${name}: no completed scan`, 5);
+    return `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(row.technical?.bias || "-")}<div class="cell-note">${fmtDateTime(row.technical?.candle_time)}</div></td><td>${escapeHtml(row.option?.bias || "-")}</td><td>${row.confirmation?.passed ? "Passed" : "Waiting"} (${fmtInt(row.confirmation?.technical_aligned || 0)} technical / ${fmtInt(row.confirmation?.option_aligned || 0)} option / ${fmtInt(row.confirmation?.both_aligned || 0)} both)</td><td>${escapeHtml(row.reason || "-")}</td></tr>`;
+  });
+  $("indexScannerHorizon").innerHTML = `<table class="readable-table"><thead><tr><th>Horizon</th><th>Technicals</th><th>Option OI</th><th>Tracked stocks</th><th>Result</th></tr></thead><tbody>${horizonRows.join("")}</tbody></table>`;
+  const option = horizons.intraday?.option || {};
+  $("indexScannerFootprint").innerHTML = `<table class="readable-table"><thead><tr><th>Bias</th><th>PCR (OI)</th><th>Put OI change</th><th>Call OI change</th><th>Contracts matched</th><th>Current snapshot</th><th>Previous snapshot</th></tr></thead><tbody><tr><td>${escapeHtml(option.bias || "unavailable")}</td><td>${fmt(option.pcr_oi)}</td><td>${fmtInt(option.put_oi_change)}</td><td>${fmtInt(option.call_oi_change)}</td><td>${fmtInt(option.matched_contracts)}</td><td>${fmtDateTime(option.snapshot_time)}</td><td>${fmtDateTime(option.previous_time)}</td></tr></tbody></table><p class="cell-note">${escapeHtml(option.reason || "OI changes indicate positioning, not verified buyer or seller identity.")}</p>`;
+  const leaders = horizons.intraday?.constituents || [];
+  $("indexScannerLeadersMeta").textContent = data.profile.source_date ? `Weights as of ${data.profile.source_date}` : "Selected leaders, unweighted";
+  $("indexScannerLeaders").innerHTML = leaders.length ? leaders.map((row) => `<tr><td>${escapeHtml(row.symbol)}</td><td>${row.weight_pct == null ? "-" : fmtPct(row.weight_pct)}</td><td>${escapeHtml(row.technical_bias)}</td><td>${escapeHtml(row.option_bias)}</td><td>${fmtPct(row.change_pct)}</td><td>${fmtInt(row.put_oi_change)}</td><td>${fmtInt(row.call_oi_change)}</td></tr>`).join("") : indexScannerTableRow("No constituent analysis yet", 7);
+  $("indexScannerAlerts").innerHTML = (history.alerts || []).length ? history.alerts.map((row) => `<tr><td>${fmtDateTime(row.created_at)}</td><td>${escapeHtml(row.horizon)}</td><td>${escapeHtml(row.event_kind)}</td><td>${escapeHtml(row.trade_id)}</td><td>${escapeHtml(row.telegram_status)}</td></tr>`).join("") : indexScannerTableRow("No alerts yet", 5);
+  $("indexScannerTrades").innerHTML = (history.trades || []).length ? history.trades.map((row) => `<tr><td>${escapeHtml(row.trade_id)}</td><td>${escapeHtml(row.horizon)}</td><td>${escapeHtml(row.direction)}</td><td>${fmt(row.entry_price)}</td><td>${fmtDateTime(row.entry_time)}</td><td>${fmt(row.exit_price)}</td><td>${fmtDateTime(row.exit_time)}</td><td>${row.open_seconds == null ? "Open" : escapeHtml(durationMinutes(row.open_seconds / 60))}</td><td>${escapeHtml(row.status)}</td></tr>`).join("") : indexScannerTableRow("No trades yet", 9);
+  const errors = result.errors || data.errors || [];
+  $("indexScannerErrorCount").textContent = `${errors.length} issue(s)`;
+  $("indexScannerErrors").innerHTML = errors.length ? errors.map((message) => `<div>${escapeHtml(message)}</div>`).join("") : "No data issues reported";
 }
 
 function parseDateTime(value) {
@@ -3697,17 +3762,22 @@ $("niftyAutoStartBtn").addEventListener("click", startNiftyAutoScan);
 $("niftyAutoStopBtn").addEventListener("click", stopNiftyAutoScan);
 $("niftyAutoRunOnceBtn").addEventListener("click", runNiftyAutoOnce);
 $("niftyScannerBacktestBtn").addEventListener("click", runNiftyScannerBacktest);
-$("niftyBacktestHorizon").addEventListener("change", () => {
+function syncNiftyBacktestControls(resetValues = false) {
+  const technical = $("niftyBacktestMethod").value === "technical";
+  $("niftyBacktestStrategy").parentElement.hidden = !technical;
+  $("niftyBacktestCostBps").parentElement.hidden = !technical;
+  const openingRange = $("niftyBacktestStrategy").querySelector('option[value="opening_range"]');
+  openingRange.disabled = $("niftyBacktestHorizon").value !== "intraday";
+  if (openingRange.disabled && $("niftyBacktestStrategy").value === "opening_range") {
+    $("niftyBacktestStrategy").value = "ema_pullback";
+  }
+  if (resetValues) $("niftyBacktestTargetR").value = technical ? 1 : 2;
   const defaults = { intraday: 8, swing: 12, positional: 10 };
-  $("niftyBacktestMaxBars").value = defaults[$("niftyBacktestHorizon").value] || 8;
-});
-$("startOptionMonitorBtn").addEventListener("click", startOptionMonitor);
-$("stopOptionMonitorBtn").addEventListener("click", stopOptionMonitor);
-$("optionMonitorSymbols").addEventListener("keydown", (event) => {
-  if (event.key === "Enter") loadOptionMonitorExpiries();
-});
-$("optionMonitorSymbols").addEventListener("blur", loadOptionMonitorExpiries);
-$("optionMonitorSymbols").addEventListener("change", loadOptionMonitorExpiries);
+  if (resetValues) $("niftyBacktestMaxBars").value = defaults[$("niftyBacktestHorizon").value] || 8;
+}
+$("niftyBacktestMethod").addEventListener("change", () => syncNiftyBacktestControls(true));
+$("niftyBacktestHorizon").addEventListener("change", () => syncNiftyBacktestControls(true));
+syncNiftyBacktestControls();
 $("symbolInput").addEventListener("keydown", (event) => {
   if (event.key === "Enter") analyze();
 });
@@ -3729,6 +3799,13 @@ document.querySelectorAll("[data-tab-target]").forEach((button) => {
   button.setAttribute("aria-selected", button.classList.contains("active") ? "true" : "false");
   button.addEventListener("click", () => activateTab(button.dataset.tabTarget));
 });
+$("indexScannerSymbol").addEventListener("change", loadIndexScannerStatus);
+$("indexScannerStart").addEventListener("click", () => controlIndexScanner("start"));
+$("indexScannerStop").addEventListener("click", () => controlIndexScanner("stop"));
+$("indexScannerRunOnce").addEventListener("click", () => controlIndexScanner("run-once"));
+$("allIndexStart").addEventListener("click", () => controlAllIndexScanners("start"));
+$("allIndexStop").addEventListener("click", () => controlAllIndexScanners("stop"));
+$("instrumentMasterRefresh").addEventListener("click", refreshInstrumentMasters);
 enhanceCollapsibleSections();
 updatePurpleDefaults();
 setPurpleBacktestDefaults();

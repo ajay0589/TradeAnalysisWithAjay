@@ -288,7 +288,7 @@ UI usage:
 6. Click `Suggest Strategies` to see strategy candidates with suitability score, reasons, risks, and required confirmations.
 7. Start `NIFTY Live Scanner` during market hours to monitor Intraday, Swing, and Positional entries and exits.
 8. Review `NIFTY Trades: Open & Closed` for entry time, exit time, open duration, stop, target, and directional result.
-9. Use `NIFTY Scanner Backtest` to test the closed-candle rules by date range, horizon, direction, target R, and maximum holding bars.
+9. Use `NIFTY Spot Backtest` to compare technical-only setups or the existing scanner rules by date range, horizon, direction, target R, and maximum holding bars.
 
 CLI examples:
 
@@ -382,6 +382,17 @@ NIFTY scanner backtest:
 - Historical option-chain confirmation is not replayed unless timestamped historical snapshots are available.
 - This is a NIFTY spot signal test, not option premium P&L; brokerage, slippage, IV decay, margin, and strike-level payoff are not modeled.
 
+Technical-only NIFTY spot backtest:
+
+1. In `NIFTY Desk` > `NIFTY Spot Backtest`, select `Technical setup (next candle)`.
+2. For the daily candidate, select `EMA20 pullback`, `Positional (Daily)`, `Bullish & Bearish`, `Target R = 1`, `Maximum bars = 10`, and `Cost per side = 2 bps`.
+3. Run separate date windows: `2023-01-01` to `2024-12-31` (development), `2025-01-01` to `2025-12-31` (validation), and `2026-01-01` onward (holdout). Compare trade counts, win rate, average R, profit factor, and max drawdown. A date range alone does not change indicator warmup; calculations use prior cached candles.
+4. Other entry setups are `10-candle breakout`, `RSI reversal`, and `Opening range (15m)` (Intraday only). `Existing scanner rules` reproduces the earlier backtest and retains its original assumptions.
+
+For the EMA20 pullback, bullish requires a previous close at/below EMA20, then a green close above EMA20 with EMA20 above EMA50 and RSI14 from 52 to 70. Bearish reverses those conditions with RSI14 from 30 to 48. Signals use the completed candle; execution is simulated at the next candle open with a 1 ATR14 stop, selected R target, stop-first resolution if both prices are touched, and a maximum holding period. Intraday research trades close by the end of the session. A daily stop/target exit is timestamped at 15:30 IST because daily OHLC does not reveal the exact intraday hit time. The cost input is a spot-equivalent stress assumption, not a measured option fill. NIFTY index volume in the cached data is zero, so this research does not use volume-based VWAP.
+
+Research comparison can be reproduced from the command line with `python -m scripts.research_nifty_technicals`. These technical research rules do not alter live NIFTY alerts. Both UI backtest methods use NIFTY 50 spot index candles in `data/raw/candles`; neither uses NIFTY futures candles or option premium returns.
+
 Auto-scan limitations:
 
 - Alerts are read-only signals and require manual risk review.
@@ -427,6 +438,23 @@ For NSE, use official pages for public/manual checks and authorized NSE Data & A
 3. Review only the highest-quality setups.
 4. Check events, results, news, market regime, and option liquidity manually.
 5. Record the decision and outcome in your journal.
+
+## Bank Nifty and Sensex scanner
+
+Open `Bank Nifty & Sensex` to start either index scanner independently or use `Start all three` for NIFTY, Bank Nifty, and Sensex. They run on independent schedules during exchange hours, with a 15-minute post-close finalization window for the Bank Nifty/Sensex Daily candles. Broker requests are serialized and rate-limited across the three; cached-data analysis can run independently. `Stop all three` stops these index monitors only. Each cycle refreshes available day, 1-hour, and 15-minute index/leader candles and option-chain snapshots, then checks intraday, swing, and positional closed-candle signals. `Analyze now` refreshes data and shows why a setup passed or waited; outside that scan window it creates no new alerts. The tab shows snapshot-to-snapshot OI changes, sampled constituent confirmation, entry/exit alerts, and paper trade duration. No order is placed.
+
+Before starting all three, authenticate Zerodha, then open `Data Ops` and click `Refresh NSE, NFO, BSE, BFO` under `Zerodha Instrument Masters`. Wait until all four show `fresh`. The refresh runs in the background and preserves an existing file if an exchange download fails. Stop index monitors before refreshing masters. A master older than seven days is blocked; refreshing each trading day is preferable. These command-line equivalents remain available:
+
+```powershell
+python -m trading_analysis.cli zerodha-instruments --exchange NSE --output data\raw\zerodha\instruments_NSE.csv
+python -m trading_analysis.cli zerodha-instruments --exchange NFO --output data\raw\zerodha\instruments_NFO.csv
+python -m trading_analysis.cli zerodha-instruments --exchange BSE --output data\raw\zerodha\instruments_BSE.csv
+python -m trading_analysis.cli zerodha-instruments --exchange BFO --output data\raw\zerodha\instruments_BFO.csv
+```
+
+Set `BANKNIFTY_TELEGRAM_BOT_TOKEN` and `BANKNIFTY_TELEGRAM_CHAT_ID`, and likewise `SENSEX_...`, in local `.env` for separate alert chats. If absent, the configured `NIFTY_...` destination is used. Without either destination, alerts stay in the UI and database with `not_configured` delivery status.
+
+The Bank Nifty sample uses the five dated constituents and weights in `config/index_scanner_leaders.json`; update them when the official factsheet changes. Sensex uses selected leaders without index-weight claims. An OI increase paired with falling option premium is only an *inference* of writing pressure, not proof of trader identity or future direction. Alerts require aligned index trend, two fresh option snapshots, and constituent breadth; missing or stale inputs block alerts. Signals use index spot candles, not option premium P&L. Validate results prospectively before trading.
 
 ## Roadmap
 
