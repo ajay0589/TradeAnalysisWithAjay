@@ -6,6 +6,7 @@ import threading
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -14,6 +15,7 @@ from trading_analysis.nifty.alert_backtest import backtest_nifty_alert_signals
 from trading_analysis.nifty.iv_context import build_nifty_iv_context
 from trading_analysis.nifty.auto_scan_service import NiftyAutoScanService
 from trading_analysis.nifty.live_scanner import backtest_nifty_live_rules, build_live_entry_signal, evaluate_live_exit
+from trading_analysis.notifications.telegram import TelegramNotifier
 from trading_analysis.scheduler.alerts import generate_nifty_alerts
 from trading_analysis.scheduler.jobs import NiftyMarketJobs
 from trading_analysis.scheduler.market_hours import is_market_hours
@@ -34,6 +36,14 @@ from trading_analysis.web_services import AnalysisService
 
 
 class NiftyAutoScanTests(unittest.TestCase):
+    def setUp(self) -> None:
+        telegram_guard = patch(
+            "trading_analysis.notifications.telegram.urlopen",
+            side_effect=AssertionError("Tests must never contact Telegram."),
+        )
+        telegram_guard.start()
+        self.addCleanup(telegram_guard.stop)
+
     def test_market_hours_detection_for_weekday_open(self) -> None:
         now = datetime(2026, 7, 6, 9, 20, tzinfo=ZoneInfo("Asia/Kolkata"))
 
@@ -619,6 +629,7 @@ class NiftyAutoScanTests(unittest.TestCase):
                 candle_repository=candle_repo,
                 option_repository=option_repo,
                 iv_repository=iv_repo,
+                notifier=TelegramNotifier(),
             )
 
             payload = jobs.run_nifty_opportunity_scan_job(mode="auto", min_score=70)
@@ -627,6 +638,7 @@ class NiftyAutoScanTests(unittest.TestCase):
             self.assertEqual(alert["metadata"]["latest_option_snapshot_id"], snapshot_id)
             self.assertEqual(alert["metadata"]["latest_iv_observation_id"], iv_id)
             self.assertIsNotNone(alert["metadata"]["latest_candle_timestamp"])
+            self.assertFalse(payload["result"]["telegram"]["configured"])
 
 
 class FakeJobs:
