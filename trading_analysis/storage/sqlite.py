@@ -76,6 +76,7 @@ def initialize_database(path: str | Path = DEFAULT_DB_PATH) -> None:
         _ensure_column(conn, "nifty_alerts", "event_kind", "TEXT")
         _ensure_column(conn, "nifty_alerts", "trade_id", "TEXT")
         _ensure_column(conn, "nifty_alerts", "telegram_status", "TEXT")
+        _ensure_column(conn, "nifty_alerts", "telegram_error", "TEXT")
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_nifty_alerts_recent
@@ -644,9 +645,10 @@ class NiftyAlertRepository:
             row = conn.execute("SELECT * FROM nifty_alerts WHERE id = ?", (alert_id,)).fetchone()
         return _alert_row(row) if row else {"id": alert_id, "updated": False}
 
-    def update_telegram_status(self, alert_id: int, status: str) -> dict[str, Any]:
+    def update_telegram_status(self, alert_id: int, status: str, error: str | None = None) -> dict[str, Any]:
         with _connection(self.db_path) as conn:
-            conn.execute("UPDATE nifty_alerts SET telegram_status = ? WHERE id = ?", (status, alert_id))
+            conn.execute("UPDATE nifty_alerts SET telegram_status = ?, telegram_error = ? WHERE id = ?",
+                         (status, error, alert_id))
             row = conn.execute("SELECT * FROM nifty_alerts WHERE id = ?", (alert_id,)).fetchone()
         return _alert_row(row) if row else {"id": alert_id, "updated": False}
 
@@ -2243,6 +2245,7 @@ def _alert_row(row: sqlite3.Row) -> dict[str, Any]:
         "event_kind": row["event_kind"] if "event_kind" in row.keys() else None,
         "trade_id": row["trade_id"] if "trade_id" in row.keys() else None,
         "telegram_status": row["telegram_status"] if "telegram_status" in row.keys() else None,
+        "telegram_error": row["telegram_error"] if "telegram_error" in row.keys() else None,
         "is_active": bool(row["is_active"]),
         "acknowledged_at": row["acknowledged_at"],
     }

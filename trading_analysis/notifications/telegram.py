@@ -4,7 +4,7 @@ import json
 import os
 from dataclasses import dataclass
 from typing import Any
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from trading_analysis.config import load_dotenv
@@ -45,11 +45,23 @@ class TelegramNotifier:
         try:
             with urlopen(request, timeout=self.timeout_seconds) as response:
                 body = json.loads(response.read().decode("utf-8"))
-            return {"sent": bool(body.get("ok")), "configured": True, "response": body}
+            error = None if body.get("ok") else str(body.get("description") or "Telegram rejected the message")
+            return {"sent": bool(body.get("ok")), "configured": True, "response": body,
+                    "error": error.replace(self.bot_token, "[redacted]") if error else None}
+        except HTTPError as exc:
+            try:
+                body = json.loads(exc.read().decode("utf-8"))
+                reason = str(body.get("description") or exc.reason)
+            except (ValueError, UnicodeError):
+                reason = str(exc.reason)
+            finally:
+                exc.close()
+            return {"sent": False, "configured": True,
+                    "error": f"HTTP {exc.code}: {reason}".replace(self.bot_token, "[redacted]")}
         except URLError as exc:
-            return {"sent": False, "configured": True, "error": str(exc.reason)}
+            return {"sent": False, "configured": True, "error": str(exc.reason).replace(self.bot_token, "[redacted]")}
         except Exception as exc:
-            return {"sent": False, "configured": True, "error": str(exc)}
+            return {"sent": False, "configured": True, "error": str(exc).replace(self.bot_token, "[redacted]")}
 
 
 def purple_alert_message(alert: dict[str, Any], trade: dict[str, Any] | None = None) -> str:

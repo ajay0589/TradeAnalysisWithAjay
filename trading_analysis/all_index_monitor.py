@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from trading_analysis.index_scanner import IndexScannerService
 from trading_analysis.instrument_master_service import InstrumentMasterService
@@ -19,11 +21,21 @@ class AllIndexMonitor:
         nifty = self.nifty.status()
         bank = self.indexes.status("BANKNIFTY")
         sensex = self.indexes.status("SENSEX")
-        scanners = {"NIFTY": {"running": nifty["running"], "phase": ", ".join(nifty["active_jobs"]) or "waiting",
+        recent_delivery = next((alert for alert in nifty.get("recent_alerts") or []
+                                if alert.get("telegram_status") in {"sent", "failed"}), None)
+        recent_failure = recent_delivery if recent_delivery and recent_delivery.get("telegram_status") == "failed" else None
+        nifty_progress = nifty.get("entry_scan_progress") or {}
+        scanners = {"NIFTY": {"running": nifty["running"], "scan_active": bool(nifty["active_jobs"]),
+                               "phase": ", ".join(nifty["active_jobs"]) or "waiting",
                                "started_at": nifty["started_at"], "stopped_at": nifty["stopped_at"],
-                               "last_cycle_at": nifty["last_cycle_completed_at"],
+                               "last_cycle_at": nifty.get("last_cycle_completed_at") or nifty.get("last_job_run"),
+                               "next_run": (nifty.get("next_runs") or {}).get("opportunity_scan") if nifty["running"] else None,
                                "telegram_configured": TelegramNotifier.from_env("NIFTY_").configured(),
-                               "errors": nifty["errors"]},
+                               "errors": nifty["errors"] + (["Telegram: " + str(recent_failure.get("telegram_error") or "delivery failed")]
+                                                              if recent_failure else []),
+                               "progress": {"current": nifty_progress.get("current") or ", ".join(nifty["active_jobs"]),
+                                            "completed": nifty_progress.get("completed", 0),
+                                            "total": nifty_progress.get("total", 0)}},
                     "BANKNIFTY": self._index_row(bank), "SENSEX": self._index_row(sensex)}
         return {"all_running": all((nifty["running"], bank["running"], sensex["running"])),
                 "any_running": any((nifty["running"], bank["running"], sensex["running"])),
@@ -33,11 +45,12 @@ class AllIndexMonitor:
 
     @staticmethod
     def _index_row(state: dict[str, Any]) -> dict[str, Any]:
-        return {"running": state["running"], "phase": state["phase"],
+        return {"running": state["running"], "scan_active": state.get("scan_active", False), "phase": state["phase"],
                 "started_at": state["started_at"], "stopped_at": state["stopped_at"],
                 "last_cycle_at": state["last_cycle_at"],
                 "telegram_configured": bool(state["telegram_destination"]),
-                "errors": state["errors"]}
+                "errors": state["errors"], "progress": state.get("progress"),
+                "next_run": state.get("next_run")}
 
     def start(self, nifty_seconds: int = 60, bank_seconds: int = 180, sensex_seconds: int = 180) -> dict[str, Any]:
         if not all(60 <= value <= 3600 for value in (nifty_seconds, bank_seconds, sensex_seconds)):
@@ -82,3 +95,55 @@ class AllIndexMonitor:
         result = self.status()
         result["stop_errors"] = errors
         return result
+
+    @staticmethod
+    def test_telegram(symbol: str) -> dict[str, Any]:
+        selected = symbol.upper()
+        if selected not in {"NIFTY", "BANKNIFTY", "SENSEX"}:
+            raise ValueError("Choose NIFTY, BANKNIFTY, or SENSEX.")
+        notifier = TelegramNotifier.from_env(f"{selected}_")
+        destination = f"{selected}_TELEGRAM_CHAT_ID"
+        if selected != "NIFTY" and not notifier.configured():
+            notifier = TelegramNotifier.from_env("NIFTY_")
+            destination = "NIFTY_TELEGRAM_CHAT_ID"
+        if not notifier.configured():
+            return {"symbol": selected, "sent": False, "error": f"{selected} Telegram bot token or chat ID is not configured"}
+        result = notifier.send_message(f"{selected} scanner TEST MESSAGE (not a trade alert).")
+        return {"symbol": selected, "destination": destination, "sent": bool(result.get("sent")),
+                "error": result.get("error")}
+
+    def diagnostics(self, day: str | None = None) -> dict[str, Any]:
+        selected = date.fromisoformat(day) if day else datetime.now(ZoneInfo("Asia/Kolkata")).date()
+        stamp = selected.isoformat()
+        jobs = [self._nifty_job(row) for row in self.nifty.job_repository.latest_jobs(limit=10000)
+                if str(row.get("started_at") or "").startswith(stamp)]
+        alerts = [row for row in self.nifty.alert_repository.list_recent_alerts(limit=5000)
+                  if str(row.get("created_at") or "").startswith(stamp)]
+        trades = [row for row in self.nifty.trade_repository.list_trades(status="all", limit=5000)
+                  if str(row.get("created_at") or "").startswith(stamp)
+                  or str(row.get("updated_at") or "").startswith(stamp)]
+        return {"schema_version": 1, "date": stamp, "timezone": "Asia/Kolkata",
+                "generated_at": datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(timespec="seconds"),
+                "note": "Read-only spot-signal diagnostics; no broker tokens or option orders.",
+                "NIFTY": {"jobs": jobs, "alerts": alerts, "trades": trades},
+                "BANKNIFTY": self.indexes.repository.diagnostics("BANKNIFTY", stamp),
+                "SENSEX": self.indexes.repository.diagnostics("SENSEX", stamp)}
+
+    @staticmethod
+    def _nifty_job(job: dict[str, Any]) -> dict[str, Any]:
+        result = job.get("result") or {}
+        if job.get("job_name") == "run_nifty_opportunity_scan":
+            detail = {"horizons": result.get("horizons"), "alerts_created": result.get("alerts_created"),
+                      "telegram": result.get("telegram"), "warnings": result.get("warnings"), "errors": result.get("errors")}
+        elif job.get("job_name") == "run_nifty_exit_scan":
+            detail = {"open_checked": result.get("open_checked"), "trades_closed": result.get("trades_closed"),
+                      "telegram": result.get("telegram")}
+        elif job.get("job_name") == "update_nifty_candles":
+            detail = {"candle_db": result.get("candle_db"), "warnings": result.get("warnings"),
+                      "errors": result.get("errors")}
+        else:
+            detail = {key: result.get(key) for key in ("option_snapshot_id", "saved_rows", "atm_iv", "iv_rank", "deleted", "errors")
+                      if key in result}
+        return {"job_name": job.get("job_name"), "status": job.get("status"),
+                "started_at": job.get("started_at"), "finished_at": job.get("finished_at"),
+                "duration_ms": job.get("duration_ms"), "error": job.get("error"), "detail": detail}

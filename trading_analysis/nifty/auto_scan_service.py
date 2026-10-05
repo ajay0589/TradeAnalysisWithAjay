@@ -250,6 +250,7 @@ class NiftyAutoScanService:
             "recent_alerts": recent_alerts,
             "active_alerts_count": len(active_alerts),
             "trade_counts": self.trade_repository.counts(),
+            "entry_scan_progress": dict(self.job_runner.scan_progress),
             "telegram": {
                 "configured": self.job_runner.notifier.configured(),
                 "destination": "NIFTY_TELEGRAM_CHAT_ID" if self.job_runner.notifier.configured() else None,

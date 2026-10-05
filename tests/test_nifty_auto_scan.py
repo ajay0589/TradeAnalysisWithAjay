@@ -4,10 +4,12 @@ import json
 import tempfile
 import threading
 import unittest
+from io import BytesIO
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 from zoneinfo import ZoneInfo
 
 from trading_analysis.models import Candle
@@ -43,6 +45,25 @@ class NiftyAutoScanTests(unittest.TestCase):
         )
         telegram_guard.start()
         self.addCleanup(telegram_guard.stop)
+
+    def test_telegram_rejection_keeps_reason_without_token(self) -> None:
+        response = HTTPError("https://api.telegram.org/botsecret/sendMessage", 400, "Bad Request", None,
+                             BytesIO(b'{"ok":false,"description":"Bad Request: chat not found"}'))
+        with patch("trading_analysis.notifications.telegram.urlopen", side_effect=response):
+            result = TelegramNotifier("secret", "chat").send_message("test")
+
+        self.assertFalse(result["sent"])
+        self.assertIn("chat not found", result["error"])
+        self.assertNotIn("secret", result["error"])
+
+    def test_telegram_error_is_persisted_on_alert(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = NiftyAlertRepository(Path(tmp) / "alerts.db")
+            alert = repo.create_alert(**_alert(score=85, severity="watch"))
+            saved = repo.update_telegram_status(alert["id"], "failed", "HTTP 400: chat not found")
+
+            self.assertEqual(saved["telegram_status"], "failed")
+            self.assertEqual(saved["telegram_error"], "HTTP 400: chat not found")
 
     def test_market_hours_detection_for_weekday_open(self) -> None:
         now = datetime(2026, 7, 6, 9, 20, tzinfo=ZoneInfo("Asia/Kolkata"))
@@ -307,6 +328,34 @@ class NiftyAutoScanTests(unittest.TestCase):
         self.assertTrue(result["ran"])
         self.assertEqual(fake.calls, ["candles", "option_chain", "iv", "exit", "scan", "cleanup"])
 
+    def test_forced_weekend_cycle_does_not_create_entry_or_exit_alerts(self) -> None:
+        fake = FakeJobs()
+        scheduler = MarketScanScheduler(
+            job_runner=fake,
+            clock=lambda: datetime(2026, 10, 3, 16, 30, tzinfo=ZoneInfo("Asia/Kolkata")),
+        )
+
+        result = scheduler.run_once(force=True)
+
+        self.assertTrue(result["ran"])
+        self.assertEqual(result["results"]["opportunity_scan"]["reason"], "outside_market_hours")
+        self.assertEqual(result["results"]["trade_exit"]["reason"], "outside_market_hours")
+        self.assertEqual(fake.calls, ["candles", "option_chain", "iv", "cleanup"])
+
+    def test_post_close_cycle_checks_final_daily_candle(self) -> None:
+        fake = FakeJobs()
+        scheduler = MarketScanScheduler(
+            job_runner=fake,
+            clock=lambda: datetime(2026, 10, 5, 15, 35, tzinfo=ZoneInfo("Asia/Kolkata")),
+        )
+
+        result = scheduler.run_once()
+
+        self.assertTrue(result["ran"])
+        self.assertFalse(result["market_hours"])
+        self.assertTrue(result["scan_window"])
+        self.assertIn("scan", fake.calls)
+
     def test_api_status_alerts_and_acknowledge_return_json(self) -> None:
         class FakeAutoService:
             def status(self):
@@ -541,6 +590,33 @@ class NiftyAutoScanTests(unittest.TestCase):
         context["options"]["option_bias"] = "bearish"
         self.assertIsNone(build_live_entry_signal(context, [_candidate("nifty_bull_call_spread", "bullish", 85)], "intraday", candles, now=datetime(2026, 7, 7, 0, 15)))
 
+    def test_positional_entry_rejects_previous_trading_day(self) -> None:
+        candles = [Candle(datetime(2026, 8, 7) + timedelta(days=index), 100 + index,
+                          102 + index, 99 + index, 101 + index, 1000) for index in range(57)]
+        checks = {}
+        signal = build_live_entry_signal(
+            _context("bullish"), [_candidate("nifty_bull_call_spread", "bullish", 85)],
+            "positional", candles, now=datetime(2026, 10, 5, 10, 0), diagnostics=checks,
+        )
+
+        self.assertIsNone(signal)
+        self.assertEqual(checks["gate"], "candle_freshness")
+
+    def test_positional_entry_accepts_same_day_closed_candle(self) -> None:
+        candles = [Candle(datetime(2026, 8, 7) + timedelta(days=index), 100 + index,
+                          102 + index, 99 + index, 101 + index, 1000) for index in range(60)]
+        context = _context("bullish")
+        context["summary"] = {"data_links": {"latest_option_snapshot_at": "2026-10-05T15:35:00+05:30"}}
+        checks = {}
+
+        signal = build_live_entry_signal(
+            context, [_candidate("nifty_bull_call_spread", "bullish", 85)], "positional",
+            candles, now=datetime(2026, 10, 5, 15, 35), diagnostics=checks,
+        )
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(checks["gate"], "passed")
+
     def test_nifty_scanner_backtest_returns_entry_exit_and_risk_metrics(self) -> None:
         candles = _candles([100 + index * 0.5 for index in range(140)])
 
@@ -632,7 +708,8 @@ class NiftyAutoScanTests(unittest.TestCase):
                 notifier=TelegramNotifier(),
             )
 
-            payload = jobs.run_nifty_opportunity_scan_job(mode="auto", min_score=70)
+            with patch("trading_analysis.scheduler.jobs.is_scan_window", return_value=True):
+                payload = jobs.run_nifty_opportunity_scan_job(mode="auto", min_score=70)
             alert = payload["result"]["alerts"][0]
 
             self.assertEqual(alert["metadata"]["latest_option_snapshot_id"], snapshot_id)

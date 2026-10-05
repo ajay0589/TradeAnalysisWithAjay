@@ -26,16 +26,23 @@ def build_live_entry_signal(
     min_score: int = 70,
     target_r_multiple: float = 2.0,
     now: datetime | None = None,
+    diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     config = HORIZON_CONFIG[horizon]
     closed = closed_candles(candles, config["timeframe"], now=now)
+    if diagnostics is not None:
+        diagnostics.update({"timeframe": config["timeframe"], "closed_candles": len(closed), "gate": "candle_history"})
     if len(closed) < 50:
         return None
     latest = closed[-1]
     current = _as_naive_ist(now or datetime.now(IST))
+    if diagnostics is not None:
+        diagnostics.update({"candle_time": latest.timestamp.isoformat(), "candle_close": latest.close, "gate": "candle_freshness"})
     if not _candle_is_fresh(latest, horizon, current):
         return None
     links = ((context.get("summary") or {}).get("data_links") or {})
+    if diagnostics is not None:
+        diagnostics.update({"option_snapshot_time": links.get("latest_option_snapshot_at"), "gate": "option_freshness"})
     if not _timestamp_is_fresh(links.get("latest_option_snapshot_at"), current, minutes=10):
         return None
     technical = context.get("technical") or {}
@@ -43,9 +50,13 @@ def build_live_entry_signal(
     iv = context.get("iv") or {}
     closes = [candle.close for candle in closed]
     direction = _historical_direction(latest, ema(closes, 20), ema(closes, 50), rsi(closes, 14), "both") or ""
+    if diagnostics is not None:
+        diagnostics.update({"technical_direction": direction or "none", "rsi14": rsi(closes, 14), "gate": "technical_direction"})
     if direction not in {"bullish", "bearish"}:
         return None
     option_bias = str(options.get("option_bias") or "").lower()
+    if diagnostics is not None:
+        diagnostics.update({"option_bias": option_bias, "gate": "option_alignment"})
     if option_bias not in {direction, "neutral"}:
         return None
     matching = [
@@ -54,20 +65,28 @@ def build_live_entry_signal(
         if _candidate_direction(candidate) == direction
         and int(candidate.get("suitability_score") or candidate.get("score") or 0) >= min_score
     ]
+    if diagnostics is not None:
+        diagnostics.update({"matching_candidates": len(matching), "gate": "candidate_score"})
     if not matching:
         return None
     candidate = max(matching, key=lambda row: int(row.get("suitability_score") or row.get("score") or 0))
     ema20 = ema(closes, 20)
+    if diagnostics is not None:
+        diagnostics.update({"ema20": ema20, "gate": "candle_confirmation"})
     if ema20 is None or not _candle_confirms(latest, direction, ema20):
         return None
     entry = float(latest.close)
     atr14 = atr(closed, 14)
     stop = _stop_level(direction, entry, technical, atr14, float(config["fallback_risk_percent"]))
     risk = abs(entry - stop)
+    if diagnostics is not None:
+        diagnostics.update({"risk_points": risk, "gate": "risk"})
     if risk <= 0:
         return None
     target = entry + risk * target_r_multiple if direction == "bullish" else entry - risk * target_r_multiple
     score = int(candidate.get("suitability_score") or candidate.get("score") or 0)
+    if diagnostics is not None:
+        diagnostics.update({"gate": "passed", "score": score})
     return {
         "horizon": horizon,
         "direction": direction,
@@ -240,7 +259,7 @@ def _candidate_direction(candidate: dict[str, Any]) -> str:
 def _candle_is_fresh(candle: Candle, horizon: str, now: datetime) -> bool:
     timestamp = _as_naive_ist(candle.timestamp)
     if horizon == "positional":
-        return timedelta(0) <= now - timestamp <= timedelta(days=4)
+        return timestamp.date() == now.date() and timedelta(0) <= now - timestamp <= timedelta(hours=16)
     config = HORIZON_CONFIG[horizon]
     return timestamp.date() == now.date() and timedelta(0) <= now - timestamp <= timedelta(minutes=int(config["minutes"]) * 3)
 

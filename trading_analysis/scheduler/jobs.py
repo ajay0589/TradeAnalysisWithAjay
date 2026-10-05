@@ -10,6 +10,7 @@ from trading_analysis.nifty.service import NiftyDeskService
 from trading_analysis.nifty.live_scanner import HORIZON_CONFIG, build_live_entry_signal, evaluate_live_exit
 from trading_analysis.notifications.telegram import TelegramNotifier, nifty_trade_message
 from trading_analysis.scheduler.alerts import generate_nifty_alerts
+from trading_analysis.scheduler.market_hours import is_scan_window
 from trading_analysis.storage import (
     DEFAULT_DB_PATH,
     MarketJobRepository,
@@ -45,6 +46,7 @@ class NiftyMarketJobs:
         repository_db = getattr(self.alert_repository, "db_path", DEFAULT_DB_PATH)
         self.trade_repository = trade_repository or NiftyTradeRepository(repository_db)
         self.notifier = notifier or TelegramNotifier.from_env("NIFTY_")
+        self.scan_progress: dict[str, Any] = {"completed": 0, "total": 3, "current": None, "status": "idle"}
 
     def update_nifty_candles_job(self, refresh: bool = False) -> dict[str, Any]:
         return self._record(
@@ -94,6 +96,8 @@ class NiftyMarketJobs:
             job = self.job_repository.finish_job(job_id, result=result)
             return {"job": job, "result": result}
         except Exception as exc:
+            if job_name == "run_nifty_opportunity_scan":
+                self.scan_progress.update({"current": None, "status": "failed"})
             self.job_repository.fail_job(job_id, str(exc))
             return {"job": {"id": job_id, "job_name": job_name, "status": "failed", "error": str(exc)}, "error": str(exc)}
 
@@ -194,13 +198,19 @@ class NiftyMarketJobs:
         }
 
     def _run_nifty_opportunity_scan(self, mode: str, min_score: int) -> dict[str, Any]:
+        if not is_scan_window():
+            self.scan_progress = {"completed": 0, "total": 0, "current": None, "status": "skipped"}
+            return {"symbol": "NIFTY", "mode": mode, "status": "skipped", "reason": "outside_scan_window",
+                    "horizons": {}, "alerts_created": 0, "alerts": [], "telegram": {"sent": 0, "errors": []}}
         horizons = [mode] if mode in HORIZON_CONFIG else list(HORIZON_CONFIG)
+        self.scan_progress = {"completed": 0, "total": len(horizons), "current": None, "status": "running"}
         results: dict[str, Any] = {}
         created: list[dict[str, Any]] = []
         warnings: list[str] = []
         errors: list[str] = []
         telegram = {"configured": self.notifier.configured(), "sent": 0, "errors": []}
         for horizon in horizons:
+            self.scan_progress["current"] = f"{horizon} entry checks"
             context = self.nifty_service.nifty_strategy_suggestions(mode=horizon, refresh=False)
             candidates = list(context.get("candidates") or [])
             data_links = self._attach_latest_data_links(context)
@@ -213,9 +223,11 @@ class NiftyMarketJobs:
                 warnings.append(f"{horizon} context persistence failed: {exc}")
             config = HORIZON_CONFIG[horizon]
             candles = self._cached_candles(config["timeframe"])
-            signal = build_live_entry_signal(context, candidates, horizon, candles, min_score=min_score)
+            checks: dict[str, Any] = {}
+            signal = build_live_entry_signal(context, candidates, horizon, candles, min_score=min_score, diagnostics=checks)
             horizon_result: dict[str, Any] = {
                 "candidate_count": len(candidates),
+                "checks": checks,
                 "context_snapshot_id": context_snapshot_id,
                 "candidate_ids": candidate_ids,
                 "entry_created": False,
@@ -230,7 +242,7 @@ class NiftyMarketJobs:
                     alert = self.alert_repository.create_alert(**self._entry_alert(signal, trade))
                     trade = self.trade_repository.attach_entry_alert(trade["trade_id"], int(alert["id"]))
                     delivery = self._send_nifty_telegram("entry", trade, alert)
-                    self.alert_repository.update_telegram_status(int(alert["id"]), delivery["status"])
+                    self.alert_repository.update_telegram_status(int(alert["id"]), delivery["status"], delivery.get("error"))
                     telegram["sent"] += int(delivery["sent"])
                     if delivery.get("error"):
                         telegram["errors"].append(delivery["error"])
@@ -239,8 +251,10 @@ class NiftyMarketJobs:
                 else:
                     horizon_result["reason"] = "An open trade already exists for this horizon, or this candle was already processed."
             results[horizon] = horizon_result
+            self.scan_progress["completed"] += 1
             warnings.extend(context.get("warnings") or [])
             errors.extend(context.get("errors") or [])
+        self.scan_progress.update({"current": None, "status": "completed"})
         return {
             "symbol": "NIFTY",
             "mode": mode,
@@ -254,6 +268,9 @@ class NiftyMarketJobs:
         }
 
     def _run_nifty_exit_scan(self) -> dict[str, Any]:
+        if not is_scan_window():
+            return {"status": "skipped", "reason": "outside_scan_window", "open_checked": 0,
+                    "trades_closed": 0, "alerts": [], "telegram": {"sent": 0, "errors": []}}
         checked = closed = 0
         alerts: list[dict[str, Any]] = []
         telegram = {"configured": self.notifier.configured(), "sent": 0, "errors": []}
@@ -276,7 +293,7 @@ class NiftyMarketJobs:
             alert = self.alert_repository.create_alert(**self._exit_alert(closed_trade))
             closed_trade = self.trade_repository.attach_exit_alert(trade["trade_id"], int(alert["id"]))
             delivery = self._send_nifty_telegram("exit", closed_trade, alert)
-            self.alert_repository.update_telegram_status(int(alert["id"]), delivery["status"])
+            self.alert_repository.update_telegram_status(int(alert["id"]), delivery["status"], delivery.get("error"))
             telegram["sent"] += int(delivery["sent"])
             if delivery.get("error"):
                 telegram["errors"].append(delivery["error"])

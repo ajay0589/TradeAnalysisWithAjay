@@ -4,13 +4,16 @@ import tempfile
 import threading
 import time
 import unittest
+import json
 from pathlib import Path
 from unittest.mock import patch
+from urllib.request import Request, urlopen
 
 from trading_analysis.all_index_monitor import AllIndexMonitor
 from trading_analysis.brokers.zerodha import ZerodhaKiteClient, write_instruments_csv
 from trading_analysis.instrument_master_service import InstrumentMasterService
 from trading_analysis.web_services import AnalysisService
+from trading_analysis.web_app import ReusableThreadingHTTPServer, TradingRequestHandler
 
 
 def _master_service(root: Path, fetcher=None) -> InstrumentMasterService:
@@ -55,6 +58,91 @@ class FakeIndexes:
 
 
 class AllIndexMonitorTests(unittest.TestCase):
+    def test_telegram_check_uses_configured_destination_without_creating_trade(self):
+        class FakeNotifier:
+            def configured(self):
+                return True
+
+            def send_message(self, message):
+                self.message = message
+                return {"sent": False, "error": "HTTP 400: chat not found"}
+
+        notifier = FakeNotifier()
+        with patch("trading_analysis.all_index_monitor.TelegramNotifier.from_env", return_value=notifier) as configured:
+            result = AllIndexMonitor.test_telegram("NIFTY")
+        configured.assert_called_once_with("NIFTY_")
+        self.assertFalse(result["sent"])
+        self.assertEqual(result["error"], "HTTP 400: chat not found")
+        self.assertIn("TEST MESSAGE (not a trade alert)", notifier.message)
+
+    def test_telegram_check_rejects_unknown_symbol(self):
+        with self.assertRaisesRegex(ValueError, "Choose NIFTY"):
+            AllIndexMonitor.test_telegram("OTHER")
+
+    def test_telegram_check_uses_nifty_fallback_for_bank_nifty(self):
+        class FakeNotifier:
+            def __init__(self, configured):
+                self.enabled = configured
+
+            def configured(self):
+                return self.enabled
+
+            def send_message(self, message):
+                self.message = message
+                return {"sent": True}
+
+        fallback = FakeNotifier(True)
+        with patch("trading_analysis.all_index_monitor.TelegramNotifier.from_env",
+                   side_effect=[FakeNotifier(False), fallback]) as configured:
+            result = AllIndexMonitor.test_telegram("BANKNIFTY")
+        self.assertEqual([call.args[0] for call in configured.call_args_list], ["BANKNIFTY_", "NIFTY_"])
+        self.assertEqual(result["destination"], "NIFTY_TELEGRAM_CHAT_ID")
+        self.assertIn("BANKNIFTY scanner TEST MESSAGE", fallback.message)
+
+    def test_diagnostics_api_returns_selected_day(self):
+        class FakeMonitor:
+            def diagnostics(self, day):
+                return {"date": day, "NIFTY": {"jobs": []}, "BANKNIFTY": {"runs": []}, "SENSEX": {"runs": []}}
+
+        original = TradingRequestHandler.all_index_monitor
+        TradingRequestHandler.all_index_monitor = FakeMonitor()
+        server = ReusableThreadingHTTPServer(("127.0.0.1", 0), TradingRequestHandler)
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        try:
+            with urlopen(f"http://127.0.0.1:{server.server_port}/api/index-scanners/diagnostics?date=2026-10-05") as response:
+                data = json.load(response)
+            self.assertEqual(data["date"], "2026-10-05")
+            self.assertEqual(data["BANKNIFTY"]["runs"], [])
+        finally:
+            server.shutdown()
+            server.server_close()
+            TradingRequestHandler.all_index_monitor = original
+
+    def test_telegram_check_api_returns_delivery_failure(self):
+        class FakeMonitor:
+            def test_telegram(self, symbol):
+                return {"symbol": symbol, "sent": False, "error": "HTTP 400: chat not found"}
+
+        original = TradingRequestHandler.all_index_monitor
+        TradingRequestHandler.all_index_monitor = FakeMonitor()
+        server = ReusableThreadingHTTPServer(("127.0.0.1", 0), TradingRequestHandler)
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        try:
+            request = Request(
+                f"http://127.0.0.1:{server.server_port}/api/index-scanners/telegram-test",
+                data=json.dumps({"symbol": "NIFTY"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            with urlopen(request) as response:
+                result = json.load(response)
+            self.assertEqual(result["error"], "HTTP 400: chat not found")
+        finally:
+            server.shutdown()
+            server.server_close()
+            TradingRequestHandler.all_index_monitor = original
+
     def test_refresh_all_masters_then_start_and_stop_all(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

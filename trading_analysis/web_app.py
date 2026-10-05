@@ -256,6 +256,9 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(self.instrument_master_service.status())
             elif parsed.path == "/api/index-scanners/all/status":
                 self._send_json(self.all_index_monitor.status())
+            elif parsed.path == "/api/index-scanners/diagnostics":
+                params = parse_qs(parsed.query)
+                self._send_json(self.all_index_monitor.diagnostics(params.get("date", [None])[0]))
             elif parsed.path == "/api/nifty/data/latest":
                 self._send_json(self.nifty_auto_service.latest_data())
             elif parsed.path == "/api/nifty/trades":
@@ -359,6 +362,9 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/index-scanners/all/stop":
                 self._read_json()
                 self._send_json(self.all_index_monitor.stop())
+            elif parsed.path == "/api/index-scanners/telegram-test":
+                payload = self._read_json()
+                self._send_json(self.all_index_monitor.test_telegram(str(payload.get("symbol") or "")))
             elif parsed.path == "/api/bulk-candles":
                 payload = self._read_json()
                 self._send_json(

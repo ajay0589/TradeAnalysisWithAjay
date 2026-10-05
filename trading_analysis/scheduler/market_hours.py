@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 IST = ZoneInfo("Asia/Kolkata")
 MARKET_OPEN = time(9, 15)
 MARKET_CLOSE = time(15, 30)
+SCAN_CLOSE = time(15, 45)
 
 
 def is_market_day(value: date | None = None) -> bool:
@@ -17,6 +18,11 @@ def is_market_day(value: date | None = None) -> bool:
 def is_market_hours(now: datetime | None = None) -> bool:
     current = _as_ist(now or datetime.now(IST))
     return is_market_day(current.date()) and MARKET_OPEN <= current.time() <= MARKET_CLOSE
+
+
+def is_scan_window(now: datetime | None = None) -> bool:
+    current = _as_ist(now or datetime.now(IST))
+    return is_market_day(current.date()) and MARKET_OPEN <= current.time() <= SCAN_CLOSE
 
 
 def next_market_open(now: datetime | None = None) -> datetime | None:

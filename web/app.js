@@ -40,22 +40,42 @@ const state = {
     autoPollTimer: null,
   },
   indexScanner: { pollTimer: null },
-  indexGroup: { pollTimer: null },
+  indexGroup: { pollTimer: null, active: "nifty" },
+  research: { active: "analyze" },
   instrumentMaster: { pollTimer: null },
 };
 
 const $ = (id) => document.getElementById(id);
 
 function activateTab(name) {
+  if (["analyze", "scans", "krishna", "backtest"].includes(name)) {
+    state.research.active = name;
+    name = "research";
+  }
+  const panelName = name === "research" ? state.research.active : name;
   document.querySelectorAll("[data-tab-target]").forEach((button) => {
     const active = button.dataset.tabTarget === name;
     button.classList.toggle("active", active);
     button.setAttribute("aria-selected", active ? "true" : "false");
   });
   document.querySelectorAll("[data-tab-panel]").forEach((panel) => {
-    panel.classList.toggle("active", panel.dataset.tabPanel === name);
+    panel.classList.toggle("active", panel.dataset.tabPanel === panelName);
   });
-  if (name === "nifty") {
+  $("researchSubtabs").hidden = name !== "research";
+  document.querySelectorAll("[data-research-target]").forEach((button) => {
+    const active = button.dataset.researchTarget === state.research.active;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  if (name === "indices") {
+    activateIndexSubtab(state.indexGroup.active);
+    loadAllIndexStatus();
+    if (!state.indexGroup.pollTimer) state.indexGroup.pollTimer = setInterval(loadAllIndexStatus, 5000);
+  } else if (state.indexGroup.pollTimer) {
+    clearInterval(state.indexGroup.pollTimer);
+    state.indexGroup.pollTimer = null;
+  }
+  if (name === "indices" && state.indexGroup.active === "nifty") {
     loadNiftyAutoStatus();
     loadNiftyAlerts();
     loadNiftyTrades();
@@ -64,16 +84,12 @@ function activateTab(name) {
   } else {
     stopNiftyAutoPolling();
   }
-  if (name === "index") {
+  if (name === "indices" && state.indexGroup.active !== "nifty") {
     loadIndexScannerStatus();
-    loadAllIndexStatus();
-    if (!state.indexScanner.pollTimer) state.indexScanner.pollTimer = setInterval(loadIndexScannerStatus, 15000);
-    if (!state.indexGroup.pollTimer) state.indexGroup.pollTimer = setInterval(loadAllIndexStatus, 15000);
+    if (!state.indexScanner.pollTimer) state.indexScanner.pollTimer = setInterval(loadIndexScannerStatus, 5000);
   } else if (state.indexScanner.pollTimer) {
     clearInterval(state.indexScanner.pollTimer);
     state.indexScanner.pollTimer = null;
-    clearInterval(state.indexGroup.pollTimer);
-    state.indexGroup.pollTimer = null;
   }
   if (name === "data") {
     loadInstrumentMasterStatus();
@@ -81,6 +97,22 @@ function activateTab(name) {
   } else if (state.instrumentMaster.pollTimer) {
     clearInterval(state.instrumentMaster.pollTimer);
     state.instrumentMaster.pollTimer = null;
+  }
+}
+
+function activateIndexSubtab(name) {
+  state.indexGroup.active = name;
+  document.querySelectorAll("[data-index-target]").forEach((button) => {
+    const active = button.dataset.indexTarget === name;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  document.querySelectorAll("[data-index-panel]").forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.indexPanel.split(" ").includes(name));
+  });
+  if (name !== "nifty") {
+    $("indexScannerSymbol").value = name.toUpperCase();
+    $("indexScannerTitle").textContent = name === "banknifty" ? "Bank Nifty" : "Sensex";
   }
 }
 
@@ -281,14 +313,17 @@ async function updateZerodhaToken() {
     return;
   }
   setZerodhaStatus("updating", "checking");
+  $("updateZerodhaTokenBtn").disabled = true;
   try {
     const data = await postApi("/api/zerodha/access-token", { request_token: requestToken });
     $("zerodhaRedirectUrl").value = "";
-    setNotes(data.message);
-    await checkZerodhaStatus();
+    setZerodhaStatus("updated", "valid");
+    setNotes(`${data.message} Token exchange ${((data.exchange_duration_ms || 0) / 1000).toFixed(1)}s.`);
   } catch (error) {
     setZerodhaStatus("failed", "expired");
     setNotes([error.message], true);
+  } finally {
+    $("updateZerodhaTokenBtn").disabled = false;
   }
 }
 
@@ -3204,21 +3239,28 @@ function stopNiftyAutoPolling() {
 
 function renderNiftyAutoStatus(data) {
   const running = Boolean(data.running);
-  $("niftyAutoMeta").textContent = `${running ? "Running" : "Stopped"} / market ${data.market_hours ? "open" : "closed"}`;
+  const marketLabel = data.market_hours ? "Open" : data.scan_window ? "Post-close checks" : "Closed";
+  $("niftyAutoMeta").textContent = `${running ? "Running" : "Stopped"} / ${marketLabel}`;
   $("niftyAutoStartBtn").disabled = running;
   $("niftyAutoStopBtn").disabled = !running;
   const telegram = data.telegram || {};
   $("niftyTelegramStatus").textContent = telegram.configured
     ? "Configured for the separate NIFTY Telegram chat"
     : "Set NIFTY_TELEGRAM_BOT_TOKEN and NIFTY_TELEGRAM_CHAT_ID";
+  const latestDelivery = (data.recent_alerts || []).find((row) => ["sent", "failed"].includes(row.telegram_status));
+  const failed = latestDelivery?.telegram_status === "failed" ? latestDelivery : null;
+  $("niftyDeliveryIssue").textContent = failed
+    ? `Latest Telegram failure ${fmtDateTime(failed.created_at)}: ${failed.telegram_error || "reason not stored for this older alert"}`
+    : "";
+  $("niftyDeliveryIssue").classList.toggle("points-negative", Boolean(failed));
   $("niftyAutoCards").innerHTML = [
     ["Status", running ? "Running" : "Stopped"],
-    ["Market Hours", data.market_hours ? "Open" : "Closed"],
+    ["Market", marketLabel],
     ["Started", fmtDateTime(data.started_at)],
     ["Stopped", fmtDateTime(data.stopped_at)],
     ["Last Completed", fmtDateTime(data.last_cycle_completed_at || data.last_job_run)],
-    ["Next Entry Check", fmtDateTime((data.next_runs || {}).opportunity_scan)],
-    ["Next Exit Check", fmtDateTime((data.next_runs || {}).trade_exit)],
+    ["Next Entry Check", running ? fmtDateTime((data.next_runs || {}).opportunity_scan) : "-"],
+    ["Next Exit Check", running ? fmtDateTime((data.next_runs || {}).trade_exit) : "-"],
     ["Open Trades", fmtInt((data.trade_counts || {}).open)],
   ]
     .map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${value}</strong></div>`)
@@ -3272,7 +3314,7 @@ function renderNiftyAlerts(data) {
         <td>${fmt(alert.invalidation_level)}</td>
         <td>${fmt(alert.score)}</td>
         <td>${escapeHtml(alert.message)}</td>
-        <td>${alert.telegram_status || "-"}</td>
+        <td title="${escapeHtml(alert.telegram_error || "")}">${alert.telegram_status || "-"}${alert.telegram_error ? `<div class="cell-note points-negative">${escapeHtml(alert.telegram_error)}</div>` : ""}</td>
         <td>
           ${alert.context_snapshot_id ? `<button class="linkBtn nifty-context-view" data-context-id="${alert.context_snapshot_id}">View Context</button>` : ""}
         </td>
@@ -3412,8 +3454,12 @@ async function viewNiftyContextSnapshot(contextId) {
 function autoJobSummary(job) {
   if (job.error) return escapeHtml(job.error);
   const result = job.result && job.result.result ? job.result.result : job.result || {};
+  if (result.status === "skipped") return `Skipped: ${escapeHtml(result.reason || "outside scan window")}`;
+  const deliveryErrors = result.telegram?.errors || [];
+  if (deliveryErrors.length) return `Telegram failed: ${escapeHtml(deliveryErrors.at(-1))}`;
   if (result.alerts_created !== undefined) {
-    return `${result.alerts_created} entry alert(s) across Intraday, Swing, and Positional`;
+    const gates = Object.entries(result.horizons || {}).map(([horizon, row]) => `${horizon}: ${row.checks?.gate || row.reason || "-"}`);
+    return `${result.alerts_created} entry alert(s) | ${escapeHtml(gates.join("; "))}`;
   }
   if (result.trades_closed !== undefined) {
     return `${result.open_checked || 0} open trade(s) checked, ${result.trades_closed} closed`;
@@ -3505,10 +3551,56 @@ function renderAllIndexStatus(data) {
   $("allIndexStatusBody").innerHTML = ["NIFTY", "BANKNIFTY", "SENSEX"].map((symbol) => {
     const row = rows[symbol] || {};
     const issue = (row.errors || []).at(-1) || "-";
-    return `<tr><td>${escapeHtml(symbol)}</td><td>${row.running ? "Running" : "Stopped"}<div class="cell-note">${escapeHtml(row.phase || "-")}</div></td><td>${fmtDateTime(row.started_at)}</td><td>${fmtDateTime(row.last_cycle_at)}</td><td>${fmtDateTime(row.stopped_at)}</td><td>${row.telegram_configured ? "Configured" : "Not configured"}</td><td>${escapeHtml(issue)}</td></tr>`;
+    const progress = row.progress || {};
+    const progressText = progress.total ? `${fmtInt(progress.completed)}/${fmtInt(progress.total)}` : "-";
+    const status = row.running ? "Running" : row.scan_active ? "Scanning once" : "Stopped";
+    return `<tr><td>${escapeHtml(symbol)}</td><td>${status}<div class="cell-note">${escapeHtml(row.phase || "-")}</div></td><td>${progressText}</td><td>${escapeHtml(progress.current || "-")}</td><td>${fmtDateTime(row.started_at)}</td><td>${fmtDateTime(row.last_cycle_at)}</td><td>${fmtDateTime(row.next_run)}</td><td>${row.telegram_configured ? "Configured" : "Not configured"}<div><button class="linkBtn index-telegram-test" data-symbol="${symbol}" type="button" title="Send a labeled test message to this index's configured Telegram chat">Send test</button></div></td><td class="${issue !== "-" ? "points-negative" : ""}">${escapeHtml(issue)}</td></tr>`;
   }).join("");
+  document.querySelectorAll(".index-telegram-test").forEach((button) => {
+    button.addEventListener("click", () => testIndexTelegram(button.dataset.symbol, button));
+  });
   if (!data.masters_ready && !$("allIndexMessage").classList.contains("points-negative")) $("allIndexMessage").textContent = "Refresh instrument masters in Data Ops before starting all three.";
   else if (!$("allIndexMessage").classList.contains("points-negative")) $("allIndexMessage").textContent = "";
+}
+
+async function testIndexTelegram(symbol, button) {
+  const message = $("allIndexMessage");
+  button.disabled = true;
+  message.classList.remove("points-negative");
+  message.textContent = `Sending ${symbol} test message...`;
+  try {
+    const result = await postApi("/api/index-scanners/telegram-test", { symbol });
+    message.textContent = result.sent ? `${symbol} test message delivered via ${result.destination}.` : `${symbol} Telegram failed: ${result.error || "unknown error"}`;
+    message.classList.toggle("points-negative", !result.sent);
+  } catch (error) {
+    message.textContent = `${symbol} Telegram failed: ${error.message}`;
+    message.classList.add("points-negative");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function downloadIndexDiagnostics() {
+  const date = $("indexDiagnosticsDate").value;
+  if (!date) return;
+  const button = $("indexDiagnosticsDownload");
+  button.disabled = true;
+  $("indexDiagnosticsStatus").textContent = "Preparing scan log...";
+  try {
+    const data = await api(`/api/index-scanners/diagnostics?date=${encodeURIComponent(date)}`);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `index-scan-log-${date}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    $("indexDiagnosticsStatus").textContent = `Downloaded ${fmtInt(data.NIFTY?.jobs?.length || 0)} NIFTY jobs, ${fmtInt(data.BANKNIFTY?.runs?.length || 0)} Bank Nifty runs, ${fmtInt(data.SENSEX?.runs?.length || 0)} Sensex runs.`;
+  } catch (error) {
+    $("indexDiagnosticsStatus").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function controlAllIndexScanners(action) {
@@ -3530,7 +3622,7 @@ async function controlAllIndexScanners(action) {
       const missingChats = result.unconfigured_telegram || [];
       message.textContent = action === "start"
         ? `All three monitors started.${missingChats.length ? ` Telegram not configured for ${missingChats.join(", ")}.` : ""}`
-        : "All three monitors stopped.";
+        : result.any_running ? "Stop requested. An active broker request may finish before the scanners fully stop." : "All three monitors stopped.";
     }
     loadIndexScannerStatus();
   } catch (error) {
@@ -3617,10 +3709,16 @@ function renderIndexScanner(data) {
   const marketState = data.market_hours ? "market open" : data.scan_window ? "post-close finalization" : "market closed";
   indexScannerMessage(`${data.running ? "Running" : "Stopped"} | ${data.phase || "idle"} | ${marketState}`);
   $("indexScannerStart").disabled = data.running;
-  $("indexScannerStop").disabled = !data.running;
+  $("indexScannerStop").disabled = !data.running && !data.scan_active;
   if (data.running && data.interval_seconds) $("indexScannerInterval").value = String(data.interval_seconds);
   $("indexScannerTiming").textContent = `Started ${fmtDateTime(data.started_at)} | Last cycle ${fmtDateTime(data.last_cycle_at)} | Next ${fmtDateTime(data.next_run)} | Stopped ${fmtDateTime(data.stopped_at)}`;
   $("indexScannerTelegram").textContent = data.telegram_destination ? `Telegram: ${data.telegram_destination}` : "Telegram: no destination configured";
+  const progress = data.progress || {};
+  $("indexScannerProgressBar").max = Math.max(1, Number(progress.total || 1));
+  $("indexScannerProgressBar").value = Number(progress.completed || 0);
+  $("indexScannerProgressText").textContent = progress.total
+    ? `${fmtInt(progress.completed)}/${fmtInt(progress.total)} steps | ${progress.current || data.phase || "idle"} | ${fmtInt(progress.failures)} failed`
+    : "Waiting for a scan";
   $("indexScannerMeta").textContent = `${data.profile.label} | ${fmtDateTime(result.as_of)}`;
   $("indexScannerMetrics").innerHTML = [
     ["New entries", result.entries_created ?? 0], ["New exits", result.exits_created ?? 0],
@@ -3638,7 +3736,7 @@ function renderIndexScanner(data) {
   const leaders = horizons.intraday?.constituents || [];
   $("indexScannerLeadersMeta").textContent = data.profile.source_date ? `Weights as of ${data.profile.source_date}` : "Selected leaders, unweighted";
   $("indexScannerLeaders").innerHTML = leaders.length ? leaders.map((row) => `<tr><td>${escapeHtml(row.symbol)}</td><td>${row.weight_pct == null ? "-" : fmtPct(row.weight_pct)}</td><td>${escapeHtml(row.technical_bias)}</td><td>${escapeHtml(row.option_bias)}</td><td>${fmtPct(row.change_pct)}</td><td>${fmtInt(row.put_oi_change)}</td><td>${fmtInt(row.call_oi_change)}</td></tr>`).join("") : indexScannerTableRow("No constituent analysis yet", 7);
-  $("indexScannerAlerts").innerHTML = (history.alerts || []).length ? history.alerts.map((row) => `<tr><td>${fmtDateTime(row.created_at)}</td><td>${escapeHtml(row.horizon)}</td><td>${escapeHtml(row.event_kind)}</td><td>${escapeHtml(row.trade_id)}</td><td>${escapeHtml(row.telegram_status)}</td></tr>`).join("") : indexScannerTableRow("No alerts yet", 5);
+  $("indexScannerAlerts").innerHTML = (history.alerts || []).length ? history.alerts.map((row) => `<tr><td>${fmtDateTime(row.created_at)}</td><td>${escapeHtml(row.horizon)}</td><td>${escapeHtml(row.event_kind)}</td><td>${escapeHtml(row.trade_id)}</td><td>${escapeHtml(row.telegram_status)}${row.telegram_error ? `<div class="cell-note points-negative">${escapeHtml(row.telegram_error)}</div>` : ""}</td></tr>`).join("") : indexScannerTableRow("No alerts yet", 5);
   $("indexScannerTrades").innerHTML = (history.trades || []).length ? history.trades.map((row) => `<tr><td>${escapeHtml(row.trade_id)}</td><td>${escapeHtml(row.horizon)}</td><td>${escapeHtml(row.direction)}</td><td>${fmt(row.entry_price)}</td><td>${fmtDateTime(row.entry_time)}</td><td>${fmt(row.exit_price)}</td><td>${fmtDateTime(row.exit_time)}</td><td>${row.open_seconds == null ? "Open" : escapeHtml(durationMinutes(row.open_seconds / 60))}</td><td>${escapeHtml(row.status)}</td></tr>`).join("") : indexScannerTableRow("No trades yet", 9);
   const errors = result.errors || data.errors || [];
   $("indexScannerErrorCount").textContent = `${errors.length} issue(s)`;
@@ -3799,7 +3897,17 @@ document.querySelectorAll("[data-tab-target]").forEach((button) => {
   button.setAttribute("aria-selected", button.classList.contains("active") ? "true" : "false");
   button.addEventListener("click", () => activateTab(button.dataset.tabTarget));
 });
-$("indexScannerSymbol").addEventListener("change", loadIndexScannerStatus);
+document.querySelectorAll("[data-research-target]").forEach((button) => {
+  button.addEventListener("click", () => activateTab(button.dataset.researchTarget));
+});
+document.querySelectorAll("[data-index-target]").forEach((button) => {
+  button.addEventListener("click", () => {
+    activateIndexSubtab(button.dataset.indexTarget);
+    activateTab("indices");
+  });
+});
+$("indexDiagnosticsDate").value = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Kolkata" });
+$("indexDiagnosticsDownload").addEventListener("click", downloadIndexDiagnostics);
 $("indexScannerStart").addEventListener("click", () => controlIndexScanner("start"));
 $("indexScannerStop").addEventListener("click", () => controlIndexScanner("stop"));
 $("indexScannerRunOnce").addEventListener("click", () => controlIndexScanner("run-once"));

@@ -240,6 +240,7 @@ class AnalysisService:
         creds = load_settings().broker_credentials
         if not creds.zerodha_api_key or not creds.zerodha_api_secret:
             raise ValueError("Missing ZERODHA_API_KEY or ZERODHA_API_SECRET in .env")
+        started = time.monotonic()
         session = generate_session(
             api_key=creds.zerodha_api_key,
             api_secret=creds.zerodha_api_secret,
@@ -252,6 +253,7 @@ class AnalysisService:
         return {
             "updated": True,
             "token_status": "updated",
+            "exchange_duration_ms": int((time.monotonic() - started) * 1000),
             "user_id": session.get("user_id"),
             "message": "Zerodha access token updated in .env.",
         }

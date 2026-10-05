@@ -20,15 +20,18 @@
       </section>
 
       <nav class="activity-tabs" aria-label="Decision desk activities">
-        <button class="tab-btn active" data-tab-target="analyze" type="button">Analyze</button>
-        <button class="tab-btn" data-tab-target="nifty" type="button">NIFTY Desk</button>
-        <button class="tab-btn" data-tab-target="index" type="button">Bank Nifty &amp; Sensex</button>
-        <button class="tab-btn" data-tab-target="scans" type="button">Scans</button>
-        <button class="tab-btn" data-tab-target="krishna" type="button">Krishna Setup</button>
+        <button class="tab-btn active" data-tab-target="research" type="button">Stock Research</button>
+        <button class="tab-btn" data-tab-target="indices" type="button">Index Scanning</button>
         <button class="tab-btn" data-tab-target="purple" type="button">Purple Touch</button>
-        <button class="tab-btn" data-tab-target="backtest" type="button">Backtest</button>
         <button class="tab-btn" data-tab-target="data" type="button">Data Ops</button>
         <button class="tab-btn" data-tab-target="reports" type="button">Reports</button>
+      </nav>
+
+      <nav id="researchSubtabs" class="index-subtabs" aria-label="Stock research">
+        <button class="index-subtab active" data-research-target="analyze" type="button" aria-selected="true">Analyze</button>
+        <button class="index-subtab" data-research-target="scans" type="button" aria-selected="false">Scans</button>
+        <button class="index-subtab" data-research-target="krishna" type="button" aria-selected="false">Krishna Setup</button>
+        <button class="index-subtab" data-research-target="backtest" type="button" aria-selected="false">Backtest</button>
       </nav>
 
       <section class="notes" id="notes"></section>
@@ -404,7 +407,31 @@
           </section>
         </section>
 
-        <section id="tab-nifty" class="tab-pane" data-tab-panel="nifty">
+        <section id="tab-indices" class="tab-pane" data-tab-panel="indices">
+          <section class="index-monitor-band">
+            <div class="index-monitor-inner">
+              <div class="panel-head"><h2>Index Monitors</h2><span id="allIndexMeta">Loading</span></div>
+              <div class="index-monitor-controls">
+                <div><label for="allNiftyInterval">NIFTY interval</label><select id="allNiftyInterval"><option value="60" selected>Every minute</option><option value="180">Every 3 minutes</option><option value="300">Every 5 minutes</option></select></div>
+                <div><label for="allBankInterval">Bank Nifty interval</label><select id="allBankInterval"><option value="60">Every minute</option><option value="180" selected>Every 3 minutes</option><option value="300">Every 5 minutes</option></select></div>
+                <div><label for="allSensexInterval">Sensex interval</label><select id="allSensexInterval"><option value="60">Every minute</option><option value="180" selected>Every 3 minutes</option><option value="300">Every 5 minutes</option></select></div>
+                <div class="button-row"><button id="allIndexStart" type="button">Start all three</button><button id="allIndexStop" type="button">Stop all three</button></div>
+              </div>
+              <div class="wide-table"><table class="readable-table"><thead><tr><th>Scanner</th><th>Status</th><th>Progress</th><th>Current work</th><th>Started</th><th>Last completed</th><th>Next</th><th>Telegram</th><th>Latest issue</th></tr></thead><tbody id="allIndexStatusBody"></tbody></table></div>
+              <div class="index-diagnostics-controls">
+                <div><label for="indexDiagnosticsDate">Scan date (IST)</label><input id="indexDiagnosticsDate" type="date" /></div>
+                <button id="indexDiagnosticsDownload" type="button">Download scan log</button>
+                <span id="indexDiagnosticsStatus" class="cell-note"></span>
+              </div>
+              <div id="allIndexMessage" class="mini-status"></div>
+            </div>
+          </section>
+          <nav class="index-subtabs" aria-label="Index scanner">
+            <button class="index-subtab active" data-index-target="nifty" type="button" aria-selected="true">NIFTY</button>
+            <button class="index-subtab" data-index-target="banknifty" type="button" aria-selected="false">Bank Nifty</button>
+            <button class="index-subtab" data-index-target="sensex" type="button" aria-selected="false">Sensex</button>
+          </nav>
+        <section id="tab-nifty" class="index-subpane active" data-index-panel="nifty">
           <section class="workspace">
             <aside class="sidebar">
               <div class="panel">
@@ -574,10 +601,11 @@
                 </div>
                 <div class="compact-metrics" id="niftyAutoCards"></div>
                 <div class="compact-metrics" id="niftyDataFreshnessCards"></div>
+                <div id="niftyDeliveryIssue" class="mini-status"></div>
                 <div class="button-row">
                   <button id="niftyAutoStartBtn" title="Starts candle, option-chain, IV, entry, and exit monitoring during NSE market hours.">Start scanner</button>
                   <button id="niftyAutoStopBtn" title="Stops new NIFTY scan cycles. Stored alerts and trades remain available.">Stop scanner</button>
-                  <button id="niftyAutoRunOnceBtn" title="Runs one complete data refresh, exit check, and three-horizon entry cycle for testing.">Run one cycle</button>
+                  <button id="niftyAutoRunOnceBtn" title="Refreshes data; entry and exit alerts run only during the trading-day scan window.">Run one cycle</button>
                 </div>
                 <div class="wide-table">
                   <table>
@@ -668,25 +696,12 @@
           </section>
         </section>
 
-        <section id="tab-index" class="tab-pane" data-tab-panel="index">
-          <section class="index-monitor-band">
-            <div class="index-monitor-inner">
-              <div class="panel-head"><h2>NIFTY, Bank Nifty &amp; Sensex Monitors</h2><span id="allIndexMeta">Loading</span></div>
-              <div class="index-monitor-controls">
-                <div><label for="allNiftyInterval">NIFTY interval</label><select id="allNiftyInterval"><option value="60" selected>Every minute</option><option value="180">Every 3 minutes</option><option value="300">Every 5 minutes</option></select></div>
-                <div><label for="allBankInterval">Bank Nifty interval</label><select id="allBankInterval"><option value="60">Every minute</option><option value="180" selected>Every 3 minutes</option><option value="300">Every 5 minutes</option></select></div>
-                <div><label for="allSensexInterval">Sensex interval</label><select id="allSensexInterval"><option value="60">Every minute</option><option value="180" selected>Every 3 minutes</option><option value="300">Every 5 minutes</option></select></div>
-                <div class="button-row"><button id="allIndexStart" type="button">Start all three</button><button id="allIndexStop" type="button">Stop all three</button></div>
-              </div>
-              <div class="wide-table"><table class="readable-table"><thead><tr><th>Scanner</th><th>Status</th><th>Started</th><th>Last completed</th><th>Stopped</th><th>Telegram</th><th>Latest issue</th></tr></thead><tbody id="allIndexStatusBody"></tbody></table></div>
-              <div id="allIndexMessage" class="mini-status"></div>
-            </div>
-          </section>
+        <section id="tab-index" class="index-subpane" data-index-panel="banknifty sensex">
           <section class="workspace">
             <aside class="sidebar">
               <div class="panel">
-                <label for="indexScannerSymbol">Index</label>
-                <select id="indexScannerSymbol"><option value="BANKNIFTY">Bank Nifty</option><option value="SENSEX">Sensex</option></select>
+                <h2 id="indexScannerTitle">Bank Nifty</h2>
+                <input id="indexScannerSymbol" type="hidden" value="BANKNIFTY" />
                 <label for="indexScannerInterval">Check interval</label>
                 <select id="indexScannerInterval"><option value="60">Every minute</option><option value="180" selected>Every 3 minutes</option><option value="300">Every 5 minutes</option></select>
                 <div class="button-row">
@@ -697,6 +712,9 @@
                 <p id="indexScannerStatus" class="cell-note">Loading...</p>
                 <p id="indexScannerTiming" class="cell-note"></p>
                 <p id="indexScannerTelegram" class="cell-note"></p>
+                <label for="indexScannerProgressBar">Current cycle</label>
+                <progress id="indexScannerProgressBar" max="100" value="0"></progress>
+                <p id="indexScannerProgressText" class="cell-note">Waiting for a scan</p>
               </div>
             </aside>
             <section class="content">
@@ -727,6 +745,7 @@
               </section>
             </section>
           </section>
+        </section>
         </section>
 
         <section id="tab-scans" class="tab-pane" data-tab-panel="scans">

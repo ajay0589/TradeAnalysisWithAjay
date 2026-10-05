@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from trading_analysis.scheduler.jobs import NiftyMarketJobs
-from trading_analysis.scheduler.market_hours import is_market_hours, next_market_open
+from trading_analysis.scheduler.market_hours import is_market_hours, is_scan_window, next_market_open
 
 
 DEFAULT_INTERVALS = {
@@ -71,6 +71,7 @@ class MarketScanScheduler:
         return {
             "running": bool(self._thread and self._thread.is_alive()),
             "market_hours": is_market_hours(now),
+            "scan_window": is_scan_window(now),
             "next_market_open": next_market_open(now),
             "intervals": dict(self.intervals),
             "active_jobs": sorted(self._active_jobs),
@@ -90,7 +91,8 @@ class MarketScanScheduler:
 
     def run_once(self, force: bool = False) -> dict[str, Any]:
         now = self.clock()
-        if not force and not is_market_hours(now):
+        scan_open = is_scan_window(now)
+        if not force and not scan_open:
             return {
                 "ran": False,
                 "reason": "outside_market_hours",
@@ -101,14 +103,17 @@ class MarketScanScheduler:
         results: dict[str, Any] = {}
         self._last_cycle_started_at = now.isoformat(timespec="seconds")
         for name in ("candles", "option_chain", "iv_snapshot", "trade_exit", "opportunity_scan", "cleanup"):
-            results[name] = self._run_job(name)
+            if not scan_open and name in {"trade_exit", "opportunity_scan"}:
+                results[name] = {"status": "skipped", "reason": "outside_market_hours"}
+            else:
+                results[name] = self._run_job(name)
         self._last_cycle_completed_at = self.clock().isoformat(timespec="seconds")
-        return {"ran": True, "market_hours": is_market_hours(now), "results": results}
+        return {"ran": True, "market_hours": is_market_hours(now), "scan_window": scan_open, "results": results}
 
     def _loop(self) -> None:
         while not self._stop_event.is_set():
             try:
-                if is_market_hours(self.clock()):
+                if is_scan_window(self.clock()):
                     self._run_due_jobs()
                 time.sleep(1)
             except Exception as exc:
