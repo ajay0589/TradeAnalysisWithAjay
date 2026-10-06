@@ -334,6 +334,15 @@ python -m trading_analysis.cli nifty-backtest --strategy nifty_short_strangle --
 
 ## NIFTY Live Scanner
 
+### Index scanner performance and diagnostics
+
+- Development preview on the maintainer's laptop uses port `8767`; personal installations keep `8766`. Ports do not determine broker or Telegram credentials: the server's project folder and `.env` do.
+- Bank Nifty and Sensex analyze cached data independently of a shared refresh worker. Fresh data wakes analysis early; the selected interval is the maximum scheduled wait between cached checks. Exit checks run before entry analysis.
+- The refresh worker prioritizes open-trade candles, batches option quotes across indexes and shared constituents, and refreshes candles at their close boundaries. Option snapshots are requested every three minutes when capacity permits. Stale snapshots still block entry; slow networks are not treated as fresh data.
+- `Data Refresh` shows pending sources, the current download, per-source durations and errors. Download both index and application logs after the session. Broker events separate queue, TLS-context setup, connection-to-headers (including DNS/TLS/server wait), and body-read time. Repeated unchanged status polls are sampled rather than reported as new failures.
+- Intraday spot-signal trades exit on the final 15-minute candle closing at 15:30 IST, or earlier stop/target/reversal rules. Keep scanners running through the 15:45 finalization window. No orders are placed. Missed closed candles are replayed in order on the next exit check. Entry metadata separates signal candle start/close from detection time; history is not rewritten.
+- Update outside market hours using the desktop launcher's `Update App`, which installs dependencies. For a manual update, install `requirements.txt` using the same Python/virtual environment as the server, then restart. Verified HTTPS connection pooling uses `urllib3`; certificate validation and proxy settings remain enabled. Do not run two server instances against the same data folder during live trading.
+
 NIFTY Live Scanner is a local market-hour scheduler for the NIFTY Desk. It uses SQLite storage at `data\db\trading_analysis.db`, enables WAL mode, and stores job history, market-data snapshots, context, entry/exit alerts, and complete trade lifecycles. It is read-only and never places orders.
 
 Configure its separate Telegram destination in `.env`:

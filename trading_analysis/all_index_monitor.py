@@ -50,6 +50,7 @@ class AllIndexMonitor:
                 "last_cycle_at": state["last_cycle_at"],
                 "telegram_configured": bool(state["telegram_destination"]),
                 "errors": state["errors"], "progress": state.get("progress"),
+                "data_service": state.get("data_service"),
                 "next_run": state.get("next_run")}
 
     def start(self, nifty_seconds: int = 60, bank_seconds: int = 180, sensex_seconds: int = 180) -> dict[str, Any]:
@@ -125,6 +126,7 @@ class AllIndexMonitor:
         return {"schema_version": 1, "date": stamp, "timezone": "Asia/Kolkata",
                 "generated_at": datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(timespec="seconds"),
                 "note": "Read-only spot-signal diagnostics; no broker tokens or option orders.",
+                "data_service": dict(self.indexes._data_status),
                 "NIFTY": {"jobs": jobs, "alerts": alerts, "trades": trades},
                 "BANKNIFTY": self.indexes.repository.diagnostics("BANKNIFTY", stamp),
                 "SENSEX": self.indexes.repository.diagnostics("SENSEX", stamp)}

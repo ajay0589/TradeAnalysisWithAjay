@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -14,11 +15,11 @@ from zoneinfo import ZoneInfo
 from trading_analysis import diagnostics
 
 from trading_analysis.brokers.zerodha import load_instruments_csv, merge_candles_csv, resolve_instrument_token
-from trading_analysis.candles import candle_path, candle_window, fetch_interval, refresh_bucket
+from trading_analysis.candles import candle_path, candle_window, fetch_interval
 from trading_analysis.data_sources.csv_loader import load_candles
 from trading_analysis.index_signal import leader_confirmation, option_footprint, technical_read
 from trading_analysis.instrument_master_service import InstrumentMasterService
-from trading_analysis.nifty.live_scanner import HORIZON_CONFIG, build_live_entry_signal, evaluate_live_exit
+from trading_analysis.nifty.live_scanner import HORIZON_CONFIG, build_live_entry_signal, evaluate_live_exit, closed_candles
 from trading_analysis.nifty.technical_context import build_nifty_technical_context
 from trading_analysis.notifications.telegram import TelegramNotifier
 from trading_analysis.scheduler.market_hours import is_market_day, is_market_hours
@@ -29,7 +30,6 @@ from trading_analysis.web_services import AnalysisService, _zerodha_client
 IST = ZoneInfo("Asia/Kolkata")
 PROFILE_PATH = Path("config/index_scanner_leaders.json")
 CANDLE_DAYS = {"day": 365, "60minute": 90, "15minute": 45}
-REFRESH_SECONDS = {"day": 60 * 60, "60minute": 30 * 60, "15minute": 5 * 60}
 
 
 class ScanCancelled(RuntimeError):
@@ -98,6 +98,12 @@ class IndexScanRepository:
             """)
             if "telegram_error" not in {row["name"] for row in conn.execute("PRAGMA table_info(index_scan_alerts)")}:
                 conn.execute("ALTER TABLE index_scan_alerts ADD COLUMN telegram_error TEXT")
+            if "owner_pid" not in {row["name"] for row in conn.execute("PRAGMA table_info(index_scan_runs)")}:
+                conn.execute("ALTER TABLE index_scan_runs ADD COLUMN owner_pid INTEGER")
+            for row in conn.execute("SELECT id, owner_pid FROM index_scan_runs WHERE status = 'running'").fetchall():
+                if row["owner_pid"] and not _process_alive(row["owner_pid"]):
+                    conn.execute("UPDATE index_scan_runs SET status = 'interrupted', finished_at = ?, errors_json = ? WHERE id = ?",
+                                 (_iso(), json.dumps(["Scanner process ended before completion"]), row["id"]))
 
     @contextmanager
     def _connect(self):
@@ -177,8 +183,8 @@ class IndexScanRepository:
     def start_run(self, symbol: str, total_steps: int) -> int:
         with self._connect() as conn:
             row = conn.execute(
-                "INSERT INTO index_scan_runs(symbol, started_at, status, total_steps) VALUES (?, ?, 'running', ?)",
-                (symbol, _iso(), total_steps),
+                "INSERT INTO index_scan_runs(symbol, started_at, status, total_steps, owner_pid) VALUES (?, ?, 'running', ?, ?)",
+                (symbol, _iso(), total_steps, os.getpid()),
             )
             return int(row.lastrowid)
 
@@ -205,7 +211,8 @@ class IndexScanRepository:
                 "SELECT * FROM index_scan_runs WHERE symbol = ? AND substr(started_at, 1, 10) = ? "
                 "ORDER BY id DESC LIMIT ?", (symbol, day, limit),
             ).fetchall()
-        return [{**dict(row), "errors": json.loads(row["errors_json"]),
+        return [{**dict(row), "status": "unknown_legacy_owner" if row["status"] == "running" and not row["owner_pid"] else row["status"],
+                 "errors": json.loads(row["errors_json"]),
                  "result": json.loads(row["result_json"]) if row["result_json"] else None}
                 for row in rows]
 
@@ -248,10 +255,19 @@ class IndexScannerService:
         self._threads: dict[str, threading.Thread] = {}
         self._scan_locks = {symbol: threading.Lock() for symbol in self.profiles}
         self._refresh_lock = threading.Lock()
+        self._start_lock = threading.Lock()
         self._source_locks: dict[tuple[str, str], threading.Lock] = {}
         self._instrument_tokens: dict[tuple[str, str], tuple[int, str]] = {}
         self._candle_refresh: dict[tuple[str, str], datetime] = {}
         self._option_refresh: dict[str, dict[str, Any]] = {}
+        self._data_lock = threading.Lock()
+        self._data_thread: threading.Thread | None = None
+        self._data_wake = threading.Event()
+        self._analysis_wake = {symbol: threading.Event() for symbol in self.profiles}
+        self._data_attempts: dict[tuple[str, str], datetime] = {}
+        self._data_status = {"running": False, "current": None, "pending": 0,
+                             "successes": 0, "failures": 0, "last_success": None,
+                             "last_error": None, "sources": {}}
 
     def _symbol(self, value: str) -> str:
         symbol = value.upper()
@@ -278,6 +294,10 @@ class IndexScannerService:
             raise ScanCancelled("Scanner stopped before shared data refresh")
 
     def start(self, symbol: str, interval_seconds: int = 180) -> dict[str, Any]:
+        with self._start_lock:
+            return self._start_locked(symbol, interval_seconds)
+
+    def _start_locked(self, symbol: str, interval_seconds: int) -> dict[str, Any]:
         symbol = self._symbol(symbol)
         if not 60 <= int(interval_seconds) <= 3600:
             raise ValueError("Check interval must be 60 to 3600 seconds.")
@@ -296,11 +316,142 @@ class IndexScannerService:
         thread = threading.Thread(target=self._loop, args=(symbol,), name=f"index-{symbol}", daemon=True)
         self._threads[symbol] = thread
         thread.start()
+        self._ensure_data_worker()
         return self.status(symbol)
+
+    def _ensure_data_worker(self) -> None:
+        with self._data_lock:
+            if not self._data_thread or not self._data_thread.is_alive():
+                self._data_thread = threading.Thread(target=self._data_loop, name="index-data", daemon=True)
+                self._data_thread.start()
+        self._data_wake.set()
+
+    def _data_tasks(self, owners: list[str]) -> list[tuple[str, str, str]]:
+        tasks = {}
+        for owner in owners:
+            for item in [owner, *[row["symbol"] for row in self.profiles[owner]["leaders"]]]:
+                for frame in ("options", "15minute", "60minute", "day"):
+                    tasks.setdefault((item, frame), (owner, item, frame))
+        return list(tasks.values())
+
+    def _data_due(self, item: str, frame: str, now: datetime) -> bool:
+        attempted = self._data_attempts.get((item, frame))
+        # Failed/empty sources retry with a bounded delay, not a tight loop.
+        if attempted and (now - attempted).total_seconds() < 30:
+            return False
+        if frame == "options":
+            refreshed = self._option_refresh.get(item, {}).get("refreshed_at")
+            return not refreshed or (now - refreshed).total_seconds() >= 180
+        last = self._candle_refresh.get((item, frame))
+        return not last or self._closed_bucket(frame, last) != self._closed_bucket(frame, now)
+
+    @staticmethod
+    def _closed_bucket(frame: str, now: datetime) -> tuple:
+        current = now.astimezone(IST)
+        start = current.replace(hour=9, minute=15, second=0, microsecond=0)
+        end = current.replace(hour=15, minute=30, second=0, microsecond=0)
+        if current >= end:
+            return current.date(), "closed"
+        minutes = {"15minute": 15, "60minute": 60, "day": 375}[frame]
+        return current.date(), max(0, int((current - start).total_seconds() // (minutes * 60)))
+
+    def _data_loop(self) -> None:
+        self._data_status["running"] = True
+        try:
+            while True:
+                owners = [s for s in self.profiles if self._states[s]["running"] and not self._events[s].is_set()]
+                if not owners:
+                    with self._data_lock:
+                        # A concurrent start either joins this worker or starts its replacement.
+                        if not any(self._states[s]["running"] and not self._events[s].is_set() for s in self.profiles):
+                            self._data_status.update({"running": False, "current": None, "pending": 0})
+                            self._data_thread = None
+                            return
+                    continue
+                if not _scan_window():
+                    self._data_wake.wait(5)
+                    self._data_wake.clear()
+                    continue
+                due = [task for task in self._data_tasks(owners) if self._data_due(task[1], task[2], _now())]
+                self._data_status["pending"] = len(due)
+                if not due:
+                    self._data_wake.wait(1)
+                    self._data_wake.clear()
+                    continue
+                open_frames = {(owner, HORIZON_CONFIG[t["horizon"]]["timeframe"])
+                               for owner in owners for t in self.repository.open_trades(owner)}
+                def priority(task):
+                    _, item, frame = task
+                    return (0 if (item, frame) in open_frames else 1 if frame == "options" else
+                            2 if item in owners else 3,
+                            self._data_attempts.get((item, frame), datetime.min.replace(tzinfo=IST)))
+                due.sort(key=priority)
+                owner, item, frame = due[0]
+                # All option chains share spot/contract quote requests, including common constituents.
+                batch = [task for task in due if task[2] == "options"] if frame == "options" else [due[0]]
+                started = time.monotonic()
+                self._data_status["current"] = ", ".join(f"{i} {f}" for _, i, f in batch)
+                for _, i, f in batch:
+                    self._data_attempts[(i, f)] = _now()
+                try:
+                    if frame == "options":
+                        self._refresh_option_batch(batch, started)
+                    else:
+                        result = self._refresh_candle(item, frame, owner)
+                        error = {"empty": "Empty candle response", "stale": "Required closed candle not available yet; retry queued"}.get(result)
+                        self._record_data(item, frame, error, started)
+                except Exception as exc:
+                    for _, i, f in batch:
+                        self._record_data(i, f, str(exc), started)
+                finally:
+                    self._data_status["current"] = None
+                    for active_owner in owners:
+                        self._analysis_wake[active_owner].set()
+        finally:
+            if self._data_thread is threading.current_thread():
+                self._data_status.update({"running": False, "current": None, "pending": 0})
+
+    def _refresh_option_batch(self, batch, started):
+        acquired = []
+        try:
+            for owner, item, _ in batch:
+                lock = self._source_lock("options", item)
+                if not self._events[owner].is_set() and lock.acquire(blocking=False):
+                    acquired.append((item, lock))
+            if not acquired:
+                return
+            with diagnostics.scope("indexes"):
+                results = self.analysis.refresh_option_chain_snapshots([item for item, _ in acquired])
+            for item, _ in acquired:
+                result = results.get(item, {"error": "No snapshot returned"})
+                error = result.get("error")
+                try:
+                    if not error:
+                        self._publish_options(item, result)
+                except Exception as exc:
+                    error = str(exc)
+                self._record_data(item, "options", error, started)
+        finally:
+            for _, lock in acquired:
+                lock.release()
+
+    def _record_data(self, item: str, frame: str, error: str | None, started: float) -> None:
+        row = {"symbol": item, "timeframe": frame, "status": "failed" if error else "updated",
+               "finished_at": _iso(), "duration_ms": int((time.monotonic() - started) * 1000), "error": error}
+        # Replace the mapping so status readers never iterate a mutating dictionary.
+        self._data_status["sources"] = {**self._data_status["sources"], f"{item}:{frame}": row}
+        self._data_status["failures" if error else "successes"] += 1
+        if error:
+            self._data_status["last_error"] = f"{item} {frame}: {error}"
+        else:
+            self._data_status["last_success"] = _iso()
+        diagnostics.record("index_data_refresh", area="indexes", **row)
 
     def stop(self, symbol: str) -> dict[str, Any]:
         symbol = self._symbol(symbol)
         self._events[symbol].set()
+        self._analysis_wake[symbol].set()
+        self._data_wake.set()
         self._states[symbol]["phase"] = "stopping"
         thread = self._threads.get(symbol)
         if thread and thread.is_alive():
@@ -314,9 +465,12 @@ class IndexScannerService:
         try:
             while not self._events[symbol].is_set():
                 if _scan_window():
-                    self.run_once(symbol, refresh=True)
+                    self._ensure_data_worker()
+                    self._analysis_wake[symbol].clear()
+                    self.run_once(symbol, refresh=False)
                     state["next_run"] = (_now() + timedelta(seconds=state["interval_seconds"])).isoformat(timespec="seconds")
-                    self._events[symbol].wait(state["interval_seconds"])
+                    self._analysis_wake[symbol].wait(state["interval_seconds"])
+                    self._events[symbol].wait(1)
                 else:
                     state["phase"] = "waiting for market"
                     self._events[symbol].wait(20)
@@ -334,6 +488,9 @@ class IndexScannerService:
         state["scan_window"] = _scan_window()
         state["telegram_destination"] = self._telegram_source(symbol)
         state["history"] = self.repository.history(symbol)
+        state["data_service"] = dict(self._data_status)
+        items = {symbol, *[row["symbol"] for row in self.profiles[symbol]["leaders"]]}
+        state["data_service"]["sources"] = {key: row for key, row in self._data_status["sources"].items() if row["symbol"] in items}
         return state
 
     def _telegram_source(self, symbol: str) -> str | None:
@@ -383,7 +540,7 @@ class IndexScannerService:
         key = (symbol, timeframe)
         requested_at = _now()
         last = self._candle_refresh.get(key)
-        if last and (requested_at - last).total_seconds() < REFRESH_SECONDS[timeframe] and refresh_bucket(timeframe, last) == refresh_bucket(timeframe, requested_at):
+        if last and self._closed_bucket(timeframe, last) == self._closed_bucket(timeframe, requested_at):
             return "cached"
         profile = self.profiles.get(symbol)
         exchange = profile["exchange"] if profile else "NSE"
@@ -401,15 +558,36 @@ class IndexScannerService:
             instrument = cached[1]
         path = self._candle_path(symbol, timeframe)
         days = CANDLE_DAYS[timeframe] if not path.exists() else {"day": 8, "60minute": 4, "15minute": 3}[timeframe]
+        cached_candles = self._candles(symbol, timeframe)
+        if cached_candles:
+            days = max(days, (requested_at.date() - _as_ist(cached_candles[-1].timestamp).date()).days + 2)
         window = candle_window(days=days)
         candles = self._broker_call(lambda: _zerodha_client().historical_candles(
             instrument_token=instrument, interval=fetch_interval(timeframe),
             from_time=window.from_time, to_time=window.to_time), owner)
         if candles:
             merge_candles_csv(path, candles)
+            closed = closed_candles(candles, timeframe, requested_at)
+            if not closed or _as_ist(closed[-1].timestamp) < self._expected_closed_bar(timeframe, requested_at):
+                return "stale"
             self._candle_refresh[key] = requested_at
             return "updated"
         return "empty"
+
+    @staticmethod
+    def _expected_closed_bar(frame: str, now: datetime) -> datetime:
+        start = now.replace(hour=9, minute=15, second=0, microsecond=0)
+        end = now.replace(hour=15, minute=30, second=0, microsecond=0)
+        if now >= end:
+            return now.replace(hour=0, minute=0, second=0, microsecond=0) if frame == "day" else end.replace(minute=15)
+        minutes = {"day": 375, "60minute": 60, "15minute": 15}[frame]
+        count = int((now - start).total_seconds() // (minutes * 60))
+        if count > 0:
+            return start + timedelta(minutes=(count - 1) * minutes)
+        previous = now - timedelta(days=1)
+        while not is_market_day(previous.date()):
+            previous -= timedelta(days=1)
+        return previous.replace(hour=0 if frame == "day" else 15, minute=0 if frame == "day" else 15, second=0, microsecond=0)
 
     def _refresh_options(self, symbol: str, owner: str | None = None) -> str:
         lock = self._source_lock("options", symbol)
@@ -435,10 +613,21 @@ class IndexScannerService:
             symbol=symbol, strikes_around=20 if symbol in self.profiles else 8, max_snapshots=8), owner)
         if not result.get("expiry") or date.fromisoformat(result["expiry"]) < _now().date():
             raise ValueError(f"{symbol} option contracts are expired; refresh the instrument cache")
+        self._publish_options(symbol, result)
+        return "updated"
+
+    def _publish_options(self, symbol: str, result: dict[str, Any]) -> None:
+        def read(path):
+            if not path:
+                return []
+            with Path(path).open("r", encoding="utf-8", newline="") as handle:
+                return list(csv.DictReader(handle))
+        current = read(result.get("history_snapshot") or result["latest_snapshot"])
+        previous = read(result.get("archived_previous_latest"))
         self._option_refresh[symbol] = {"current": result["latest_snapshot"],
                                         "previous": result.get("archived_previous_latest"),
+                                        "rows": (current, previous),
                                         "refreshed_at": _now(), "expiry": result.get("expiry")}
-        return "updated"
 
     def _footprint(self, symbol: str, spot: float | None) -> dict[str, Any]:
         files = self._option_refresh.get(symbol)
@@ -449,7 +638,7 @@ class IndexScannerService:
         def read(path):
             with Path(path).open("r", encoding="utf-8", newline="") as handle:
                 return list(csv.DictReader(handle))
-        current, previous = read(files["current"]), read(files["previous"])
+        current, previous = files["rows"] if "rows" in files else (read(files["current"]), read(files["previous"]))
         if not current or not previous or current[0].get("expiry") != previous[0].get("expiry"):
             return {"bias": "unavailable", "reason": "Snapshot expiry mismatch"}
         previous_at = _as_ist(previous[0]["snapshot_time"])
@@ -645,3 +834,29 @@ class IndexScannerService:
                     errors.append(delivery_error)
                 count += 1
         return count
+
+
+def _process_alive(pid: int) -> bool:
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return ctypes.get_last_error() == 5  # Access denied is not proof of termination.
+        try:
+            code = wintypes.DWORD()
+            return not kernel.GetExitCodeProcess(handle, ctypes.byref(code)) or code.value == 259
+        finally:
+            kernel.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True

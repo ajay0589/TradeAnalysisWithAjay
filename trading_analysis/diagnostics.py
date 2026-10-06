@@ -28,6 +28,8 @@ _LOCK = threading.Lock()
 _SENSITIVE = re.compile(r"token|secret|password|authorization|cookie|chat_id|api_key|request_token", re.I)
 _TOKEN = re.compile(r"\b\d{6,}:[A-Za-z0-9_-]{20,}\b")
 _LOG_ERROR: str | None = None
+_POLL_LOCK = threading.Lock()
+_POLL_STATE = {}
 
 
 def clean(value):
@@ -154,7 +156,9 @@ def audit_http(fn):
         params = parse_qs(urlparse(handler.path).query)
         selected = {key: params[key] for key in ("symbol", "timeframe", "horizon", "days", "refresh", "mode") if key in params}
         with scope(area_for_path(path), request_id):
-            record("request_started", method=handler.command, endpoint=path, parameters=selected)
+            polling = handler.command == "GET" and path.endswith("/status")
+            if not polling:
+                record("request_started", method=handler.command, endpoint=path, parameters=selected)
             try:
                 return fn(handler)
             except Exception as exc:
@@ -162,10 +166,20 @@ def audit_http(fn):
                 handler._diagnostic_response = {"error": str(exc)}
                 raise
             finally:
-                status = "failed" if handler._diagnostic_status >= 400 or handler._diagnostic_response.get("errors") or handler._diagnostic_response.get("status") == "failed" else "ok"
-                record("request_finished", status=status, method=handler.command, endpoint=path,
-                       http_status=handler._diagnostic_status, duration_ms=int((time.monotonic() - started) * 1000),
-                       parameters=selected, result=handler._diagnostic_response)
+                status = "failed" if handler._diagnostic_status >= 400 or (not polling and (handler._diagnostic_response.get("errors") or handler._diagnostic_response.get("status") == "failed")) else "ok"
+                emit = True
+                if polling:
+                    signature = json.dumps(clean([handler._diagnostic_status, handler._diagnostic_response]), sort_keys=True, default=str)
+                    key = (str(ROOT), path, json.dumps(selected, sort_keys=True))
+                    with _POLL_LOCK:
+                        previous, last_at = _POLL_STATE.get(key, (None, 0))
+                        emit = signature != previous or time.monotonic() - last_at >= 60
+                        if emit:
+                            _POLL_STATE[key] = (signature, time.monotonic())
+                if emit:
+                    record("request_finished", status=status, method=handler.command, endpoint=path,
+                           http_status=handler._diagnostic_status, duration_ms=int((time.monotonic() - started) * 1000),
+                           parameters=selected, result=handler._diagnostic_response)
     return wrapper
 
 

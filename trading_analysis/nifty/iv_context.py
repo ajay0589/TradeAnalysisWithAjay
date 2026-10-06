@@ -128,8 +128,9 @@ def build_nifty_iv_context(
             notes=notes,
             warnings=warnings,
         )
-    iv_min = min(values)
-    iv_max = max(values)
+    # Include the current observation even before the history writer has persisted it.
+    iv_min = min([*values, current])
+    iv_max = max([*values, current])
     iv_rank = None if current is None or iv_max == iv_min else ((current - iv_min) / (iv_max - iv_min)) * 100
     iv_percentile = None if current is None else (len([value for value in values if value < current]) / len(values)) * 100
     regime = _regime(iv_rank)

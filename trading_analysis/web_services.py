@@ -2793,6 +2793,53 @@ class AnalysisService:
         spot_price = _optional_float(spot_quote.get("last_price"))
         selected = contracts if all_strikes else select_strikes_around_spot(contracts, spot_price, strikes_around)
         quotes = client.quotes([contract.kite_key for contract in selected])
+        return self._save_option_snapshot(symbol, selected_expiry, selected, quotes, spot_price,
+                                          previous_snapshot, max_snapshots)
+
+    def refresh_option_chain_snapshots(self, symbols: list[str], max_snapshots: int = 8) -> dict[str, Any]:
+        """Share spot and option quote requests across the index monitor's watchlist."""
+        client = _zerodha_client()
+        prepared, results, masters = {}, {}, {}
+        for symbol in dict.fromkeys(symbols):
+            try:
+                exchange = "BFO" if symbol == "SENSEX" else "NFO"
+                path = self.nfo_instruments_path if exchange == "NFO" else self.nfo_instruments_path.with_name("instruments_BFO.csv")
+                if datetime.now().timestamp() - path.stat().st_mtime > 7 * 86400:
+                    raise ValueError(f"Refresh stale {exchange} instrument master")
+                if exchange not in masters:
+                    masters[exchange] = load_instruments_csv(path)
+                contracts = option_contracts_for_symbol(masters[exchange], self._option_underlying(symbol), exchange=exchange)
+                expiry = nearest_expiry(contracts)
+                if not expiry or expiry < date.today():
+                    raise ValueError(f"No current option contracts for {symbol}")
+                prepared[symbol] = (expiry, [row for row in contracts if row.expiry == expiry])
+            except Exception as exc:
+                results[symbol] = {"error": str(exc)}
+        if not prepared:
+            return results
+        spots = client.quotes([self._spot_quote_key(symbol) for symbol in prepared])
+        selected, prices = {}, {}
+        for symbol, (_, contracts) in prepared.items():
+            spot = _optional_float(spots.get(self._spot_quote_key(symbol), {}).get("last_price"))
+            if not spot or spot <= 0:
+                results[symbol] = {"error": "Current spot quote unavailable"}
+                continue
+            prices[symbol] = spot
+            selected[symbol] = select_strikes_around_spot(contracts, spot, 20 if symbol in {"BANKNIFTY", "SENSEX"} else 8)
+        quotes = client.quotes([row.kite_key for rows in selected.values() for row in rows])
+        for symbol, rows in selected.items():
+            try:
+                if not rows or any(row.kite_key not in quotes for row in rows):
+                    raise ValueError("Incomplete option quote response; previous snapshot retained")
+                _, snapshot = self._save_option_snapshot(symbol, prepared[symbol][0], rows, quotes,
+                                                         prices[symbol], None, max_snapshots)
+                results[symbol] = snapshot
+            except Exception as exc:
+                results[symbol] = {"error": str(exc)}
+        return results
+
+    def _save_option_snapshot(self, symbol, selected_expiry, selected, quotes, spot_price,
+                              previous_snapshot, max_snapshots):
         default_snapshot = self._latest_snapshot_path(symbol, selected_expiry)
         previous_path = Path(previous_snapshot) if previous_snapshot else default_snapshot
         previous_exists = previous_path.exists()

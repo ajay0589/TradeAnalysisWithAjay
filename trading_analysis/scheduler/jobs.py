@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Callable
 import time
@@ -257,7 +259,8 @@ class NiftyMarketJobs:
             }
             if signal:
                 signal["context_snapshot_id"] = context_snapshot_id
-                signal["metadata"] = {**(signal.get("metadata") or {}), **data_links}
+                signal["metadata"] = {**(signal.get("metadata") or {}), **data_links,
+                                      "latest_candle_timestamp": signal["entry_candle_timestamp"].isoformat()}
                 opened = self.trade_repository.open_trade(signal)
                 if opened.get("created"):
                     trade = opened["trade"]
@@ -381,7 +384,10 @@ class NiftyMarketJobs:
             "expiry": None,
             "reasons": [f"Exit reason: {trade['exit_reason']}"],
             "risks": [],
-            "metadata": trade.get("metadata") or {},
+            "metadata": {**(trade.get("metadata") or {}),
+                         "latest_candle_timestamp": str(trade.get("exit_time") or ""),
+                         "exit_candle_timestamp": str(trade.get("exit_time") or ""),
+                         "exit_detected_at": datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()},
             "context_snapshot_id": trade.get("context_snapshot_id"),
             "telegram_status": "pending",
         }

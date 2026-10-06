@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from statistics import mean
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -36,6 +36,10 @@ def build_live_entry_signal(
         return None
     latest = closed[-1]
     current = _as_naive_ist(now or datetime.now(IST))
+    if horizon == "intraday" and current.time() >= time(15, 30):
+        if diagnostics is not None:
+            diagnostics["gate"] = "session_closed"
+        return None
     if diagnostics is not None:
         diagnostics.update({"candle_time": latest.timestamp.isoformat(), "candle_close": latest.close, "gate": "candle_freshness"})
     if not _candle_is_fresh(latest, horizon, current):
@@ -109,6 +113,9 @@ def build_live_entry_signal(
         ],
         "risks": list(candidate.get("risks") or []) + list(context.get("warnings") or [])[:2],
         "metadata": {
+            "signal_candle_timestamp": latest.timestamp.isoformat(),
+            "signal_candle_closed_at": candle_close_time(latest.timestamp, config["timeframe"]).isoformat(),
+            "signal_detected_at": (now or datetime.now(IST)).isoformat(),
             "candle_open": latest.open,
             "candle_high": latest.high,
             "candle_low": latest.low,
@@ -132,14 +139,32 @@ def evaluate_live_exit(
     *,
     now: datetime | None = None,
 ) -> dict[str, Any] | None:
+    if trade.get("status") == "closed":
+        return None
     horizon = str(trade.get("horizon") or "")
     config = HORIZON_CONFIG[horizon]
     closed = closed_candles(candles, config["timeframe"], now=now)
     if not closed:
         return None
-    latest = closed[-1]
-    if str(trade.get("last_candle_timestamp") or "") == latest.timestamp.isoformat(timespec="seconds"):
+    entry_time = _as_naive_ist(trade.get("entry_candle_timestamp") or trade["entry_time"])
+    last_checked = _as_naive_ist(trade.get("last_candle_timestamp") or entry_time)
+    pending = [row for row in closed if _as_naive_ist(row.timestamp) > max(last_checked, entry_time)]
+    if not pending:
+        latest = closed[-1]
+        if horizon == "intraday" and _as_naive_ist(latest.timestamp) > entry_time and candle_close_time(latest.timestamp, "15minute").time() == time(15, 30):
+            return _exit_payload(latest, latest.close, "session_close")
         return None
+    # Replay every unseen closed bar so slow refreshes cannot skip a stop or target.
+    for latest in pending:
+        prefix = [row for row in closed if _as_naive_ist(row.timestamp) <= _as_naive_ist(latest.timestamp)]
+        outcome = _evaluate_exit_bar(trade, prefix, entry_time, config)
+        if not outcome.get("checked_only"):
+            return outcome
+    return outcome
+
+
+def _evaluate_exit_bar(trade, closed, entry_time, config):
+    latest = closed[-1]
     direction = str(trade.get("direction") or "")
     stop = float(trade["stop_level"])
     target = float(trade["target_level"])
@@ -157,7 +182,8 @@ def evaluate_live_exit(
         return _exit_payload(latest, latest.close, "closed_below_ema20")
     if ema20 is not None and direction == "bearish" and latest.close > ema20:
         return _exit_payload(latest, latest.close, "closed_above_ema20")
-    entry_time = _as_naive_ist(trade.get("entry_time"))
+    if trade["horizon"] == "intraday" and candle_close_time(latest.timestamp, "15minute").time() >= time(15, 30):
+        return _exit_payload(latest, latest.close, "session_close")
     later_bars = [candle for candle in closed if _as_naive_ist(candle.timestamp) > entry_time]
     if len(later_bars) >= int(config["max_bars"]):
         return _exit_payload(latest, latest.close, "maximum_holding_period")
@@ -194,6 +220,8 @@ def backtest_nifty_live_rules(
         slow = slow_series[index]
         rsi14 = rsi_series[index]
         signal_direction = _historical_direction(latest, fast, slow, rsi14, direction)
+        if horizon == "intraday" and candle_close_time(latest.timestamp, "15minute").time() >= time(15, 30):
+            signal_direction = None
         if signal_direction is None:
             index += 1
             continue
@@ -202,7 +230,7 @@ def backtest_nifty_live_rules(
         risk = abs(latest.close - stop)
         target = latest.close + risk * target_r_multiple if signal_direction == "bullish" else latest.close - risk * target_r_multiple
         exit_index, exit_price, exit_reason, favorable, adverse = _simulate_exit(
-            filtered, fast_series, index, signal_direction, stop, target, max_bars
+            filtered, fast_series, index, signal_direction, stop, target, max_bars, intraday=horizon == "intraday"
         )
         r_multiple = ((exit_price - latest.close) / risk) * (1 if signal_direction == "bullish" else -1)
         open_seconds = max(0, int((filtered[exit_index].timestamp - latest.timestamp).total_seconds()))
@@ -231,6 +259,18 @@ def backtest_nifty_live_rules(
     return _backtest_payload(trades, horizon, config["timeframe"], target_r_multiple, len(filtered))
 
 
+def candle_close_time(timestamp: datetime, timeframe: str) -> datetime:
+    stamp = _as_naive_ist(timestamp)
+    session_end = stamp.replace(hour=15, minute=30, second=0, microsecond=0)
+    if timeframe == "day":
+        return session_end.replace(tzinfo=IST)
+    minutes = int(HORIZON_CONFIG[_horizon_for_timeframe(timeframe)]["minutes"])
+    close = stamp + timedelta(minutes=minutes)
+    if stamp.replace(hour=9, minute=15, second=0, microsecond=0) <= stamp < session_end:
+        close = min(close, session_end)
+    return close.replace(tzinfo=IST)
+
+
 def closed_candles(candles: list[Candle], timeframe: str, now: datetime | None = None) -> list[Candle]:
     current = now or datetime.now(IST)
     if current.tzinfo is not None:
@@ -238,10 +278,7 @@ def closed_candles(candles: list[Candle], timeframe: str, now: datetime | None =
     output = []
     for candle in sorted(candles, key=lambda row: row.timestamp):
         timestamp = _as_naive_ist(candle.timestamp)
-        if timeframe == "day":
-            close_time = timestamp.replace(hour=15, minute=30, second=0, microsecond=0)
-        else:
-            close_time = timestamp + timedelta(minutes=int(HORIZON_CONFIG[_horizon_for_timeframe(timeframe)]["minutes"]))
+        close_time = candle_close_time(timestamp, timeframe).replace(tzinfo=None)
         if close_time <= current:
             output.append(candle)
     return output
@@ -301,12 +338,14 @@ def _historical_direction(candle: Candle, fast: float | None, slow: float | None
     return None
 
 
-def _simulate_exit(candles: list[Candle], ema20_series: list[float | None], entry_index: int, direction: str, stop: float, target: float, max_bars: int) -> tuple[int, float, str, float, float]:
+def _simulate_exit(candles: list[Candle], ema20_series: list[float | None], entry_index: int, direction: str, stop: float, target: float, max_bars: int, intraday: bool = False) -> tuple[int, float, str, float, float]:
     entry = candles[entry_index].close
     favorable = adverse = 0.0
     last_index = min(len(candles) - 1, entry_index + max_bars)
     for index in range(entry_index + 1, last_index + 1):
         candle = candles[index]
+        if intraday and candle.timestamp.date() != candles[entry_index].timestamp.date():
+            return index - 1, candles[index - 1].close, "session_end_data_boundary", favorable, adverse
         if direction == "bullish":
             favorable = max(favorable, candle.high - entry)
             adverse = min(adverse, candle.low - entry)
@@ -324,6 +363,8 @@ def _simulate_exit(candles: list[Candle], ema20_series: list[float | None], entr
         ema20 = ema20_series[index]
         if ema20 is not None and ((direction == "bullish" and candle.close < ema20) or (direction == "bearish" and candle.close > ema20)):
             return index, candle.close, "ema20_reversal", favorable, adverse
+        if intraday and candle_close_time(candle.timestamp, "15minute").time() >= time(15, 30):
+            return index, candle.close, "session_close", favorable, adverse
     return last_index, candles[last_index].close, "maximum_holding_period", favorable, adverse
 
 

@@ -3589,11 +3589,12 @@ function renderAllIndexStatus(data) {
   $("allIndexStop").disabled = !data.any_running;
   $("allIndexStatusBody").innerHTML = ["NIFTY", "BANKNIFTY", "SENSEX"].map((symbol) => {
     const row = rows[symbol] || {};
-    const issue = (row.errors || []).at(-1) || "-";
+    const issue = Object.values(row.data_service?.sources || {}).find((source) => source.error)?.error || (row.errors || []).at(-1) || "-";
     const progress = row.progress || {};
-    const progressText = progress.total ? `${fmtInt(progress.completed)}/${fmtInt(progress.total)}` : "-";
+    const progressText = progress.total ? `${fmtInt(progress.completed)}/${fmtInt(progress.total)}${row.data_service ? ` | ${fmtInt(row.data_service.pending)} refresh pending` : ""}` : "-";
+    const currentWork = row.data_service?.current || progress.current || "-";
     const status = row.running ? "Running" : row.scan_active ? "Scanning once" : "Stopped";
-    return `<tr><td>${escapeHtml(symbol)}</td><td>${status}<div class="cell-note">${escapeHtml(row.phase || "-")}</div></td><td>${progressText}</td><td>${escapeHtml(progress.current || "-")}</td><td>${fmtDateTime(row.started_at)}</td><td>${fmtDateTime(row.last_cycle_at)}</td><td>${fmtDateTime(row.next_run)}</td><td>${row.telegram_configured ? "Configured" : "Not configured"}<div><button class="linkBtn index-telegram-test" data-symbol="${symbol}" type="button" title="Send a labeled test message to this index's configured Telegram chat">Send test</button></div></td><td class="${issue !== "-" ? "points-negative" : ""}">${escapeHtml(issue)}</td></tr>`;
+    return `<tr><td>${escapeHtml(symbol)}</td><td>${status}<div class="cell-note">${escapeHtml(row.phase || "-")}</div></td><td>${progressText}</td><td>${escapeHtml(currentWork)}</td><td>${fmtDateTime(row.started_at)}</td><td>${fmtDateTime(row.last_cycle_at)}</td><td>${fmtDateTime(row.next_run)}</td><td>${row.telegram_configured ? "Configured" : "Not configured"}<div><button class="linkBtn index-telegram-test" data-symbol="${symbol}" type="button" title="Send a labeled test message to this index's configured Telegram chat">Send test</button></div></td><td class="${issue !== "-" ? "points-negative" : ""}">${escapeHtml(issue)}</td></tr>`;
   }).join("");
   document.querySelectorAll(".index-telegram-test").forEach((button) => {
     button.addEventListener("click", () => testIndexTelegram(button.dataset.symbol, button));
@@ -3795,6 +3796,10 @@ function renderIndexScanner(data) {
   $("indexScannerProgressText").textContent = progress.total
     ? `${fmtInt(progress.completed)}/${fmtInt(progress.total)} steps | ${progress.current || data.phase || "idle"} | ${fmtInt(progress.failures)} failed`
     : "Waiting for a scan";
+  const refresh = data.data_service || {};
+  $("indexScannerDataStatus").textContent = `Data refresh ${refresh.running ? "running" : "stopped"} | ${fmtInt(refresh.pending || 0)} pending | ${refresh.current || "idle"} | Last success ${fmtDateTime(refresh.last_success)}`;
+  const sources = Object.values(refresh.sources || {});
+  $("indexScannerDataSources").innerHTML = sources.length ? `<table class="readable-table"><thead><tr><th>Source</th><th>Status</th><th>Last completed</th><th>Seconds</th></tr></thead><tbody>${sources.map((row) => `<tr><td>${escapeHtml(row.symbol)} ${escapeHtml(row.timeframe)}</td><td>${escapeHtml(row.status)}${row.error ? `<div class="points-negative">${escapeHtml(row.error)}</div>` : ""}</td><td>${fmtDateTime(row.finished_at)}</td><td>${fmt(row.duration_ms / 1000)}</td></tr>`).join("")}</tbody></table>` : "";
   $("indexScannerMeta").textContent = `${data.profile.label} | ${fmtDateTime(result.as_of)}`;
   $("indexScannerMetrics").innerHTML = [
     ["New entries", result.entries_created ?? 0], ["New exits", result.exits_created ?? 0],

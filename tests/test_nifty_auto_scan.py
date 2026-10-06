@@ -690,11 +690,12 @@ class NiftyAutoScanTests(unittest.TestCase):
             candle_repo = NiftyCandleRepository(db_path)
             option_repo = NiftyOptionChainRepository(db_path)
             iv_repo = NiftyIVObservationRepository(db_path)
-            start = datetime.now() - timedelta(minutes=15 * 60)
+            now = datetime(2026, 10, 6, 12, 0, tzinfo=ZoneInfo("Asia/Kolkata"))
+            start = now - timedelta(minutes=15 * 60)
             candle_repo.upsert_candles("NIFTY", "15minute", _candles([100 + index for index in range(60)], start=start))
             snapshot_id = option_repo.save_snapshot(
                 {"symbol": "NIFTY", "expiry": "2026-07-09", "rows": _option_rows()},
-                captured_at=datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(timespec="seconds"),
+                captured_at=now.isoformat(timespec="seconds"),
             )
             iv_id = iv_repo.record_observation(expiry="2026-07-09", atm_iv=15.5, source_snapshot_id=snapshot_id)
             jobs = NiftyMarketJobs(
@@ -708,7 +709,8 @@ class NiftyAutoScanTests(unittest.TestCase):
                 notifier=TelegramNotifier(),
             )
 
-            with patch("trading_analysis.scheduler.jobs.is_scan_window", return_value=True):
+            with patch("trading_analysis.scheduler.jobs.is_scan_window", return_value=True), \
+                 patch("trading_analysis.scheduler.jobs.build_live_entry_signal", side_effect=lambda *args, **kwargs: build_live_entry_signal(*args, **kwargs, now=now)):
                 payload = jobs.run_nifty_opportunity_scan_job(mode="auto", min_score=70)
             alert = payload["result"]["alerts"][0]
 

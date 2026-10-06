@@ -13,11 +13,11 @@ from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from trading_analysis.models import Candle
 from trading_analysis import diagnostics
-from trading_analysis.network import https_context
+from trading_analysis.network import https_context, pooled_urlopen as urlopen
 
 
 QUOTE_LIMIT = 500
@@ -135,8 +135,10 @@ class ZerodhaKiteClient:
             method="GET",
         )
         started = time.monotonic()
-        queue_ms = network_ms = 0
+        queue_ms = network_ms = context_ms = headers_ms = body_ms = 0
         network_started = None
+        phase = "queue"
+        phase_started = started
         error = None
         try:
             with request_slot() as queue_ms:
@@ -145,8 +147,18 @@ class ZerodhaKiteClient:
                     time.sleep(wait)
                 network_started = time.monotonic()
                 try:
-                    with urlopen(request, timeout=self.timeout_seconds, context=https_context()) as response:
-                        return response.read().decode("utf-8")
+                    phase, phase_started = "tls_context", network_started
+                    context = https_context()
+                    context_ms = int((time.monotonic() - network_started) * 1000)
+                    tick = time.monotonic()
+                    phase, phase_started = "connect_to_headers", tick
+                    with urlopen(request, timeout=self.timeout_seconds, context=context) as response:
+                        headers_ms = int((time.monotonic() - tick) * 1000)
+                        tick = time.monotonic()
+                        phase, phase_started = "body", tick
+                        body = response.read().decode("utf-8")
+                        body_ms = int((time.monotonic() - tick) * 1000)
+                        return body
                 finally:
                     network_ms = int((time.monotonic() - network_started) * 1000)
                     _LAST_REQUEST_AT = time.monotonic()
@@ -158,6 +170,9 @@ class ZerodhaKiteClient:
                 queue_ms = int((time.monotonic() - started) * 1000)
             diagnostics.record("broker_request", status="failed" if error else "ok", endpoint=path,
                                queue_ms=queue_ms, network_ms=network_ms, error=error,
+                               context_ms=context_ms, connect_to_headers_ms=headers_ms, body_ms=body_ms,
+                               failed_phase=phase if error else None,
+                               failed_phase_ms=int((time.monotonic() - phase_started) * 1000) if error else None,
                                duration_ms=int((time.monotonic() - started) * 1000),
                                worker=threading.current_thread().name)
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import math
+import tempfile
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -173,6 +174,19 @@ def load_option_chain_snapshot(path: str | Path) -> dict[str, dict[str, str]]:
 
 
 def write_option_chain_snapshot(path: str | Path, analysis: OptionChainAnalysis) -> None:
+    from trading_analysis.brokers.zerodha import _atomic_replace
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=output.parent, prefix=f".{output.name}.", suffix=".tmp", delete=False) as handle:
+        temporary = Path(handle.name)
+    try:
+        _write_option_chain_snapshot(temporary, analysis)
+        _atomic_replace(temporary, output)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _write_option_chain_snapshot(path: str | Path, analysis: OptionChainAnalysis) -> None:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [

@@ -6,11 +6,11 @@ import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from trading_analysis.config import load_dotenv
 from trading_analysis import diagnostics
-from trading_analysis.network import https_context, network_hint, tls_info
+from trading_analysis.network import https_context, network_hint, tls_info, pooled_urlopen as urlopen
 
 
 @dataclass(frozen=True)
@@ -136,6 +136,9 @@ def nifty_trade_message(event_kind: str, trade: dict[str, Any], alert: dict[str,
     if alert and alert.get("message"):
         parts.append(str(alert["message"]))
     metadata = trade.get("metadata") or {}
+    if event_kind.lower() == "entry" and metadata.get("signal_candle_closed_at"):
+        parts.append(f"Signal candle closed: {metadata['signal_candle_closed_at']}")
+        parts.append(f"Signal detected: {metadata.get('signal_detected_at') or trade.get('created_at')}")
     parts.append(
         "Context: "
         f"option {metadata.get('option_bias') or '-'}, PCR {_fmt(metadata.get('pcr_oi'))}, "
