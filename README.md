@@ -180,6 +180,22 @@ python -m trading_analysis.cli trade-decision --symbol RELIANCE --skip-option-ch
 
 ## Web UI
 
+### Windows launcher (recommended)
+
+Double-click `Trading Desk.cmd` in the project folder. A desktop control window opens independently of the web server, so it works even when the server is stopped. Python with Tcl/Tk and Git must already be installed; the standard python.org Windows installer includes Tcl/Tk. This launcher does not require changing PowerShell execution policy or running as Administrator. You can create a Windows desktop shortcut to this file; keep the original file in the project folder.
+
+- `Start Server`: starts this project's server on port 8766, or recognizes an already-running copy. It does not automatically start market scanners.
+- `Stop Server`: stops the verified server and its scanner workers. Stored candles, credentials, and trade history are retained.
+- `Open App`: opens the app in your browser.
+- `Update App`: requires the `scanner-audit-and-v4` branch and a clean working folder, stops the server if running, executes `git pull --ff-only origin scanner-audit-and-v4`, installs `requirements.txt` with the selected Python, and restarts only if the server was previously running. Start the market scanners again in the app afterward. Update outside market hours.
+- `View Logs` / `Save Support Log`: shows or exports launcher and server log tails for troubleshooting. Review exported logs before sharing.
+
+Updates never reset, stash, overwrite local edits, or erase data. A failed pull or dependency installation leaves the server stopped and displays the error. Authentication errors require Git access to be configured once; the launcher does not ask for passwords or store Git credentials. Reopen the launcher after updating to load changes to the launcher itself. Closing the launcher asks whether to stop the server or leave it running.
+
+If a port belongs to another project or an old server without identifying health metadata, the launcher refuses to stop it. Inspect that process or ask the maintainer for help. A startup timeout cleans up only the process tree it just launched, instead of leaving a hidden process occupying the port. Local health checks bypass network proxies and verify the project, port, and launch identity, not the Python alias path or launcher PID.
+
+### Command-line alternative
+
 Start the local F&O decision dashboard:
 
 ```powershell
@@ -189,7 +205,7 @@ python -m pip install -r requirements.txt
 
 Then open `http://127.0.0.1:8766`.
 
-Use this same URL going forward on `scanner-audit-and-v4`. The script uses `.venv\Scripts\python.exe` when present (install requirements with that Python), otherwise `python` from PATH. It waits for a verified health response before reporting success and refuses to overwrite an occupied port. The v3 server can continue running separately on port `8765`. Stop the current v4 server before restarting:
+Use this same URL going forward on `scanner-audit-and-v4`. The script uses `.venv\Scripts\python.exe` when present (install requirements with that Python), otherwise `python` from PATH. The scripts and desktop launcher share the same process controller. Start recognizes a healthy server from this folder, waits for readiness when launching, and refuses a port occupied by an unverified process. The v3 server can continue running separately on port `8765`. Stop the current v4 server before restarting:
 
 ```powershell
 .\scripts\stop_web_ui.ps1 -Port 8766

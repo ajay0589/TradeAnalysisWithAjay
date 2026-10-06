@@ -85,7 +85,7 @@ def runtime() -> dict:
     return {"service": "trading-analysis", "instance_id": INSTANCE_ID, "pid": os.getpid(),
             "started_at": STARTED_AT, "python": platform.python_version(), "executable": sys.executable,
             "project_root": str(ROOT), "code_version": CODE_VERSION, "tls": tls_info(),
-            "logging_error": _LOG_ERROR}
+            "logging_error": _LOG_ERROR, "launch_id": os.getenv("TRADING_SERVER_LAUNCH_ID")}
 
 
 def export(day: str | None = None) -> dict:
