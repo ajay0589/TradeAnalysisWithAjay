@@ -7,6 +7,8 @@ import os
 import tempfile
 import threading
 import time
+from collections import deque
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
@@ -14,13 +16,17 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from trading_analysis.models import Candle
+from trading_analysis import diagnostics
+from trading_analysis.network import https_context
 
 
 QUOTE_LIMIT = 500
 _CANDLE_MERGE_LOCK = threading.RLock()
-_REQUEST_LOCK = threading.Lock()
+_REQUEST_CONDITION = threading.Condition()
+_REQUEST_WAITERS: deque = deque()
 _LAST_REQUEST_AT = 0.0
 _MIN_REQUEST_GAP_SECONDS = 0.45
+_MAX_QUEUE_WAIT_SECONDS = 60
 HISTORICAL_MAX_DAYS = {
     "day": 1900,
     "60minute": 390,
@@ -28,6 +34,27 @@ HISTORICAL_MAX_DAYS = {
     "15minute": 190,
     "10minute": 90,
 }
+
+
+@contextmanager
+def request_slot():
+    ticket = object()
+    started = time.monotonic()
+    with _REQUEST_CONDITION:
+        _REQUEST_WAITERS.append(ticket)
+        while _REQUEST_WAITERS[0] is not ticket:
+            remaining = _MAX_QUEUE_WAIT_SECONDS - (time.monotonic() - started)
+            if remaining <= 0:
+                _REQUEST_WAITERS.remove(ticket)
+                _REQUEST_CONDITION.notify_all()
+                raise TimeoutError("Broker refresh queue wait limit reached; retry on the next cycle")
+            _REQUEST_CONDITION.wait(min(remaining, 0.25))
+    try:
+        yield int((time.monotonic() - started) * 1000)
+    finally:
+        with _REQUEST_CONDITION:
+            _REQUEST_WAITERS.popleft()
+            _REQUEST_CONDITION.notify_all()
 
 
 class ZerodhaKiteClient:
@@ -107,15 +134,32 @@ class ZerodhaKiteClient:
             },
             method="GET",
         )
-        with _REQUEST_LOCK:
-            wait = _MIN_REQUEST_GAP_SECONDS - (time.monotonic() - _LAST_REQUEST_AT)
-            if wait > 0:
-                time.sleep(wait)
-            try:
-                with urlopen(request, timeout=self.timeout_seconds) as response:
-                    return response.read().decode("utf-8")
-            finally:
-                _LAST_REQUEST_AT = time.monotonic()
+        started = time.monotonic()
+        queue_ms = network_ms = 0
+        network_started = None
+        error = None
+        try:
+            with request_slot() as queue_ms:
+                wait = _MIN_REQUEST_GAP_SECONDS - (time.monotonic() - _LAST_REQUEST_AT)
+                if wait > 0:
+                    time.sleep(wait)
+                network_started = time.monotonic()
+                try:
+                    with urlopen(request, timeout=self.timeout_seconds, context=https_context()) as response:
+                        return response.read().decode("utf-8")
+                finally:
+                    network_ms = int((time.monotonic() - network_started) * 1000)
+                    _LAST_REQUEST_AT = time.monotonic()
+        except Exception as exc:
+            error = str(exc)
+            raise
+        finally:
+            if network_started is None:
+                queue_ms = int((time.monotonic() - started) * 1000)
+            diagnostics.record("broker_request", status="failed" if error else "ok", endpoint=path,
+                               queue_ms=queue_ms, network_ms=network_ms, error=error,
+                               duration_ms=int((time.monotonic() - started) * 1000),
+                               worker=threading.current_thread().name)
 
 
 def build_login_url(api_key: str, redirect_params: dict[str, str] | None = None) -> str:
@@ -149,7 +193,7 @@ def generate_session(
         },
         method="POST",
     )
-    with urlopen(request, timeout=timeout_seconds) as response:
+    with urlopen(request, timeout=timeout_seconds, context=https_context()) as response:
         payload = json.loads(response.read().decode("utf-8"))
     if payload.get("status") != "success":
         raise RuntimeError(f"Zerodha token exchange failed: {payload}")
@@ -198,7 +242,7 @@ def write_instruments_csv(path: str | Path, instruments: list[dict[str, str]]) -
                 writer.writerows(instruments)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary_path, output_path)
+        _atomic_replace(temporary_path, output_path)
     finally:
         if temporary_path and temporary_path.exists():
             temporary_path.unlink()
@@ -254,10 +298,22 @@ def write_candles_csv(path: str | Path, candles: list[Candle]) -> None:
                 )
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary_path, output_path)
+        _atomic_replace(temporary_path, output_path)
     finally:
         if temporary_path and temporary_path.exists():
             temporary_path.unlink()
+
+
+def _atomic_replace(source: Path, target: Path) -> None:
+    for attempt in range(6):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt == 5:
+                raise
+            diagnostics.record("cache_replace_retry", area="data", status="retry", file=target.name, attempt=attempt + 1)
+            time.sleep(0.05 * 2 ** attempt)
 
 
 def merge_candles_csv(path: str | Path, candles: list[Candle]) -> None:

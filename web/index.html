@@ -19,6 +19,14 @@
         </div>
       </section>
 
+      <div class="app-diagnostics">
+        <span id="serverRuntime" class="cell-note"></span>
+        <label for="appDiagnosticsDate">Log date (IST)</label>
+        <input id="appDiagnosticsDate" type="date" />
+        <button id="appDiagnosticsDownload" type="button">Download app log</button>
+        <span id="appDiagnosticsStatus" class="cell-note"></span>
+      </div>
+
       <nav class="activity-tabs" aria-label="Decision desk activities">
         <button class="tab-btn active" data-tab-target="research" type="button">Stock Research</button>
         <button class="tab-btn" data-tab-target="indices" type="button">Index Scanning</button>
@@ -46,6 +54,7 @@
                   <input id="symbolInput" list="symbolList" placeholder="NIFTY" autocomplete="off" />
                   <button id="analyzeBtn">Analyze</button>
                 </div>
+                <p id="analysisSelectionStatus" class="cell-note" role="status"></p>
                 <datalist id="symbolList"></datalist>
                 <label for="timeframeSelect">Timeframe</label>
                 <select id="timeframeSelect">
@@ -143,7 +152,7 @@
               </div>
             </aside>
 
-            <section class="content">
+            <section class="content" id="analysisResults" hidden>
               <section class="analysis-banner">
                 <div>
                   <span>Instrument</span>

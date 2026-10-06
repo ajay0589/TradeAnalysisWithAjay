@@ -3,10 +3,14 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 from typing import Any, Callable
+import time
+
+from trading_analysis import diagnostics
 
 from trading_analysis.candles import candle_path
 from trading_analysis.data_sources.csv_loader import load_candles
 from trading_analysis.nifty.service import NiftyDeskService
+from trading_analysis.nifty.iv_context import record_nifty_iv_snapshot
 from trading_analysis.nifty.live_scanner import HORIZON_CONFIG, build_live_entry_signal, evaluate_live_exit
 from trading_analysis.notifications.telegram import TelegramNotifier, nifty_trade_message
 from trading_analysis.scheduler.alerts import generate_nifty_alerts
@@ -91,11 +95,20 @@ class NiftyMarketJobs:
 
     def _record(self, job_name: str, params: dict[str, Any], fn: Callable[[], dict[str, Any]]) -> dict[str, Any]:
         job_id = self.job_repository.start_job(job_name, params=params)
+        started = time.monotonic()
+        diagnostics.record("job_started", area="nifty", job=job_name, job_id=job_id)
         try:
-            result = fn()
+            with diagnostics.scope("nifty"):
+                result = fn()
             job = self.job_repository.finish_job(job_id, result=result)
+            diagnostics.record("job_finished", area="nifty", job=job_name, job_id=job_id,
+                               duration_ms=int((time.monotonic() - started) * 1000),
+                               warnings=result.get("warnings"), errors=result.get("errors"),
+                               horizons=result.get("horizons"), telegram=result.get("telegram"))
             return {"job": job, "result": result}
         except Exception as exc:
+            diagnostics.record("job_finished", area="nifty", status="failed", job=job_name, job_id=job_id,
+                               error=str(exc), duration_ms=int((time.monotonic() - started) * 1000))
             if job_name == "run_nifty_opportunity_scan":
                 self.scan_progress.update({"current": None, "status": "failed"})
             self.job_repository.fail_job(job_id, str(exc))
@@ -107,6 +120,7 @@ class NiftyMarketJobs:
             include_option_chain=False,
             include_iv=False,
             refresh=refresh,
+            refresh_due_only=True,
             timeframe="15minute",
             days=45,
         )
@@ -169,12 +183,20 @@ class NiftyMarketJobs:
             mode="auto",
             include_option_chain=True,
             include_iv=True,
-            refresh=True,
+            refresh=False,
             timeframe="15minute",
             days=45,
         )
         iv = context.get("iv") or {}
         options = context.get("options") or {}
+        if options.get("atm_iv") is not None:
+            record_nifty_iv_snapshot(
+                expiry=options.get("selected_weekly_expiry"), atm_strike=options.get("atm_strike"),
+                atm_iv=options["atm_iv"],
+                weekly_atm_iv=(options.get("weekly_chain_summary") or {}).get("atm_iv"),
+                monthly_atm_iv=(options.get("monthly_chain_summary") or {}).get("atm_iv"),
+                path=self.nifty_service.iv_history_path,
+            )
         latest_option = self.option_repository.load_latest_snapshot()
         observation_id = self.iv_repository.record_observation(
             symbol="NIFTY",

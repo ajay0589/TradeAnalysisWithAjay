@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import socket
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -13,6 +15,7 @@ from trading_analysis.index_scanner import IndexScannerService
 from trading_analysis.instrument_master_service import InstrumentMasterService
 from trading_analysis.all_index_monitor import AllIndexMonitor
 from trading_analysis.web_services import AnalysisService
+from trading_analysis import diagnostics
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -20,7 +23,12 @@ WEB_ROOT = ROOT / "web"
 
 
 class ReusableThreadingHTTPServer(ThreadingHTTPServer):
-    allow_reuse_address = True
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self):
+        if os.name == "nt":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
 
 class TradingRequestHandler(BaseHTTPRequestHandler):
@@ -31,6 +39,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
     instrument_master_service = InstrumentMasterService(analysis_service=service)
     all_index_monitor = AllIndexMonitor(nifty_auto_service, index_scanner_service, instrument_master_service)
 
+    @diagnostics.audit_http
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         try:
@@ -41,7 +50,12 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/app.js":
                 self._send_file(WEB_ROOT / "app.js", "application/javascript; charset=utf-8")
             elif parsed.path == "/api/health":
-                self._send_json({"status": "ok"})
+                self._send_json({"status": "ok", **diagnostics.runtime(), "port": self.server.server_port})
+            elif parsed.path == "/api/diagnostics/export":
+                params = parse_qs(parsed.query)
+                report = diagnostics.export(params.get("date", [None])[0])
+                report["scanners"] = diagnostics.clean(self.all_index_monitor.diagnostics(report["date"]))
+                self._send_json(report)
             elif parsed.path == "/api/symbols":
                 self._send_json(self.service.symbols())
             elif parsed.path == "/api/strategies":
@@ -326,10 +340,18 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
 
+    @diagnostics.audit_http
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         try:
-            if parsed.path == "/api/zerodha/access-token":
+            if parsed.path == "/api/diagnostics/client-event":
+                payload = self._read_json()
+                diagnostics.record("browser_error", area="browser", status="failed",
+                                   section=str(payload.get("section") or "")[:60],
+                                   message=str(payload.get("message") or "")[:2000],
+                                   symbol=str(payload.get("symbol") or "")[:100])
+                self._send_json({"recorded": True})
+            elif parsed.path == "/api/zerodha/access-token":
                 payload = self._read_json()
                 request_token = str(payload.get("request_token") or "").strip()
                 if not request_token:
@@ -566,6 +588,8 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _send_json(self, payload, status: HTTPStatus = HTTPStatus.OK) -> None:
+        self._diagnostic_status = int(status)
+        self._diagnostic_response = diagnostics.response_summary(payload)
         body = json.dumps(payload, indent=2, default=str).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -644,6 +668,7 @@ def main() -> None:
     args = parser.parse_args()
 
     server = ReusableThreadingHTTPServer((args.host, args.port), TradingRequestHandler)
+    diagnostics.record("server_started", port=args.port, runtime=diagnostics.runtime())
     print(f"Trading analysis UI running at http://{args.host}:{args.port}", flush=True)
     server.serve_forever()
 

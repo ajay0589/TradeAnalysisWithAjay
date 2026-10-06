@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 from datetime import datetime
+from io import StringIO
 from pathlib import Path
 
 from trading_analysis.models import Candle, WatchlistItem
@@ -18,7 +19,9 @@ def load_candles(path: str | Path) -> list[Candle]:
         raise FileNotFoundError(f"Candle file not found: {csv_path}")
 
     candles: list[Candle] = []
-    with csv_path.open("r", encoding="utf-8", newline="") as handle:
+    # Release the Windows file handle before parsing so atomic refreshes can replace it.
+    contents = csv_path.read_text(encoding="utf-8")
+    with StringIO(contents) as handle:
         reader = csv.DictReader(handle)
         for row in reader:
             candles.append(

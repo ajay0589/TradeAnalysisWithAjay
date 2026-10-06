@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import csv
+import threading
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from trading_analysis.analysis.options import OptionChainAnalysis, OptionChainRow
-from trading_analysis.candles import candle_path, candle_window, prepare_candles
+from trading_analysis.candles import candle_path, candle_window, prepare_candles, refresh_bucket
+from trading_analysis import diagnostics
 from trading_analysis.data_sources.csv_loader import load_candles
 from trading_analysis.nifty.backtest import backtest_nifty_context
 from trading_analysis.nifty.iv_context import DEFAULT_IV_HISTORY_PATH, build_nifty_iv_context, record_nifty_iv_snapshot
@@ -29,6 +32,8 @@ class NiftyDeskService:
         self.option_chain_dir = Path(option_chain_dir)
         self.iv_history_path = Path(iv_history_path)
         self.analysis_service = analysis_service
+        self._refresh_locks = {frame: threading.Lock() for frame in ("day", "60minute", "15minute")}
+        self._refresh_buckets: dict[str, tuple] = {}
 
     def nifty_context(
         self,
@@ -41,12 +46,14 @@ class NiftyDeskService:
         timeframe: str = "15minute",
         days: int = 30,
         to_date: str | None = None,
+        refresh_due_only: bool = False,
     ) -> dict[str, Any]:
         warnings: list[str] = []
         errors: list[str] = []
         refresh_results = []
         if refresh:
-            refresh_results = self._refresh_latest_candles(timeframe=timeframe, days=days, to_date=to_date, warnings=warnings)
+            refresh_results = self._refresh_latest_candles(timeframe=timeframe, days=days, to_date=to_date,
+                                                          warnings=warnings, due_only=refresh_due_only)
         daily_candles = self._load_candles("day", days=max(days, 365), to_date=to_date, warnings=warnings)
         hourly_candles = self._load_candles("60minute", days=max(days, 90), to_date=to_date, warnings=warnings)
         minute15_candles = self._load_candles("15minute", days=max(days, 45), to_date=to_date, warnings=warnings)
@@ -189,17 +196,34 @@ class NiftyDeskService:
             return []
         return prepare_candles(raw, timeframe, candle_window(days=days, to_date=to_date))
 
-    def _refresh_latest_candles(self, timeframe: str, days: int, to_date: str | None, warnings: list[str]) -> list[dict[str, Any]]:
+    def _refresh_latest_candles(self, timeframe: str, days: int, to_date: str | None, warnings: list[str],
+                               due_only: bool = False) -> list[dict[str, Any]]:
         if self.analysis_service is None:
             warnings.append("Refresh requested, but no refresh service is attached. Start the Web UI through scripts/start_web_ui.ps1.")
             return []
         timeframes = _refresh_timeframes(timeframe)
         results: list[dict[str, Any]] = []
-        for item in timeframes:
+        for item in reversed(timeframes):
             try:
-                window = candle_window(days=_refresh_days(item, days), to_date=to_date)
-                # Existing AnalysisService refresh uses read-only historical candle APIs and writes local CSV cache.
-                results.extend(self.analysis_service.refresh_candles("NIFTY", item, window))
+                with self._refresh_locks[item]:
+                    cached = candle_path(self.candle_root, item, "NIFTY_50")
+                    bucket = refresh_bucket(item, datetime.now(ZoneInfo("Asia/Kolkata")))
+                    if due_only and not to_date and cached.exists() and self._refresh_buckets.get(item) == bucket:
+                        results.append({"symbol": "NIFTY", "timeframe": item, "status": "cached"})
+                        diagnostics.record("candle_refresh", area="nifty", status="cached", timeframe=item)
+                        continue
+                    refresh_days = _refresh_days(item, days)
+                    if due_only and cached.exists() and not to_date:
+                        existing = load_candles(cached)
+                        if existing:
+                            last_date = max(candle.timestamp.date() for candle in existing)
+                            gap = (datetime.now(ZoneInfo("Asia/Kolkata")).date() - last_date).days + 2
+                            refresh_days = max({"day": 8, "60minute": 4, "15minute": 3}[item], gap)
+                    window = candle_window(days=refresh_days, to_date=to_date)
+                    refreshed = self.analysis_service.refresh_candles("NIFTY", item, window)
+                    results.extend(refreshed)
+                    if not to_date and any(row.get("candles", 0) > 0 for row in refreshed):
+                        self._refresh_buckets[item] = bucket
             except Exception as exc:
                 warnings.append(f"Refresh failed for NIFTY {item}: {exc}")
         return results

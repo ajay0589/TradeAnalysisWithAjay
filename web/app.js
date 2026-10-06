@@ -1,6 +1,12 @@
 const state = {
   symbols: [],
   lastAnalysis: null,
+  analysisRequest: 0,
+  expiryRequest: 0,
+  snapshotRequest: 0,
+  optionSymbol: "",
+  symbolTouched: false,
+  activeTab: "research",
   bulkJobId: null,
   bulkPollTimer: null,
   krishnaRefreshJobId: null,
@@ -53,6 +59,7 @@ function activateTab(name) {
     name = "research";
   }
   const panelName = name === "research" ? state.research.active : name;
+  state.activeTab = panelName;
   document.querySelectorAll("[data-tab-target]").forEach((button) => {
     const active = button.dataset.tabTarget === name;
     button.classList.toggle("active", active);
@@ -258,7 +265,7 @@ function scanParams() {
 }
 
 async function api(path) {
-  const response = await fetch(path);
+  const response = await fetch(path, { cache: "no-store" });
   const payload = await response.json();
   if (!response.ok) throw new Error(niftyRestartHint(path, payload.error || "Request failed"));
   return payload;
@@ -419,13 +426,34 @@ function renderFiiDii(data) {
     .join("");
 }
 
-async function loadOptionExpiries() {
+function syncAnalysisSymbol() {
   const symbol = $("symbolInput").value.trim().toUpperCase();
+  if (symbol !== state.optionSymbol) {
+    state.optionSymbol = symbol;
+    state.analysisRequest += 1;
+    state.expiryRequest += 1;
+    state.snapshotRequest += 1;
+    state.lastAnalysis = null;
+    $("expirySelect").innerHTML = `<option value="">Nearest expiry</option>`;
+    $("previousSnapshotSelect").innerHTML = `<option value="">Auto latest saved snapshot</option>`;
+    $("previousSnapshot").value = "";
+    $("analysisInstrument").textContent = symbol || "-";
+    $("analysisPrice").textContent = "-";
+    $("analysisSelectionStatus").textContent = symbol ? `${symbol}: not analyzed yet` : "";
+    $("analysisResults").hidden = true;
+  }
+  return symbol;
+}
+
+async function loadOptionExpiries() {
+  const symbol = syncAnalysisSymbol();
+  const request = ++state.expiryRequest;
   const select = $("expirySelect");
   select.innerHTML = `<option value="">Nearest expiry</option>`;
   if (!symbol) return;
   try {
     const data = await api(`/api/option-expiries?symbol=${encodeURIComponent(symbol)}`);
+    if (request !== state.expiryRequest || symbol !== $("symbolInput").value.trim().toUpperCase()) return;
     (data.expiries || []).forEach((expiry) => {
       const option = document.createElement("option");
       option.value = expiry;
@@ -434,12 +462,14 @@ async function loadOptionExpiries() {
     });
     await loadOptionSnapshots();
   } catch (error) {
-    setNotes([error.message], true);
+    if (request === state.expiryRequest && symbol === $("symbolInput").value.trim().toUpperCase()) setNotes([error.message], true);
   }
 }
 
 async function loadOptionSnapshots() {
   const symbol = $("symbolInput").value.trim().toUpperCase();
+  const request = ++state.snapshotRequest;
+  const expiry = $("expirySelect").value;
   const select = $("previousSnapshotSelect");
   select.innerHTML = `<option value="">Auto latest saved snapshot</option>`;
   if (!symbol) {
@@ -447,9 +477,10 @@ async function loadOptionSnapshots() {
     return;
   }
   const params = new URLSearchParams({ symbol });
-  if ($("expirySelect").value) params.set("expiry", $("expirySelect").value);
+  if (expiry) params.set("expiry", expiry);
   try {
     const data = await api(`/api/option-snapshots?${params.toString()}`);
+    if (request !== state.snapshotRequest || symbol !== $("symbolInput").value.trim().toUpperCase() || expiry !== $("expirySelect").value) return;
     const snapshots = data.snapshots || [];
     snapshots.forEach((snapshot) => {
       const option = document.createElement("option");
@@ -459,7 +490,7 @@ async function loadOptionSnapshots() {
     });
     $("snapshotStatus").textContent = `${snapshots.length} saved snapshot(s) for ${data.symbol}${data.expiry ? ` ${data.expiry}` : ""}`;
   } catch (error) {
-    $("snapshotStatus").textContent = error.message;
+    if (request === state.snapshotRequest && symbol === $("symbolInput").value.trim().toUpperCase()) $("snapshotStatus").textContent = error.message;
   }
 }
 
@@ -468,10 +499,13 @@ function useSelectedSnapshot() {
 }
 
 async function analyze() {
-  const symbol = $("symbolInput").value.trim().toUpperCase();
+  state.symbolTouched = true;
+  const symbol = syncAnalysisSymbol();
   if (!symbol) return;
+  const request = ++state.analysisRequest;
 
-  setNotes("Loading analysis...");
+  $("analysisSelectionStatus").textContent = `Analyzing ${symbol}...`;
+  setNotes(`Loading ${symbol} analysis...`);
   const params = new URLSearchParams({
     symbol,
     option_chain: $("optionChainToggle").checked ? "true" : "false",
@@ -484,12 +518,17 @@ async function analyze() {
   chartParams().forEach((value, key) => params.set(key, value));
   try {
     const data = await api(`/api/analyze?${params.toString()}`);
+    if (request !== state.analysisRequest || symbol !== $("symbolInput").value.trim().toUpperCase()) return;
     state.lastAnalysis = data;
     renderAnalysis(data);
+    $("analysisResults").hidden = false;
+    $("analysisSelectionStatus").textContent = `${symbol}: analysis complete`;
     $("reportStatus").textContent = "Report ready to save";
     setNotes((data.warnings || []).concat(data.decision.warnings || []));
     if ($("optionChainToggle").checked) await loadOptionSnapshots();
   } catch (error) {
+    if (request !== state.analysisRequest || symbol !== $("symbolInput").value.trim().toUpperCase()) return;
+    $("analysisSelectionStatus").textContent = `${symbol}: ${error.message}`;
     setNotes([error.message], true);
   }
 }
@@ -3603,6 +3642,43 @@ async function downloadIndexDiagnostics() {
   }
 }
 
+async function downloadAppDiagnostics() {
+  const date = $("appDiagnosticsDate").value;
+  if (!date) return;
+  $("appDiagnosticsDownload").disabled = true;
+  $("appDiagnosticsStatus").textContent = "Preparing app log...";
+  try {
+    const data = await api(`/api/diagnostics/export?date=${encodeURIComponent(date)}`);
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `trading-app-log-${date}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    $("appDiagnosticsStatus").textContent = `${data.events.length} events exported${data.truncated_events ? `; ${data.truncated_events} older events omitted` : ""}`;
+  } catch (error) {
+    $("appDiagnosticsStatus").textContent = error.message;
+  } finally {
+    $("appDiagnosticsDownload").disabled = false;
+  }
+}
+
+function reportBrowserError(message) {
+  fetch("/api/diagnostics/client-event", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ section: state.activeTab, message: String(message).slice(0, 2000), symbol: $("symbolInput").value }),
+  }).catch(() => {});
+}
+
+async function loadServerRuntime() {
+  try {
+    const data = await api("/api/health");
+    $("serverRuntime").textContent = data.code_version ? `Port ${data.port} | build ${data.code_version} | PID ${data.pid}` : "Older server: restart required";
+  } catch (error) {
+    $("serverRuntime").textContent = error.message;
+  }
+}
+
 async function controlAllIndexScanners(action) {
   const message = $("allIndexMessage");
   message.classList.remove("points-negative");
@@ -3879,6 +3955,10 @@ syncNiftyBacktestControls();
 $("symbolInput").addEventListener("keydown", (event) => {
   if (event.key === "Enter") analyze();
 });
+$("symbolInput").addEventListener("input", () => {
+  state.symbolTouched = true;
+  syncAnalysisSymbol();
+});
 $("symbolInput").addEventListener("blur", loadOptionExpiries);
 $("expirySelect").addEventListener("change", loadOptionSnapshots);
 $("previousSnapshotSelect").addEventListener("change", useSelectedSnapshot);
@@ -3908,6 +3988,11 @@ document.querySelectorAll("[data-index-target]").forEach((button) => {
 });
 $("indexDiagnosticsDate").value = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Kolkata" });
 $("indexDiagnosticsDownload").addEventListener("click", downloadIndexDiagnostics);
+$("appDiagnosticsDate").value = $("indexDiagnosticsDate").value;
+$("appDiagnosticsDownload").addEventListener("click", downloadAppDiagnostics);
+window.addEventListener("error", (event) => reportBrowserError(event.message));
+window.addEventListener("unhandledrejection", (event) => reportBrowserError(event.reason?.message || event.reason));
+loadServerRuntime();
 $("indexScannerStart").addEventListener("click", () => controlIndexScanner("start"));
 $("indexScannerStop").addEventListener("click", () => controlIndexScanner("stop"));
 $("indexScannerRunOnce").addEventListener("click", () => controlIndexScanner("run-once"));
@@ -3927,7 +4012,7 @@ startPurpleMonitorPolling();
 Promise.all([loadZerodhaLoginUrl(), checkZerodhaStatus(), loadSymbols(), loadStrategies(), loadNiftyExpiries(), loadSectorStatus(), loadFiiDii(false)])
   .then(() => {
     const first = state.symbols.find((row) => row.has_daily);
-    if (first) {
+    if (first && !state.symbolTouched && !$("symbolInput").value.trim()) {
       $("symbolInput").value = first.symbol;
       loadOptionExpiries();
       analyze();

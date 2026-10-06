@@ -3,8 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from trading_analysis.models import Candle
+
+
+def refresh_bucket(timeframe: str, now: datetime) -> tuple:
+    current = now.astimezone(ZoneInfo("Asia/Kolkata")) if now.tzinfo else now
+    opened = current.replace(hour=9, minute=15, second=0, microsecond=0)
+    closed = current.replace(hour=15, minute=30, second=0, microsecond=0)
+    if current >= closed:
+        return current.date(), "closed"
+    # Every new 15m/1h close falls on these boundaries; Daily is forced at 15:30.
+    minutes = {"day": 60, "60minute": 15, "15minute": 5}[timeframe]
+    return current.date(), int((current - opened).total_seconds() // (minutes * 60))
 
 
 TIMEFRAME_ALIASES = {

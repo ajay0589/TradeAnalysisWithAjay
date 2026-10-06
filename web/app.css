@@ -235,6 +235,21 @@ label {
   padding-top: 12px;
 }
 
+.app-diagnostics {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+
+.app-diagnostics label { margin: 0; }
+.app-diagnostics input { width: 160px; max-width: 100%; }
+.app-diagnostics .cell-note { overflow-wrap: anywhere; }
+#analysisSelectionStatus { overflow-wrap: anywhere; }
+
 .index-diagnostics-controls input {
   width: 170px;
 }

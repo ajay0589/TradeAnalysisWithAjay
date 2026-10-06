@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from trading_analysis import diagnostics
+
 import csv
 import json
 import queue
@@ -589,6 +591,7 @@ class AnalysisService:
             self._purple_refresh_queue.put((priority, self._purple_refresh_sequence, key[0], key[1]))
         KrishnaPurpleAlertRepository().record_refresh_queued(*key)
 
+    @diagnostics.background("purple")
     def _purple_refresh_worker(self) -> None:
         repository = KrishnaPurpleAlertRepository()
         client = None
@@ -624,6 +627,7 @@ class AnalysisService:
                     self._purple_monitor_state["latest_failure"] = None
             except Exception as exc:
                 repository.record_refresh_failure(symbol, timeframe, str(exc))
+                diagnostics.record("candle_refresh", status="failed", symbol=symbol, timeframe=timeframe, error=str(exc))
                 client = None
                 with self._purple_monitor_lock:
                     self._purple_monitor_state["refresh_failures"] += 1
@@ -635,6 +639,7 @@ class AnalysisService:
                 self._purple_refresh_queue.task_done()
             self._purple_stop_event.wait(0.35)
 
+    @diagnostics.background("purple")
     def _run_purple_profile_monitor_scan(self, profile_key: str, scheduled_at: str) -> None:
         repository = KrishnaPurpleAlertRepository()
         run_id = repository.start_scan_run(profile_key, scheduled_at=scheduled_at, queued_at=scheduled_at)
@@ -671,21 +676,27 @@ class AnalysisService:
             result = {"errors": [{"symbol": "", "error": error}]}
         finally:
             repository.finish_scan_run(run_id, result, error)
+            diagnostics.record("profile_scan", status="failed" if error else "completed", profile=profile_key,
+                               run_id=run_id, result=diagnostics.response_summary(result), error=error)
             with self._purple_monitor_lock:
                 self._purple_profile_running.discard(profile_key)
 
+    @diagnostics.background("purple")
     def _run_purple_entry_checker(self) -> None:
         try:
             entry_result = self.check_krishna_purple_entries()
+            diagnostics.record("entry_check", result=diagnostics.response_summary(entry_result))
             with self._purple_monitor_lock:
                 self._purple_monitor_state["entry_checks"] += int(entry_result.get("checked") or 0)
         finally:
             with self._purple_monitor_lock:
                 self._purple_entry_checker_running = False
 
+    @diagnostics.background("purple")
     def _run_purple_exit_checker(self) -> None:
         try:
             exit_result = self.check_krishna_purple_exits()
+            diagnostics.record("exit_check", result=diagnostics.response_summary(exit_result))
             with self._purple_monitor_lock:
                 self._purple_monitor_state["exit_checks"] += int(exit_result.get("checked") or 0)
         finally:
@@ -1077,6 +1088,7 @@ class AnalysisService:
             )
         return results
 
+    @diagnostics.background("data")
     def _run_bulk_candle_download(self, job_id: str, targets, timeframes, timeframe_windows, sleep_seconds: float) -> None:
         self._update_job(job_id, status="running", started_at=datetime.now().isoformat(timespec="seconds"))
         refresh_repository = KrishnaPurpleAlertRepository()
@@ -1150,6 +1162,7 @@ class AnalysisService:
             current="",
         )
 
+    @diagnostics.background("data")
     def _run_option_chain_monitor(self, job_id: str) -> None:
         self._update_job(job_id, status="running", started_at=datetime.now().isoformat(timespec="seconds"))
         while True:
@@ -1215,6 +1228,7 @@ class AnalysisService:
         return _dedupe_targets(targets)
 
     def _update_job(self, job_id: str, **updates) -> None:
+        diagnostics.record("job_progress", area="data", job_id=job_id, result=diagnostics.response_summary(updates))
         with self._jobs_lock:
             self._jobs[job_id].update(updates)
 
@@ -1224,6 +1238,7 @@ class AnalysisService:
             job["completed"] += 1
 
     def _append_job_result(self, job_id: str, result: dict[str, Any]) -> None:
+        diagnostics.record("job_item", area="data", job_id=job_id, result=result)
         with self._jobs_lock:
             job = self._jobs[job_id]
             job["successes"] += 1
@@ -1231,6 +1246,7 @@ class AnalysisService:
             job["results"] = job["results"][-50:]
 
     def _append_job_error(self, job_id: str, error: str) -> None:
+        diagnostics.record("job_item", area="data", job_id=job_id, status="failed", error=error)
         with self._jobs_lock:
             job = self._jobs[job_id]
             job["failures"] += 1

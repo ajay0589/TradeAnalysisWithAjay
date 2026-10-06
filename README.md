@@ -183,12 +183,29 @@ python -m trading_analysis.cli trade-decision --symbol RELIANCE --skip-option-ch
 Start the local F&O decision dashboard:
 
 ```powershell
+python -m pip install -r requirements.txt
 .\scripts\start_web_ui.ps1
 ```
 
 Then open `http://127.0.0.1:8766`.
 
-Use this same URL going forward on `scanner-audit-and-v4`. The script stops any older UI process already listening on port `8766` and starts the latest code on the same stable port. The v3 server can continue running separately on port `8765`. For foreground logs while debugging:
+Use this same URL going forward on `scanner-audit-and-v4`. The script uses `.venv\Scripts\python.exe` when present (install requirements with that Python), otherwise `python` from PATH. It waits for a verified health response before reporting success and refuses to overwrite an occupied port. The v3 server can continue running separately on port `8765`. Stop the current v4 server before restarting:
+
+```powershell
+.\scripts\stop_web_ui.ps1 -Port 8766
+.\scripts\start_web_ui.ps1 -Port 8766
+```
+
+For a server started by an older script, use Ctrl+C in its foreground window. If it ran in the background and the stop script cannot identify it, inspect the listener before stopping its Python PID:
+
+```powershell
+Get-NetTCPConnection -State Listen -LocalPort 8766 | Select-Object LocalAddress, LocalPort, OwningProcess
+# Replace 12345 with the displayed PID, after confirming it is this app's Python process.
+Get-Process -Id 12345 | Select-Object Id, ProcessName, Path
+Stop-Process -Id 12345
+```
+
+For foreground logs while debugging:
 
 ```powershell
 .\scripts\start_web_ui.ps1 -Foreground
@@ -459,6 +476,43 @@ python -m trading_analysis.cli zerodha-instruments --exchange BFO --output data\
 Set `BANKNIFTY_TELEGRAM_BOT_TOKEN` and `BANKNIFTY_TELEGRAM_CHAT_ID`, and likewise `SENSEX_...`, in local `.env` for separate alert chats. If absent, the configured `NIFTY_...` destination is used. Without either destination, alerts stay in the UI and database with `not_configured` delivery status.
 
 The Bank Nifty sample uses the five dated constituents and weights in `config/index_scanner_leaders.json`; update them when the official factsheet changes. Sensex uses selected leaders without index-weight claims. An OI increase paired with falling option premium is only an *inference* of writing pressure, not proof of trader identity or future direction. Alerts require aligned index trend, two fresh option snapshots, and constituent breadth; missing or stale inputs block alerts. Signals use index spot candles, not option premium P&L. Validate results prospectively before trading.
+
+## App diagnostics and performance
+
+The `Download app log` control above the main tabs exports the selected IST date for all sections: Stock Research, Index Scanning, Purple Touch, Data Ops, and Reports. It includes API timings and outcomes, browser errors, background refresh events, broker queue/network timings, Telegram delivery errors, and the detailed index scan/trade audit. Tokens, API secrets, and chat IDs are redacted; symbol/trade data and local runtime paths are still included. Review the file before sharing. Old logs cannot provide timing details that were not recorded at the time.
+
+Logs are stored in `logs\diagnostics\app-YYYY-MM-DD-PID.jsonl`, rotated at 10 MB. An export returns the latest 50,000 application events and reports truncation or incomplete records. Files are not automatically deleted; archive or remove old diagnostic files after retaining anything needed for review. This does not delete trade or alert history. No logging failure should stop a scanner; `/api/health` reports logging errors.
+
+The header shows the running build and PID. `/api/health` and the exported runtime also identify Python, the project folder, start time, and TLS provider. Use these when comparing ports `8766` and `8767`: the port itself does not change outgoing Telegram certificate validation. Restarting one port does not upgrade another running Python process.
+
+### Telegram certificate errors
+
+`CERTIFICATE_VERIFY_FAILED: self-signed certificate in certificate chain` means Python could not verify the HTTPS certificate chain. It is a delivery failure, not a missing trading signal. Install `requirements.txt` using the same Python that starts the server, then restart. The application uses [truststore](https://truststore.readthedocs.io/en/stable/index.html) for native Windows certificate trust. Certificate and hostname verification stay enabled. If a security product or managed network uses a private CA, obtain its trusted PEM certificate through the appropriate administrator and set `TRADING_CA_BUNDLE` in local `.env`; do not disable verification or trust an unknown certificate.
+
+After restart, use `Index Scanning > Send test` and check the result before starting monitors. Failed historical messages are not automatically resent. If delivery still fails, download that day's app log from the affected laptop. A development-laptop success does not establish that the personal laptop's network or trust configuration works.
+
+### Refresh scheduling
+
+All Zerodha data requests share a fair, rate-limited queue. A waiter times out after 60 seconds instead of remaining behind other scanners indefinitely; errors remain visible for retry on the next scheduled cycle. Shared Bank Nifty/Sensex source locks prevent duplicate refreshes without holding an additional global lock across a complete option-chain operation. New closed-candle boundaries invalidate cached refresh slots.
+
+NIFTY background refreshes reuse existing candles and request short overlap windows (3 days for 15-minute, 4 for hourly, 8 for Daily). An empty installation still downloads the configured history. Fifteen-minute sources refresh every 5 minutes, hourly sources every 15 minutes, and Daily sources hourly, with an additional market-close refresh. Entry/exit checks remain independently scheduled. The IV job reads cached context rather than downloading all candles again. Explicit manual refresh and historical-range requests retain their existing behavior.
+
+In a mocked 09:15-10:14 run with one-minute polling, the candle scheduler issues 17 source refreshes instead of the previous 180, excluding option-chain requests. This tests request reduction, not measured market-network latency. Broker timings in the next live log will show remaining queue, network, or write delays. Temporary Windows file-replacement locks are retried while preserving the previous cache; keeping live data outside OneDrive can avoid sync contention.
+
+## Regression checks
+
+Run from the project folder using the server's Python environment and Node.js:
+
+```powershell
+python -m pip install -r requirements.txt pytest tzdata
+python -m pytest -q
+node --check web/app.js
+node --test tests/web_app.test.cjs
+python -m compileall -q trading_analysis tests
+git diff --check
+```
+
+The suite covers scanner rules, lifecycle persistence, stale-data gates, alert delivery, refresh scheduling, API logging, fair broker queueing, cache-write retries, and browser request races/navigation. Test networking is restricted to loopback so synthetic signals cannot send Telegram messages or broker requests. GitHub Actions runs the suite on Windows with Python 3.12 and 3.14 and Node 22. Browser visual testing and a live-market paper-monitoring session remain separate checks; automated tests do not guarantee trading performance.
 
 ## Roadmap
 

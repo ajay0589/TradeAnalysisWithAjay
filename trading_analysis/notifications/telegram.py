@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from trading_analysis.config import load_dotenv
+from trading_analysis import diagnostics
+from trading_analysis.network import https_context, network_hint, tls_info
 
 
 @dataclass(frozen=True)
@@ -29,6 +32,17 @@ class TelegramNotifier:
         return bool(self.bot_token and self.chat_id)
 
     def send_message(self, text: str) -> dict[str, Any]:
+        started = time.monotonic()
+        result = self._send_message(text)
+        hint = network_hint(str(result.get("error") or ""))
+        if hint:
+            result["hint"] = hint
+            result["error"] = f"{result['error']} {hint}"
+        diagnostics.record("telegram_delivery", area="notifications", status="sent" if result.get("sent") else "failed",
+                           error=result.get("error"), duration_ms=int((time.monotonic() - started) * 1000), tls=tls_info())
+        return result
+
+    def _send_message(self, text: str) -> dict[str, Any]:
         if not self.configured():
             return {"sent": False, "configured": False, "error": "Telegram bot token/chat id not configured."}
         payload = {
@@ -43,7 +57,7 @@ class TelegramNotifier:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
+            with urlopen(request, timeout=self.timeout_seconds, context=https_context()) as response:
                 body = json.loads(response.read().decode("utf-8"))
             error = None if body.get("ok") else str(body.get("description") or "Telegram rejected the message")
             return {"sent": bool(body.get("ok")), "configured": True, "response": body,

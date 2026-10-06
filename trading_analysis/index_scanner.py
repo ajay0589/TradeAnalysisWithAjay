@@ -11,8 +11,10 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from trading_analysis import diagnostics
+
 from trading_analysis.brokers.zerodha import load_instruments_csv, merge_candles_csv, resolve_instrument_token
-from trading_analysis.candles import candle_path, candle_window, fetch_interval
+from trading_analysis.candles import candle_path, candle_window, fetch_interval, refresh_bucket
 from trading_analysis.data_sources.csv_loader import load_candles
 from trading_analysis.index_signal import leader_confirmation, option_footprint, technical_read
 from trading_analysis.instrument_master_service import InstrumentMasterService
@@ -245,7 +247,6 @@ class IndexScannerService:
         self._events = {symbol: threading.Event() for symbol in self.profiles}
         self._threads: dict[str, threading.Thread] = {}
         self._scan_locks = {symbol: threading.Lock() for symbol in self.profiles}
-        self._broker_lock = threading.Lock()
         self._refresh_lock = threading.Lock()
         self._source_locks: dict[tuple[str, str], threading.Lock] = {}
         self._instrument_tokens: dict[tuple[str, str], tuple[int, str]] = {}
@@ -259,15 +260,10 @@ class IndexScannerService:
         return symbol
 
     def _broker_call(self, fn, owner: str | None = None):
-        while not self._broker_lock.acquire(timeout=0.25):
-            if owner and self._events[owner].is_set():
-                raise ScanCancelled("Scanner stopped before the next broker request")
-        try:
-            if owner and self._events[owner].is_set():
-                raise ScanCancelled("Scanner stopped before the next broker request")
+        if owner and self._events[owner].is_set():
+            raise ScanCancelled("Scanner stopped before the next broker request")
+        with diagnostics.scope(owner.lower() if owner else "indexes"):
             return fn()
-        finally:
-            self._broker_lock.release()
 
     def _source_lock(self, stage: str, symbol: str) -> threading.Lock:
         with self._refresh_lock:
@@ -385,8 +381,9 @@ class IndexScannerService:
 
     def _refresh_candle_locked(self, symbol: str, timeframe: str, owner: str | None = None) -> str:
         key = (symbol, timeframe)
+        requested_at = _now()
         last = self._candle_refresh.get(key)
-        if last and (_now() - last).total_seconds() < REFRESH_SECONDS[timeframe]:
+        if last and (requested_at - last).total_seconds() < REFRESH_SECONDS[timeframe] and refresh_bucket(timeframe, last) == refresh_bucket(timeframe, requested_at):
             return "cached"
         profile = self.profiles.get(symbol)
         exchange = profile["exchange"] if profile else "NSE"
@@ -410,7 +407,7 @@ class IndexScannerService:
             from_time=window.from_time, to_time=window.to_time), owner)
         if candles:
             merge_candles_csv(path, candles)
-            self._candle_refresh[key] = _now()
+            self._candle_refresh[key] = requested_at
             return "updated"
         return "empty"
 
@@ -486,6 +483,8 @@ class IndexScannerService:
         def record_step(stage: str, item: str, frame: str | None, status: str,
                         elapsed: float, detail: str | None = None) -> None:
             self.repository.record_step(run_id, stage, item, frame, status, int(elapsed * 1000), detail)
+            diagnostics.record("scan_step", area=symbol.lower(), status=status, run_id=run_id, stage=stage,
+                               symbol=item, timeframe=frame, duration_ms=int(elapsed * 1000), detail=detail)
             progress["completed"] += 1
             progress["current"] = None
             bucket = ("failures" if status == "failed" else "cached" if status == "cached"

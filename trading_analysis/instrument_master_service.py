@@ -7,6 +7,7 @@ from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 from trading_analysis.brokers.zerodha import write_instruments_csv
+from trading_analysis import diagnostics
 from trading_analysis.web_services import AnalysisService, _zerodha_client
 
 
@@ -60,6 +61,7 @@ class InstrumentMasterService:
                 self._thread.start()
         return self.status()
 
+    @diagnostics.background("data")
     def _refresh_all(self) -> None:
         for exchange in EXCHANGES:
             with self._lock:
@@ -69,9 +71,11 @@ class InstrumentMasterService:
                 if not rows or not {"exchange", "tradingsymbol", "instrument_token"}.issubset(rows[0]):
                     raise ValueError(f"{exchange} instrument response was empty or incomplete")
                 write_instruments_csv(self.paths[exchange], rows)
+                diagnostics.record("instrument_master", exchange=exchange, rows=len(rows))
                 with self._lock:
                     self._state["results"][exchange] = len(rows)
             except Exception as exc:
+                diagnostics.record("instrument_master", status="failed", exchange=exchange, error=str(exc))
                 with self._lock:
                     self._state["errors"][exchange] = str(exc)
         with self._lock:
