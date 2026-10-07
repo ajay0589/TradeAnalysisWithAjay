@@ -44,6 +44,10 @@ def build_live_entry_signal(
         diagnostics.update({"candle_time": latest.timestamp.isoformat(), "candle_close": latest.close, "gate": "candle_freshness"})
     if not _candle_is_fresh(latest, horizon, current):
         return None
+    closes = [candle.close for candle in closed]
+    direction = _historical_direction(latest, ema(closes, 20), ema(closes, 50), rsi(closes, 14), "both") or ""
+    if diagnostics is not None:
+        diagnostics.update({"technical_direction": direction or "none", "rsi14": rsi(closes, 14)})
     links = ((context.get("summary") or {}).get("data_links") or {})
     if diagnostics is not None:
         diagnostics.update({"option_snapshot_time": links.get("latest_option_snapshot_at"), "gate": "option_freshness"})
@@ -52,8 +56,6 @@ def build_live_entry_signal(
     technical = context.get("technical") or {}
     options = context.get("options") or {}
     iv = context.get("iv") or {}
-    closes = [candle.close for candle in closed]
-    direction = _historical_direction(latest, ema(closes, 20), ema(closes, 50), rsi(closes, 14), "both") or ""
     if diagnostics is not None:
         diagnostics.update({"technical_direction": direction or "none", "rsi14": rsi(closes, 14), "gate": "technical_direction"})
     if direction not in {"bullish", "bearish"}:
@@ -165,16 +167,19 @@ def evaluate_live_exit(
 
 def _evaluate_exit_bar(trade, closed, entry_time, config):
     latest = closed[-1]
+    import json
+    metadata = trade.get("metadata") or json.loads(trade.get("context_json") or "{}")
+    range_eligible = metadata.get("timing_version") != 2 or _as_naive_ist(latest.timestamp) >= _as_naive_ist(trade["entry_time"])
     direction = str(trade.get("direction") or "")
     stop = float(trade["stop_level"])
     target = float(trade["target_level"])
-    if direction == "bullish" and latest.low <= stop:
+    if range_eligible and direction == "bullish" and latest.low <= stop:
         return _exit_payload(latest, stop, "stop_loss")
-    if direction == "bearish" and latest.high >= stop:
+    if range_eligible and direction == "bearish" and latest.high >= stop:
         return _exit_payload(latest, stop, "stop_loss")
-    if direction == "bullish" and latest.high >= target:
+    if range_eligible and direction == "bullish" and latest.high >= target:
         return _exit_payload(latest, target, "target_reached")
-    if direction == "bearish" and latest.low <= target:
+    if range_eligible and direction == "bearish" and latest.low <= target:
         return _exit_payload(latest, target, "target_reached")
     closes = [candle.close for candle in closed]
     ema20 = ema(closes, 20)
@@ -264,7 +269,7 @@ def candle_close_time(timestamp: datetime, timeframe: str) -> datetime:
     session_end = stamp.replace(hour=15, minute=30, second=0, microsecond=0)
     if timeframe == "day":
         return session_end.replace(tzinfo=IST)
-    minutes = int(HORIZON_CONFIG[_horizon_for_timeframe(timeframe)]["minutes"])
+    minutes = 5 if timeframe == "5minute" else int(HORIZON_CONFIG[_horizon_for_timeframe(timeframe)]["minutes"])
     close = stamp + timedelta(minutes=minutes)
     if stamp.replace(hour=9, minute=15, second=0, microsecond=0) <= stamp < session_end:
         close = min(close, session_end)

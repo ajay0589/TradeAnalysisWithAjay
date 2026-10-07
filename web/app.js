@@ -3395,12 +3395,21 @@ function renderNiftyTrades(data) {
       <td>${trade.trade_id}</td>
       <td><span class="status-badge status-${statusKey(trade.status)}">${statusLabel(trade.status)}</span></td>
       <td>${trade.horizon}</td><td>${trade.direction}</td><td>${trade.strategy_id || "-"}</td>
-      <td>${fmtDateTime(trade.entry_time)}</td><td>${fmt(trade.entry_price)}</td>
-      <td>${fmtDateTime(trade.exit_time)}</td><td>${fmt(trade.exit_price)}</td>
+      <td>${fmtDateTime(trade.entry_time)}</td><td>${signalPriceCell(trade.entry_price, trade.metadata, "entry")}</td>
+      <td>${fmtDateTime(trade.exit_time)}</td><td>${signalPriceCell(trade.exit_price, trade.metadata, "exit")}</td>
       <td>${trade.open_duration || "-"}</td><td>${fmt(trade.stop_level)}</td><td>${fmt(trade.target_level)}</td>
       <td>${fmtPct(trade.directional_return_percent)}</td><td>${trade.exit_reason || "-"}</td>
     </tr>
   `).join("");
+}
+
+function signalPriceCell(price, metadata = {}, event = "entry") {
+  if (price == null) return "-";
+  const m = metadata || {};
+  const basis = event === "entry" ? m.price_basis : m.exit_price_basis;
+  const reference = event === "entry" ? m.reference_price : m.exit_reference_price;
+  const delay = event === "entry" ? m.signal_delay_seconds : m.exit_delay_seconds;
+  return `${fmt(price)}<div class="cell-note">${escapeHtml(statusLabel(basis || "legacy_candle_reference"))}${reference == null ? "" : `<br>Reference ${fmt(reference)}`}${delay == null ? "" : `<br>Delay ${fmt(delay, 0)}s`}</div>`;
 }
 
 function formatSeconds(value) {
@@ -3414,10 +3423,8 @@ function formatSeconds(value) {
   return `${minutes}m`;
 }
 
-async function runNiftyScannerBacktest() {
-  $("niftyScannerBacktestMeta").textContent = "Running";
-  try {
-    const data = await postApi("/api/nifty/scanner-backtest", {
+function niftyBacktestPayload() {
+  return {
       method: $("niftyBacktestMethod").value,
       strategy: $("niftyBacktestStrategy").value,
       horizon: $("niftyBacktestHorizon").value,
@@ -3427,16 +3434,64 @@ async function runNiftyScannerBacktest() {
       target_r_multiple: Number($("niftyBacktestTargetR").value || 2),
       max_holding_bars: Number($("niftyBacktestMaxBars").value || 8),
       cost_bps_per_side: Number($("niftyBacktestCostBps").value || 0),
-    });
+      symbol: $("comparisonSymbol").value,
+      trigger: $("comparisonTrigger").value,
+  };
+}
+
+async function runNiftyScannerBacktest() {
+  $("niftyScannerBacktestMeta").textContent = "Running";
+  $("niftyScannerBacktestBtn").disabled = true;
+  try {
+    const payload = niftyBacktestPayload();
+    const data = await postApi(payload.method === "comparison" ? "/api/index-scanners/backtest" : "/api/nifty/scanner-backtest", payload);
     state.nifty.scannerBacktest = data;
     renderNiftyScannerBacktest(data);
   } catch (error) {
     $("niftyScannerBacktestMeta").textContent = "Failed";
     setNotes([error.message], true);
+  } finally {
+    $("niftyScannerBacktestBtn").disabled = false;
   }
 }
 
+async function refreshComparisonCandles() {
+  $("comparisonRefresh").disabled = true;
+  $("niftyScannerBacktestMeta").textContent = "Downloading research candles";
+  try {
+    const data = await postApi("/api/index-scanners/backtest-data", niftyBacktestPayload());
+    $("niftyScannerBacktestMeta").textContent = `${data.symbol}: ${data.results.map((row) => `${row.timeframe} ${row.candles} candles`).join("; ")}`;
+  } catch (error) {
+    $("niftyScannerBacktestMeta").textContent = error.message;
+  } finally { $("comparisonRefresh").disabled = false; }
+}
+
+function renderIndexComparison(data) {
+  const selected = data.variants.find((row) => row.variant === $("comparisonVariant").value) || data.variants[0];
+  renderNiftyScannerBacktest({ ...selected, horizon: data.horizon, method: "comparison_detail",
+    trades: selected.trades.map((row) => ({ ...row, entry_price: row.entry, exit_price: row.exit,
+      open_duration: formatSeconds((parseDateTime(row.exit_time) - parseDateTime(row.entry_time)) / 1000),
+      r_multiple: row.net_r, return_percent: row.net_r * row.risk_points / row.entry * 100 })) });
+  $("niftyScannerBacktestMeta").textContent = `${data.symbol} / ${data.horizon} / ${data.timeframe} / ${selected.label} / latest 100 trades shown`;
+  $("comparisonResults").hidden = false;
+  $("comparisonTradeControls").hidden = false;
+  $("comparisonExport").disabled = false;
+  $("comparisonResults").innerHTML = `<table class="readable-table"><thead><tr><th>Variant</th><th>Trades</th><th>Win rate</th><th>Average R</th><th>Profit factor</th><th>Net R</th><th>Drawdown R</th><th>Missing option evidence</th><th>Holdout trades</th><th>Holdout win rate / net R</th></tr></thead><tbody>${data.variants.map((row) => {
+    const m = row.metrics, holdout = row.periods[1];
+    return `<tr><td>${escapeHtml(row.label)}</td><td>${row.trade_count}</td><td>${fmtPct(m.win_rate)}</td><td>${fmt(m.average_r)}</td><td>${fmt(m.profit_factor)}</td><td>${fmt(m.net_r)}</td><td>${fmt(m.max_drawdown_r)}</td><td>${row.coverage.missing_option_evidence} / ${row.coverage.technical_checks}</td><td>${holdout.trade_count}</td><td>${fmtPct(holdout.metrics.win_rate)} / ${fmt(holdout.metrics.net_r)}</td></tr>`;
+  }).join("")}</tbody></table>`;
+  $("niftyScannerBacktestCoverage").innerHTML = [
+    `Option observations: ${data.observation_count}; ${fmtDateTime(data.observation_from)} to ${fmtDateTime(data.observation_to)}`,
+    ...(data.assumptions || []),
+  ].map((text) => `<div>${escapeHtml(text)}</div>`).join("");
+}
+
 function renderNiftyScannerBacktest(data) {
+  if (data.method === "comparison") return renderIndexComparison(data);
+  if (data.method !== "comparison_detail") {
+    $("comparisonResults").hidden = true;
+    $("comparisonTradeControls").hidden = true;
+  }
   const metrics = data.metrics || {};
   const method = data.method === "technical" ? (data.strategy || "technical setup").replaceAll("_", " ") : "scanner rules";
   $("niftyScannerBacktestMeta").textContent = `${fmtInt(data.trade_count)} trade(s) / ${data.horizon} / ${method}`;
@@ -3582,6 +3637,16 @@ async function loadAllIndexStatus() {
 }
 
 function renderAllIndexStatus(data) {
+  const quotes = data.live_quotes || {};
+  $("indexQuoteStatus").textContent = `Quotes: ${quotes.mode || "stopped"}${quotes.error ? ` | ${quotes.error}` : ""}`;
+  $("indexMarketEvidence").innerHTML = ["NIFTY", "BANKNIFTY", "SENSEX"].map((symbol) => {
+    const quote = quotes.quotes?.[symbol] || {};
+    const evidence = data.market_evidence?.[symbol] || {};
+    const rolling = evidence.rolling || {};
+    const signals = Object.entries(evidence.signals || {}).map(([horizon, row]) => `<div>${escapeHtml(horizon)}: ${escapeHtml(statusLabel(row.confirmation_state || "waiting"))}<div class="cell-note">${escapeHtml(row.reason || row.checks?.gate || "-")}</div></div>`).join("") || "Not checked";
+    const windows = [3, 6, 15, 30].map((minutes) => { const row = rolling.windows?.[minutes] || {}; return `<div title="${escapeHtml(row.reason || "")}">${minutes}m: ${escapeHtml(row.bias || "unavailable")} / flow ${escapeHtml(row.flow_bias || "unavailable")}</div>`; }).join("");
+    return `<tr><td>${symbol}</td><td>${fmt(quote.price)}</td><td>${fmtDateTime(quote.quote_time)}</td><td>${quote.fresh ? "Fresh" : quote.price ? "Stale" : "Missing"}<div class="cell-note">${escapeHtml(quote.source || "-")}</div></td><td>${signals}</td><td>${escapeHtml(statusLabel(rolling.state || "warming_up"))}${windows}</td><td>${fmtDateTime(rolling.last_observed_oi_change_at)}<div class="cell-note">Exchange OI publication time unknown</div></td></tr>`;
+  }).join("");
   const rows = data.scanners || {};
   const running = Object.values(rows).filter((row) => row.running).length;
   $("allIndexMeta").textContent = `${running} of 3 running | masters ${data.masters_ready ? "ready" : "need refresh"}`;
@@ -3627,15 +3692,8 @@ async function downloadIndexDiagnostics() {
   button.disabled = true;
   $("indexDiagnosticsStatus").textContent = "Preparing scan log...";
   try {
-    const data = await api(`/api/index-scanners/diagnostics?date=${encodeURIComponent(date)}`);
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `index-scan-log-${date}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-    $("indexDiagnosticsStatus").textContent = `Downloaded ${fmtInt(data.NIFTY?.jobs?.length || 0)} NIFTY jobs, ${fmtInt(data.BANKNIFTY?.runs?.length || 0)} Bank Nifty runs, ${fmtInt(data.SENSEX?.runs?.length || 0)} Sensex runs.`;
+    await downloadArchive(`/api/index-scanners/diagnostics?date=${encodeURIComponent(date)}&format=zip`, `index-scan-log-${date}.zip`);
+    $("indexDiagnosticsStatus").textContent = "Full-day scan log, option evidence and delivery audit downloaded.";
   } catch (error) {
     $("indexDiagnosticsStatus").textContent = error.message;
   } finally {
@@ -3649,19 +3707,31 @@ async function downloadAppDiagnostics() {
   $("appDiagnosticsDownload").disabled = true;
   $("appDiagnosticsStatus").textContent = "Preparing app log...";
   try {
-    const data = await api(`/api/diagnostics/export?date=${encodeURIComponent(date)}`);
-    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `trading-app-log-${date}.json`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    $("appDiagnosticsStatus").textContent = `${data.events.length} events exported${data.truncated_events ? `; ${data.truncated_events} older events omitted` : ""}`;
+    await downloadArchive(`/api/diagnostics/export?date=${encodeURIComponent(date)}&format=zip`, `trading-app-log-${date}.zip`);
+    $("appDiagnosticsStatus").textContent = "Full-day application and scanner audit downloaded.";
   } catch (error) {
     $("appDiagnosticsStatus").textContent = error.message;
   } finally {
     $("appDiagnosticsDownload").disabled = false;
   }
+}
+
+async function downloadArchive(url, filename) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Download failed");
+  }
+  downloadBlob(await response.blob(), filename);
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function reportBrowserError(message) {
@@ -3797,9 +3867,9 @@ function renderIndexScanner(data) {
     ? `${fmtInt(progress.completed)}/${fmtInt(progress.total)} steps | ${progress.current || data.phase || "idle"} | ${fmtInt(progress.failures)} failed`
     : "Waiting for a scan";
   const refresh = data.data_service || {};
-  $("indexScannerDataStatus").textContent = `Data refresh ${refresh.running ? "running" : "stopped"} | ${fmtInt(refresh.pending || 0)} pending | ${refresh.current || "idle"} | Last success ${fmtDateTime(refresh.last_success)}`;
+  $("indexScannerDataStatus").textContent = `Data refresh ${refresh.running ? "running" : "stopped"} | ${fmtInt(refresh.pending || 0)} pending | ${fmtInt(refresh.waiting || 0)} waiting responses | ${fmtInt(refresh.failures || 0)} failures | ${refresh.current || "idle"} | Last success ${fmtDateTime(refresh.last_success)}`;
   const sources = Object.values(refresh.sources || {});
-  $("indexScannerDataSources").innerHTML = sources.length ? `<table class="readable-table"><thead><tr><th>Source</th><th>Status</th><th>Last completed</th><th>Seconds</th></tr></thead><tbody>${sources.map((row) => `<tr><td>${escapeHtml(row.symbol)} ${escapeHtml(row.timeframe)}</td><td>${escapeHtml(row.status)}${row.error ? `<div class="points-negative">${escapeHtml(row.error)}</div>` : ""}</td><td>${fmtDateTime(row.finished_at)}</td><td>${fmt(row.duration_ms / 1000)}</td></tr>`).join("")}</tbody></table>` : "";
+  $("indexScannerDataSources").innerHTML = sources.length ? `<table class="readable-table"><thead><tr><th>Source</th><th>Status</th><th>Last completed</th><th>Latest closed candle</th><th>Expected closed candle</th><th>Retry (IST)</th><th>Seconds</th></tr></thead><tbody>${sources.map((row) => `<tr><td>${escapeHtml(row.symbol)} ${escapeHtml(row.timeframe)}</td><td>${escapeHtml(row.status)}${row.error ? `<div class="points-negative">${escapeHtml(row.error)}</div>` : ""}</td><td>${fmtDateTime(row.finished_at)}</td><td>${fmtDateTime(row.latest_closed_candle)}</td><td>${fmtDateTime(row.expected_closed_candle)}</td><td>${fmtDateTime(row.retry_at)}</td><td>${fmt(row.duration_ms / 1000)}</td></tr>`).join("")}</tbody></table>` : "";
   $("indexScannerMeta").textContent = `${data.profile.label} | ${fmtDateTime(result.as_of)}`;
   $("indexScannerMetrics").innerHTML = [
     ["New entries", result.entries_created ?? 0], ["New exits", result.exits_created ?? 0],
@@ -3818,7 +3888,7 @@ function renderIndexScanner(data) {
   $("indexScannerLeadersMeta").textContent = data.profile.source_date ? `Weights as of ${data.profile.source_date}` : "Selected leaders, unweighted";
   $("indexScannerLeaders").innerHTML = leaders.length ? leaders.map((row) => `<tr><td>${escapeHtml(row.symbol)}</td><td>${row.weight_pct == null ? "-" : fmtPct(row.weight_pct)}</td><td>${escapeHtml(row.technical_bias)}</td><td>${escapeHtml(row.option_bias)}</td><td>${fmtPct(row.change_pct)}</td><td>${fmtInt(row.put_oi_change)}</td><td>${fmtInt(row.call_oi_change)}</td></tr>`).join("") : indexScannerTableRow("No constituent analysis yet", 7);
   $("indexScannerAlerts").innerHTML = (history.alerts || []).length ? history.alerts.map((row) => `<tr><td>${fmtDateTime(row.created_at)}</td><td>${escapeHtml(row.horizon)}</td><td>${escapeHtml(row.event_kind)}</td><td>${escapeHtml(row.trade_id)}</td><td>${escapeHtml(row.telegram_status)}${row.telegram_error ? `<div class="cell-note points-negative">${escapeHtml(row.telegram_error)}</div>` : ""}</td></tr>`).join("") : indexScannerTableRow("No alerts yet", 5);
-  $("indexScannerTrades").innerHTML = (history.trades || []).length ? history.trades.map((row) => `<tr><td>${escapeHtml(row.trade_id)}</td><td>${escapeHtml(row.horizon)}</td><td>${escapeHtml(row.direction)}</td><td>${fmt(row.entry_price)}</td><td>${fmtDateTime(row.entry_time)}</td><td>${fmt(row.exit_price)}</td><td>${fmtDateTime(row.exit_time)}</td><td>${row.open_seconds == null ? "Open" : escapeHtml(durationMinutes(row.open_seconds / 60))}</td><td>${escapeHtml(row.status)}</td></tr>`).join("") : indexScannerTableRow("No trades yet", 9);
+  $("indexScannerTrades").innerHTML = (history.trades || []).length ? history.trades.map((row) => `<tr><td>${escapeHtml(row.trade_id)}</td><td>${escapeHtml(row.horizon)}</td><td>${escapeHtml(row.direction)}</td><td>${signalPriceCell(row.entry_price, row.context, "entry")}</td><td>${fmtDateTime(row.entry_time)}</td><td>${signalPriceCell(row.exit_price, row.context, "exit")}</td><td>${fmtDateTime(row.exit_time)}</td><td>${row.open_seconds == null ? "Open" : escapeHtml(durationMinutes(row.open_seconds / 60))}</td><td>${escapeHtml(row.status)}</td></tr>`).join("") : indexScannerTableRow("No trades yet", 9);
   const errors = result.errors || data.errors || [];
   $("indexScannerErrorCount").textContent = `${errors.length} issue(s)`;
   $("indexScannerErrors").innerHTML = errors.length ? errors.map((message) => `<div>${escapeHtml(message)}</div>`).join("") : "No data issues reported";
@@ -3941,10 +4011,23 @@ $("niftyAutoStartBtn").addEventListener("click", startNiftyAutoScan);
 $("niftyAutoStopBtn").addEventListener("click", stopNiftyAutoScan);
 $("niftyAutoRunOnceBtn").addEventListener("click", runNiftyAutoOnce);
 $("niftyScannerBacktestBtn").addEventListener("click", runNiftyScannerBacktest);
+$("comparisonRefresh").addEventListener("click", refreshComparisonCandles);
+$("comparisonVariant").addEventListener("change", () => { if (state.nifty.scannerBacktest?.method === "comparison") renderIndexComparison(state.nifty.scannerBacktest); });
+$("comparisonExport").addEventListener("click", () => {
+  const data = state.nifty.scannerBacktest;
+  if (data?.method === "comparison") downloadBlob(new Blob([JSON.stringify(data, null, 2)], {type: "application/json"}), `index-comparison-${data.symbol}.json`);
+});
 function syncNiftyBacktestControls(resetValues = false) {
   const technical = $("niftyBacktestMethod").value === "technical";
+  const comparison = $("niftyBacktestMethod").value === "comparison";
+  $("comparisonSymbol").parentElement.hidden = !comparison;
+  $("comparisonTrigger").parentElement.hidden = !comparison;
+  $("comparisonRefresh").hidden = !comparison;
+  $("comparisonExport").hidden = !comparison;
+  $("comparisonTrigger").querySelector('option[value="15m_5m"]').disabled = $("niftyBacktestHorizon").value !== "intraday";
+  if ($("niftyBacktestHorizon").value !== "intraday") $("comparisonTrigger").value = "standard";
   $("niftyBacktestStrategy").parentElement.hidden = !technical;
-  $("niftyBacktestCostBps").parentElement.hidden = !technical;
+  $("niftyBacktestCostBps").parentElement.hidden = !technical && !comparison;
   const openingRange = $("niftyBacktestStrategy").querySelector('option[value="opening_range"]');
   openingRange.disabled = $("niftyBacktestHorizon").value !== "intraday";
   if (openingRange.disabled && $("niftyBacktestStrategy").value === "opening_range") {

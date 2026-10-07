@@ -710,7 +710,10 @@ class NiftyAutoScanTests(unittest.TestCase):
             )
 
             with patch("trading_analysis.scheduler.jobs.is_scan_window", return_value=True), \
+                 patch("trading_analysis.scheduler.jobs.datetime") as clock, \
+                 patch("trading_analysis.scheduler.jobs.LIVE_QUOTES.get", return_value={"price": 159, "quote_time": now.isoformat(), "received_at": now.isoformat(), "source": "test"}), \
                  patch("trading_analysis.scheduler.jobs.build_live_entry_signal", side_effect=lambda *args, **kwargs: build_live_entry_signal(*args, **kwargs, now=now)):
+                clock.now.return_value = now
                 payload = jobs.run_nifty_opportunity_scan_job(mode="auto", min_score=70)
             alert = payload["result"]["alerts"][0]
 
@@ -801,6 +804,9 @@ class FakeNiftyDeskForJobs:
 
     def nifty_context(self, **kwargs):
         return _context("bullish")
+
+    def refresh_background_candles(self, refresh):
+        return {"refresh_results": [], "warnings": [], "errors": []}
 
     def nifty_strategy_suggestions(self, **kwargs):
         context = _context("bullish")

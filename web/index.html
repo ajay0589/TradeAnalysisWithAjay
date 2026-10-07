@@ -433,6 +433,10 @@
                 <span id="indexDiagnosticsStatus" class="cell-note"></span>
               </div>
               <div id="allIndexMessage" class="mini-status"></div>
+              <details class="market-evidence"><summary>Spot quotes &amp; OI evidence</summary>
+                <div id="indexQuoteStatus" class="mini-status"></div>
+                <div class="wide-table"><table class="readable-table"><thead><tr><th>Index</th><th>Observed spot</th><th>Quote time (IST)</th><th>Quote state</th><th>Technical / confirmation state</th><th>Rolling OI (research)</th><th>Last observed OI change</th></tr></thead><tbody id="indexMarketEvidence"></tbody></table></div>
+              </details>
             </div>
           </section>
           <nav class="index-subtabs" aria-label="Index scanner">
@@ -682,11 +686,13 @@
 
               <section class="table-panel">
                 <div class="panel-head">
-                  <h2>NIFTY Spot Backtest</h2>
+                  <h2>Index Spot Backtest</h2>
                   <span id="niftyScannerBacktestMeta">Not run</span>
                 </div>
-                <div class="date-grid compact-controls">
-                  <div><label for="niftyBacktestMethod">Method</label><select id="niftyBacktestMethod"><option value="technical">Technical setup (next candle)</option><option value="scanner">Existing scanner rules</option></select></div>
+                <div class="date-grid compact-controls index-backtest-controls">
+                  <div><label for="niftyBacktestMethod">Method</label><select id="niftyBacktestMethod"><option value="technical">Technical setup (next candle)</option><option value="scanner">Existing scanner rules</option><option value="comparison">Compare technical / flow / OI</option></select></div>
+                  <div hidden><label for="comparisonSymbol">Index</label><select id="comparisonSymbol"><option value="NIFTY">NIFTY</option><option value="BANKNIFTY">Bank Nifty</option><option value="SENSEX">Sensex</option></select></div>
+                  <div hidden><label for="comparisonTrigger">Trigger</label><select id="comparisonTrigger"><option value="standard">Horizon candle</option><option value="15m_5m">15m trend / 5m trigger</option></select></div>
                   <div><label for="niftyBacktestStrategy">Entry setup</label><select id="niftyBacktestStrategy"><option value="ema_pullback">EMA20 pullback</option><option value="trend_breakout">10-candle breakout</option><option value="rsi_reversal">RSI reversal</option><option value="opening_range">Opening range (15m)</option></select></div>
                   <div><label for="niftyBacktestHorizon">Horizon</label><select id="niftyBacktestHorizon"><option value="intraday">Intraday (15m)</option><option value="swing">Swing (1h)</option><option value="positional" selected>Positional (Daily)</option></select></div>
                   <div><label for="niftyBacktestDirection">Direction</label><select id="niftyBacktestDirection"><option value="both">Bullish &amp; Bearish</option><option value="bullish">Bullish</option><option value="bearish">Bearish</option></select></div>
@@ -697,6 +703,10 @@
                   <div><label for="niftyBacktestCostBps">Cost per side (bps)</label><input id="niftyBacktestCostBps" type="number" min="0" max="100" step="0.5" value="2" /></div>
                 </div>
                 <button id="niftyScannerBacktestBtn">Run backtest</button>
+                <button id="comparisonRefresh" type="button" hidden>Refresh research candles</button>
+                <button id="comparisonExport" type="button" hidden disabled>Download comparison</button>
+                <div id="comparisonResults" class="wide-table" hidden></div>
+                <div id="comparisonTradeControls" hidden><label for="comparisonVariant">Trades</label><select id="comparisonVariant"><option value="technical">Technical only</option><option value="flow">Technical + option price/volume</option><option value="oi">Technical + rolling OI</option><option value="combined">Technical + flow + rolling OI</option></select></div>
                 <div id="niftyScannerBacktestCards" class="compact-metrics"></div>
                 <div id="niftyScannerBacktestCoverage" class="mini-list"></div>
                 <div class="wide-table"><table class="readable-table"><thead><tr><th>Entry Time</th><th>Direction</th><th>Entry</th><th>Exit Time</th><th>Exit</th><th>Open Time</th><th>R</th><th>Return</th><th>Exit Reason</th></tr></thead><tbody id="niftyScannerBacktestBody"></tbody></table></div>

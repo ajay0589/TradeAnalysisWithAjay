@@ -42,6 +42,9 @@ class OptionChainRow:
     bid_price: float | None
     ask_price: float | None
     buildup: str
+    exchange_timestamp: str | None = None
+    last_trade_time: str | None = None
+    received_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -209,6 +212,7 @@ def _write_option_chain_snapshot(path: str | Path, analysis: OptionChainAnalysis
         "bid_price",
         "ask_price",
         "buildup",
+        "exchange_timestamp", "last_trade_time", "received_at",
     ]
     snapshot_time = datetime.now().isoformat(timespec="seconds")
     with output_path.open("w", encoding="utf-8", newline="") as handle:
@@ -236,6 +240,9 @@ def _write_option_chain_snapshot(path: str | Path, analysis: OptionChainAnalysis
                     "bid_price": "" if row.bid_price is None else row.bid_price,
                     "ask_price": "" if row.ask_price is None else row.ask_price,
                     "buildup": row.buildup,
+                    "exchange_timestamp": row.exchange_timestamp,
+                    "last_trade_time": row.last_trade_time,
+                    "received_at": row.received_at,
                 }
             )
 
@@ -283,6 +290,9 @@ def _row_from_quote(
         bid_price=bid_price,
         ask_price=ask_price,
         buildup=classify_buildup(price_change, oi_change),
+        exchange_timestamp=str(quote.get("timestamp") or "") or None,
+        last_trade_time=str(quote.get("last_trade_time") or "") or None,
+        received_at=datetime.now().astimezone().isoformat(),
     )
 
 

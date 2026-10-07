@@ -94,22 +94,24 @@ def export(day: str | None = None) -> dict:
     selected = date.fromisoformat(day) if day else datetime.now(IST).date()
     events = []
     malformed = 0
+    snapshots = []
     with _LOCK:
         for path in sorted((ROOT / "logs" / "diagnostics").glob(f"app-{selected}-*.jsonl")):
             try:
-                with path.open(encoding="utf-8") as handle:
-                    for line in handle:
-                        try:
-                            events.append(json.loads(line))
-                        except (ValueError, UnicodeError):
-                            malformed += 1
+                snapshots.append(path.read_bytes())
             except FileNotFoundError:
                 malformed += 1
+    # Parsing/redaction of a full trading day must not hold up live log writers.
+    for snapshot in snapshots:
+        for line in snapshot.splitlines():
+            try:
+                events.append(json.loads(line))
+            except (ValueError, UnicodeError):
+                malformed += 1
     events.sort(key=lambda row: row.get("timestamp", ""))
-    limit = 50000
     return {"schema_version": 2, "date": str(selected), "timezone": "Asia/Kolkata", "runtime": runtime(),
-            "events": [clean(row) for row in events[-limit:]],
-            "truncated_events": max(0, len(events) - limit), "incomplete_lines": malformed}
+            "events": [clean(row) for row in events], "event_count": len(events),
+            "truncated_events": 0, "incomplete_lines": malformed}
 
 
 def area_for_path(path: str) -> str:
@@ -156,7 +158,9 @@ def audit_http(fn):
         params = parse_qs(urlparse(handler.path).query)
         selected = {key: params[key] for key in ("symbol", "timeframe", "horizon", "days", "refresh", "mode") if key in params}
         with scope(area_for_path(path), request_id):
-            polling = handler.command == "GET" and path.endswith("/status")
+            polling = handler.command == "GET" and (path.endswith("/status") or path in {
+                "/api/nifty/trades", "/api/nifty/alerts", "/api/nifty/data/latest",
+                "/api/nifty/context-snapshots", "/api/nifty/option-snapshots", "/api/nifty/iv-history"})
             if not polling:
                 record("request_started", method=handler.command, endpoint=path, parameters=selected)
             try:

@@ -36,17 +36,20 @@ class Settings:
     max_bars: int
     atr_stop: float = 1.0
     cost_bps_per_side: float = COST_BPS_PER_SIDE
+    trigger_minutes: int = 15
+    ema_exit: bool = False
 
 
 def _clock(candle: Candle) -> time:
     return candle.timestamp.timetz().replace(tzinfo=None)
 
 
-def _trade_time(candle: Candle, horizon: str, *, at_close: bool = False) -> datetime:
+def _trade_time(candle: Candle, horizon: str, *, at_close: bool = False, trigger_minutes: int = 15) -> datetime:
     if horizon == "positional":
         return candle.timestamp.replace(hour=15 if at_close else 9, minute=30 if at_close else 15)
-    minutes = 15 if horizon == "intraday" else 60
-    return candle.timestamp + (timedelta(minutes=minutes) if at_close else timedelta())
+    minutes = trigger_minutes if horizon == "intraday" else 60
+    value = candle.timestamp + (timedelta(minutes=minutes) if at_close else timedelta())
+    return min(value, candle.timestamp.replace(hour=15, minute=30, second=0)) if at_close else value
 
 
 def _opening_range(candles: list[Candle]) -> dict[date, tuple[float, float]]:
@@ -74,7 +77,10 @@ def _signal(
         if not time(9, 30) <= _clock(candle) <= time(14, 45):
             return None
     bullish = bearish = False
-    if settings.strategy == "trend_breakout":
+    if settings.strategy == "scanner_rules":
+        bullish = candle.close > candle.open and candle.close > ema20 > ema50 and momentum >= 52
+        bearish = candle.close < candle.open and candle.close < ema20 < ema50 and momentum <= 48
+    elif settings.strategy == "trend_breakout":
         previous_high = max(row.high for row in candles[index - 10:index])
         previous_low = min(row.low for row in candles[index - 10:index])
         bullish = candle.close > previous_high and candle.close > ema20 > ema50 and 55 <= momentum <= 75
@@ -109,7 +115,7 @@ def _signal(
 
 def _exit(
     candles: list[Candle], start: int, direction: str, entry: float,
-    stop: float, target: float, settings: Settings,
+    stop: float, target: float, settings: Settings, ema_values=None,
 ) -> tuple[int, float, str]:
     end = min(len(candles) - 1, start + settings.max_bars - 1)
     for index in range(start, end + 1):
@@ -131,12 +137,15 @@ def _exit(
                 return index, stop, "stop"
             if candle.low <= target:
                 return index, target, "target"
+        if settings.ema_exit and ema_values and ema_values[index] is not None:
+            if (candle.close - ema_values[index]) * (1 if direction == "bullish" else -1) < 0:
+                return index, candle.close, "ema20_reversal"
         if settings.horizon == "intraday" and _clock(candle) >= time(15, 0):
             return index, candle.close, "session_close"
     return end, candles[end].close, "max_bars"
 
 
-def simulate(candles: list[Candle], settings: Settings) -> list[dict]:
+def simulate(candles: list[Candle], settings: Settings, entry_filter=None) -> list[dict]:
     closes = [row.close for row in candles]
     fast, slow, momentum, volatility = (
         _ema_series(closes, 20), _ema_series(closes, 50),
@@ -148,6 +157,10 @@ def simulate(candles: list[Candle], settings: Settings) -> list[dict]:
     while index < len(candles) - 1:
         signal = _signal(candles, index, settings, fast, slow, momentum, opening_range)
         if signal is None or volatility[index] is None:
+            index += 1
+            continue
+        decision_at = _trade_time(candles[index], settings.horizon, at_close=True, trigger_minutes=settings.trigger_minutes)
+        if entry_filter is not None and not entry_filter(index, signal, decision_at):
             index += 1
             continue
         entry_index = index + 1
@@ -162,11 +175,11 @@ def simulate(candles: list[Candle], settings: Settings) -> list[dict]:
         risk = settings.atr_stop * volatility[index]
         stop = entry - risk if signal == "bullish" else entry + risk
         target = entry + settings.target_r * risk if signal == "bullish" else entry - settings.target_r * risk
-        exit_index, exit_price, exit_reason = _exit(candles, entry_index, signal, entry, stop, target, settings)
+        exit_index, exit_price, exit_reason = _exit(candles, entry_index, signal, entry, stop, target, settings, fast)
         gross_points = (exit_price - entry) * (1 if signal == "bullish" else -1)
         cost_points = (entry + exit_price) * settings.cost_bps_per_side / 10000
-        entry_time = _trade_time(entry_candle, settings.horizon)
-        exit_time = _trade_time(candles[exit_index], settings.horizon, at_close=True)
+        entry_time = _trade_time(entry_candle, settings.horizon, trigger_minutes=settings.trigger_minutes)
+        exit_time = _trade_time(candles[exit_index], settings.horizon, at_close=True, trigger_minutes=settings.trigger_minutes)
         trades.append({
             "entry_date": entry_time.date(), "entry_time": entry_time,
             "exit_time": exit_time, "direction": signal,

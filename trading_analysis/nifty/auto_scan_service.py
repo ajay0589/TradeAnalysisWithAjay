@@ -1,4 +1,5 @@
 from __future__ import annotations
+import threading
 
 from pathlib import Path
 from statistics import mean
@@ -54,15 +55,28 @@ class NiftyAutoScanService:
             trade_repository=self.trade_repository,
         )
         self.scheduler = scheduler or MarketScanScheduler(job_runner=self.job_runner)
+        self._control_lock = threading.RLock()
 
     def start(self, scan_interval_seconds: int | None = None) -> dict[str, Any]:
+        with self._control_lock:
+            return self._start_locked(scan_interval_seconds)
+
+    def _start_locked(self, scan_interval_seconds):
+        from trading_analysis.live_quotes import LIVE_QUOTES
         if scan_interval_seconds is not None:
             seconds = max(30, int(scan_interval_seconds))
             self.scheduler.configure({"opportunity_scan": seconds, "trade_exit": seconds})
-        return self._with_repository_context(self.scheduler.start())
+        result = self.scheduler.start()
+        if result.get("running"):
+            LIVE_QUOTES.acquire("NIFTY")
+            self.job_runner.outbox.start()
+        return self._with_repository_context(result)
 
     def stop(self) -> dict[str, Any]:
-        return self._with_repository_context(self.scheduler.stop())
+        from trading_analysis.live_quotes import LIVE_QUOTES
+        with self._control_lock:
+            LIVE_QUOTES.release("NIFTY")
+            return self._with_repository_context(self.scheduler.stop())
 
     def status(self) -> dict[str, Any]:
         return self._with_repository_context(self.scheduler.status())
@@ -239,11 +253,15 @@ class NiftyAutoScanService:
         )
 
     def _with_repository_context(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from trading_analysis.live_quotes import LIVE_QUOTES
         recent_jobs = self.job_repository.latest_jobs(limit=20)
         recent_alerts = self.alert_repository.list_recent_alerts(limit=20, active_only=False)
         active_alerts = self.alert_repository.list_recent_alerts(limit=200, active_only=True)
         return {
             **payload,
+            "live_quotes": LIVE_QUOTES.status(),
+            "option_evidence": self.job_runner.rolling_options,
+            "signal_states": dict(self.job_runner._entry_results),
             "scheduler": "running" if payload.get("running") else "stopped",
             "market_hours": payload.get("market_hours", is_market_hours()),
             "recent_jobs": recent_jobs,

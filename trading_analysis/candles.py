@@ -51,6 +51,9 @@ TIMEFRAME_ALIASES = {
     "15min": "15minute",
     "15m": "15minute",
     "15minute": "15minute",
+    "5minute": "5minute",
+    "5min": "5minute",
+    "5m": "5minute",
 }
 
 TIMEFRAME_LABELS = {
@@ -62,6 +65,7 @@ TIMEFRAME_LABELS = {
     "30minute": "30 min",
     "10minute": "10 min",
     "15minute": "15 min",
+    "5minute": "5 min",
 }
 
 FETCH_INTERVALS = {
@@ -70,6 +74,7 @@ FETCH_INTERVALS = {
     "30minute": "30minute",
     "10minute": "10minute",
     "15minute": "15minute",
+    "5minute": "5minute",
 }
 
 

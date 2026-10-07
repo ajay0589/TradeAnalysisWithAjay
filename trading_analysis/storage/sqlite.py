@@ -539,11 +539,14 @@ class MarketJobRepository:
             updated = conn.execute("SELECT * FROM market_jobs WHERE id = ?", (job_id,)).fetchone()
         return _job_row(updated) if updated else {}
 
-    def latest_jobs(self, limit: int = 20) -> list[dict[str, Any]]:
+    def latest_jobs(self, limit: int | None = 20, day: str | None = None) -> list[dict[str, Any]]:
+        where = "WHERE started_at LIKE ?" if day else ""
+        params = [day + "%"] if day else []
+        params.append(-1 if limit is None else max(1, int(limit)))
         with _connection(self.db_path) as conn:
             rows = conn.execute(
-                "SELECT * FROM market_jobs ORDER BY started_at DESC, id DESC LIMIT ?",
-                (max(1, int(limit)),),
+                f"SELECT * FROM market_jobs {where} ORDER BY started_at DESC, id DESC LIMIT ?",
+                params,
             ).fetchall()
         return [_job_row(row) for row in rows]
 
@@ -587,6 +590,11 @@ class NiftyAlertRepository:
         telegram_status: str | None = None,
     ) -> dict[str, Any]:
         with _connection(self.db_path) as conn:
+            if trade_id and event_kind:
+                conn.execute("BEGIN IMMEDIATE")
+                existing = conn.execute("SELECT * FROM nifty_alerts WHERE trade_id=? AND event_kind=? ORDER BY id LIMIT 1", (trade_id, event_kind)).fetchone()
+                if existing:
+                    return _alert_row(existing)
             cursor = conn.execute(
                 """
                 INSERT INTO nifty_alerts(
@@ -626,12 +634,17 @@ class NiftyAlertRepository:
             row = conn.execute("SELECT * FROM nifty_alerts WHERE id = ?", (cursor.lastrowid,)).fetchone()
         return _alert_row(row) if row else {}
 
-    def list_recent_alerts(self, limit: int = 50, active_only: bool = False) -> list[dict[str, Any]]:
-        where = "WHERE is_active = 1" if active_only else ""
+    def list_recent_alerts(self, limit: int | None = 50, active_only: bool = False, day: str | None = None) -> list[dict[str, Any]]:
+        clauses = ["is_active = 1"] if active_only else []
+        if day:
+            clauses.append("created_at LIKE ?")
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        params = [day + "%"] if day else []
+        params.append(-1 if limit is None else max(1, int(limit)))
         with _connection(self.db_path) as conn:
             rows = conn.execute(
                 f"SELECT * FROM nifty_alerts {where} ORDER BY created_at DESC, id DESC LIMIT ?",
-                (max(1, int(limit)),),
+                params,
             ).fetchall()
         return [_alert_row(row) for row in rows]
 
@@ -703,8 +716,9 @@ class NiftyTradeRepository:
         if not entry_time or entry_price is None:
             raise ValueError("NIFTY trade requires entry time and price.")
         now = _now()
-        trade_id = str(signal.get("trade_id") or _nifty_trade_id(horizon, entry_time))
+        trade_id = str(signal.get("trade_id") or _nifty_trade_id(horizon, _string_or_none(signal.get("entry_candle_timestamp")) or entry_time))
         with _connection(self.db_path) as conn:
+            conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute(
                 "SELECT * FROM nifty_trades WHERE status = 'open' AND horizon = ? ORDER BY entry_time DESC LIMIT 1",
                 (horizon,),
@@ -762,14 +776,17 @@ class NiftyTradeRepository:
             row = conn.execute("SELECT * FROM nifty_trades WHERE trade_id = ?", (trade_id,)).fetchone()
         return _nifty_trade_row(row) if row else {}
 
-    def list_trades(self, status: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+    def list_trades(self, status: str | None = None, limit: int | None = 200, day: str | None = None) -> list[dict[str, Any]]:
         clauses: list[str] = []
         params: list[Any] = []
         if status and status.lower() != "all":
             clauses.append("status = ?")
             params.append(status.lower())
+        if day:
+            clauses.append("(created_at LIKE ? OR updated_at LIKE ?)")
+            params.extend([day + "%", day + "%"])
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        params.append(max(1, int(limit)))
+        params.append(-1 if limit is None else max(1, int(limit)))
         with _connection(self.db_path) as conn:
             rows = conn.execute(
                 f"SELECT * FROM nifty_trades {where} ORDER BY entry_time DESC, id DESC LIMIT ?",
@@ -801,13 +818,16 @@ class NiftyTradeRepository:
         exit_price: float,
         exit_reason: str,
         exit_alert_id: int | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         closed_at = _string_or_none(exit_time) or _now()
         with _connection(self.db_path) as conn:
+            conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute("SELECT * FROM nifty_trades WHERE trade_id = ?", (trade_id,)).fetchone()
             if not existing or existing["status"] != "open":
                 return _nifty_trade_row(existing) if existing else {}
-            open_seconds = max(0, int((datetime.fromisoformat(closed_at) - datetime.fromisoformat(existing["entry_time"])).total_seconds()))
+            from trading_analysis.live_timing import as_ist
+            open_seconds = max(0, int((as_ist(closed_at) - as_ist(existing["entry_time"])).total_seconds()))
             conn.execute(
                 """
                 UPDATE nifty_trades
@@ -817,6 +837,9 @@ class NiftyTradeRepository:
                 """,
                 (exit_alert_id, closed_at, exit_price, open_seconds, exit_price, _now(), exit_reason, _now(), trade_id),
             )
+            if metadata:
+                combined = {**json.loads(existing["metadata_json"] or "{}"), **metadata}
+                conn.execute("UPDATE nifty_trades SET metadata_json = ? WHERE trade_id = ?", (_json(combined), trade_id))
             row = conn.execute("SELECT * FROM nifty_trades WHERE trade_id = ?", (trade_id,)).fetchone()
         return _nifty_trade_row(row) if row else {}
 

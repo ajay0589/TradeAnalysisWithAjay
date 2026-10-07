@@ -13,6 +13,10 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from trading_analysis import diagnostics
+from trading_analysis.live_quotes import LIVE_QUOTES
+from trading_analysis.live_timing import expected_closed_bar, prepare_live_entry, live_quote_exit, price_closed_exit
+from trading_analysis.option_history import OptionHistory
+from trading_analysis.notifications.outbox import AlertOutbox
 
 from trading_analysis.brokers.zerodha import load_instruments_csv, merge_candles_csv, resolve_instrument_token
 from trading_analysis.candles import candle_path, candle_window, fetch_interval
@@ -21,7 +25,7 @@ from trading_analysis.index_signal import leader_confirmation, option_footprint,
 from trading_analysis.instrument_master_service import InstrumentMasterService
 from trading_analysis.nifty.live_scanner import HORIZON_CONFIG, build_live_entry_signal, evaluate_live_exit, closed_candles
 from trading_analysis.nifty.technical_context import build_nifty_technical_context
-from trading_analysis.notifications.telegram import TelegramNotifier
+from trading_analysis.notifications.telegram import TelegramNotifier, nifty_trade_message
 from trading_analysis.scheduler.market_hours import is_market_day, is_market_hours
 from trading_analysis.storage import DEFAULT_DB_PATH
 from trading_analysis.web_services import AnalysisService, _zerodha_client
@@ -160,6 +164,8 @@ class IndexScanRepository:
             conn.execute("""UPDATE index_scan_trades SET status = 'closed', exit_time = ?, exit_price = ?,
                 exit_reason = ?, open_seconds = ?, updated_at = ? WHERE trade_id = ?""",
                 (exit_time, float(outcome["price"]), outcome["reason"], duration, _iso(), trade_id))
+            context = {**json.loads(row["context_json"] or "{}"), **(outcome.get("metadata") or {})}
+            conn.execute("UPDATE index_scan_trades SET context_json = ? WHERE trade_id = ?", (json.dumps(context, default=str), trade_id))
             return dict(conn.execute("SELECT * FROM index_scan_trades WHERE trade_id = ?", (trade_id,)).fetchone())
 
     def alert(self, trade: dict[str, Any], event: str, message: str, telegram_status: str,
@@ -238,7 +244,7 @@ class IndexScanRepository:
             )]
         for row in trades:
             row["context"] = json.loads(row.pop("context_json") or "{}")
-        return {"runs": self.runs(symbol, day), "steps": self.steps(symbol, day),
+        return {"runs": self.runs(symbol, day, limit=-1), "steps": self.steps(symbol, day, limit=-1),
                 "trades": trades, "alerts": alerts}
 
 
@@ -248,6 +254,8 @@ class IndexScannerService:
         self.analysis = analysis_service or AnalysisService()
         self.profiles = json.loads(Path(profile_path).read_text(encoding="utf-8"))
         self.repository = IndexScanRepository(db_path)
+        self.option_history = OptionHistory(db_path)
+        self.outbox = AlertOutbox(db_path)
         self._states = {symbol: {"running": False, "phase": "stopped", "started_at": None,
                                 "stopped_at": None, "last_cycle_at": None, "next_run": None,
                                 "last_result": None, "progress": None, "errors": []} for symbol in self.profiles}
@@ -268,6 +276,13 @@ class IndexScannerService:
         self._data_status = {"running": False, "current": None, "pending": 0,
                              "successes": 0, "failures": 0, "last_success": None,
                              "last_error": None, "sources": {}}
+        self._data_status["waiting"] = 0
+        self._pending_counts = {}
+        self._source_detail = {}
+        self._candle_cache = {}
+        self._candle_cache_lock = threading.Lock()
+        self._exit_locks = {symbol: threading.Lock() for symbol in self.profiles}
+        self._exit_threads = {}
 
     def _symbol(self, value: str) -> str:
         symbol = value.upper()
@@ -303,6 +318,8 @@ class IndexScannerService:
             raise ValueError("Check interval must be 60 to 3600 seconds.")
         if self._threads.get(symbol) and self._threads[symbol].is_alive():
             return self.status(symbol)
+        if self._exit_threads.get(symbol) and self._exit_threads[symbol].is_alive():
+            return self.status(symbol)
         masters = InstrumentMasterService(self.analysis).status()["masters"]
         required = ("NSE", "NFO") if symbol == "BANKNIFTY" else ("NSE", "NFO", "BSE", "BFO")
         unavailable = [f"{exchange} ({masters[exchange]['state']})" for exchange in required
@@ -316,6 +333,10 @@ class IndexScannerService:
         thread = threading.Thread(target=self._loop, args=(symbol,), name=f"index-{symbol}", daemon=True)
         self._threads[symbol] = thread
         thread.start()
+        LIVE_QUOTES.acquire(symbol)
+        self.outbox.start()
+        self._exit_threads[symbol] = threading.Thread(target=self._exit_loop, args=(symbol,), name=f"exit-{symbol}", daemon=True)
+        self._exit_threads[symbol].start()
         self._ensure_data_worker()
         return self.status(symbol)
 
@@ -337,7 +358,8 @@ class IndexScannerService:
     def _data_due(self, item: str, frame: str, now: datetime) -> bool:
         attempted = self._data_attempts.get((item, frame))
         # Failed/empty sources retry with a bounded delay, not a tight loop.
-        if attempted and (now - attempted).total_seconds() < 30:
+        delay = min(120, 15 * 2 ** min(self._pending_counts.get((item, frame), 0), 3)) if self._pending_counts.get((item, frame)) else 30
+        if attempted and (now - attempted).total_seconds() < delay:
             return False
         if frame == "options":
             refreshed = self._option_refresh.get(item, {}).get("refreshed_at")
@@ -393,26 +415,30 @@ class IndexScannerService:
                 self._data_status["current"] = ", ".join(f"{i} {f}" for _, i, f in batch)
                 for _, i, f in batch:
                     self._data_attempts[(i, f)] = _now()
+                changed = False
                 try:
                     if frame == "options":
-                        self._refresh_option_batch(batch, started)
+                        changed = self._refresh_option_batch(batch, started)
                     else:
                         result = self._refresh_candle(item, frame, owner)
-                        error = {"empty": "Empty candle response", "stale": "Required closed candle not available yet; retry queued"}.get(result)
-                        self._record_data(item, frame, error, started)
+                        changed = result == "updated"
+                        self._record_data(item, frame, "Empty candle response" if result == "empty" else None,
+                                          started, waiting=result == "stale", cached=result == "cached")
                 except Exception as exc:
                     for _, i, f in batch:
                         self._record_data(i, f, str(exc), started)
                 finally:
                     self._data_status["current"] = None
-                    for active_owner in owners:
-                        self._analysis_wake[active_owner].set()
+                    if changed:
+                        for active_owner in owners:
+                            self._analysis_wake[active_owner].set()
         finally:
             if self._data_thread is threading.current_thread():
                 self._data_status.update({"running": False, "current": None, "pending": 0})
 
     def _refresh_option_batch(self, batch, started):
         acquired = []
+        changed = False
         try:
             for owner, item, _ in batch:
                 lock = self._source_lock("options", item)
@@ -428,22 +454,30 @@ class IndexScannerService:
                 try:
                     if not error:
                         self._publish_options(item, result)
+                        changed = True
                 except Exception as exc:
                     error = str(exc)
                 self._record_data(item, "options", error, started)
+            return changed
         finally:
             for _, lock in acquired:
                 lock.release()
 
-    def _record_data(self, item: str, frame: str, error: str | None, started: float) -> None:
-        row = {"symbol": item, "timeframe": frame, "status": "failed" if error else "updated",
-               "finished_at": _iso(), "duration_ms": int((time.monotonic() - started) * 1000), "error": error}
+    def _record_data(self, item: str, frame: str, error: str | None, started: float,
+                     waiting: bool = False, cached: bool = False) -> None:
+        key = (item, frame)
+        self._pending_counts[key] = self._pending_counts.get(key, 0) + 1 if waiting else 0
+        retry = min(120, 15 * 2 ** min(self._pending_counts[key], 3))
+        row = {"symbol": item, "timeframe": frame, "status": "failed" if error else "waiting" if waiting else "cached" if cached else "updated",
+               "finished_at": _iso(), "duration_ms": int((time.monotonic() - started) * 1000), "error": error,
+               **self._source_detail.get(key, {}),
+               "retry_at": (_now() + timedelta(seconds=retry)).isoformat() if waiting else None}
         # Replace the mapping so status readers never iterate a mutating dictionary.
         self._data_status["sources"] = {**self._data_status["sources"], f"{item}:{frame}": row}
-        self._data_status["failures" if error else "successes"] += 1
+        self._data_status["failures" if error else "waiting" if waiting else "successes"] += 1
         if error:
             self._data_status["last_error"] = f"{item} {frame}: {error}"
-        else:
+        elif not waiting and not cached:
             self._data_status["last_success"] = _iso()
         diagnostics.record("index_data_refresh", area="indexes", **row)
 
@@ -452,12 +486,16 @@ class IndexScannerService:
         self._events[symbol].set()
         self._analysis_wake[symbol].set()
         self._data_wake.set()
+        LIVE_QUOTES.release(symbol)
         self._states[symbol]["phase"] = "stopping"
         thread = self._threads.get(symbol)
         if thread and thread.is_alive():
             thread.join(timeout=5)
         elif not self._scan_locks[symbol].locked():
             self._states[symbol].update({"running": False, "phase": "stopped", "stopped_at": _iso(), "next_run": None})
+        exit_thread = self._exit_threads.get(symbol)
+        if exit_thread and exit_thread.is_alive():
+            exit_thread.join(timeout=5)
         return self.status(symbol)
 
     def _loop(self, symbol: str) -> None:
@@ -489,6 +527,7 @@ class IndexScannerService:
         state["telegram_destination"] = self._telegram_source(symbol)
         state["history"] = self.repository.history(symbol)
         state["data_service"] = dict(self._data_status)
+        state["live_quotes"] = LIVE_QUOTES.status()
         items = {symbol, *[row["symbol"] for row in self.profiles[symbol]["leaders"]]}
         state["data_service"]["sources"] = {key: row for key, row in self._data_status["sources"].items() if row["symbol"] in items}
         return state
@@ -505,17 +544,22 @@ class IndexScannerService:
         notifier = TelegramNotifier.from_env(f"{symbol}_")
         if not notifier.configured():
             notifier = TelegramNotifier.from_env("NIFTY_")
-        message = (f"{symbol} {event.upper()} | {trade['horizon']} {trade['direction']}\n"
-                   f"Trade {trade['trade_id']}\nEntry {trade['entry_price']:.2f} at {trade['entry_time']} IST\n"
-                   f"Stop {trade['stop_level']:.2f} | Target {trade['target_level']:.2f}")
-        if event == "exit":
-            message += f"\nExit {trade['exit_price']:.2f} at {trade['exit_time']} IST | {trade['exit_reason']}"
-        delivery = notifier.send_message(message) if notifier.configured() else {"sent": False, "error": "not configured"}
-        status = "sent" if delivery.get("sent") else ("failed" if notifier.configured() else "not_configured")
-        error = str(delivery.get("error") or "") if status == "failed" else None
-        self.repository.alert(trade, event, message, status, error)
-        if status == "failed":
-            return f"Telegram {event}: {error}"
+        context = json.loads(trade.get("context_json") or "{}")
+        entry = float(trade["entry_price"])
+        risk = abs(entry - float(trade["stop_level"]))
+        signed_return = ((float(trade["exit_price"]) - entry) / entry * 100
+                         * (1 if trade["direction"] == "bullish" else -1)) if trade.get("exit_price") is not None and entry else None
+        message = nifty_trade_message(event, {**trade, "metadata": context,
+                    "strategy_id": "index_confluence", "confidence": "medium",
+                    "target_r_multiple": abs(float(trade["target_level"]) - entry) / risk if risk else None,
+                    "directional_return_percent": signed_return,
+                    "entry_timeframe": HORIZON_CONFIG[trade["horizon"]]["timeframe"],
+                    "open_duration": f"{(trade.get('open_seconds') or 0) // 60}m"})
+        status = "queued" if notifier.configured() else "not_configured"
+        self.repository.alert(trade, event, message, status)
+        if status == "queued":
+            prefix = f"{symbol}_" if TelegramNotifier.from_env(f"{symbol}_").configured() else "NIFTY_"
+            self.outbox.enqueue(symbol, trade["trade_id"], event, prefix, message)
         return None
 
     def _candle_path(self, symbol: str, timeframe: str) -> Path:
@@ -524,7 +568,17 @@ class IndexScannerService:
 
     def _candles(self, symbol: str, timeframe: str) -> list[Any]:
         try:
-            return load_candles(self._candle_path(symbol, timeframe))
+            path = self._candle_path(symbol, timeframe)
+            info = path.stat()
+            version = (info.st_mtime_ns, info.st_size)
+            with self._candle_cache_lock:
+                cached = self._candle_cache.get((symbol, timeframe))
+                if cached and cached[0] == version:
+                    return cached[1]
+            rows = load_candles(path)
+            with self._candle_cache_lock:
+                self._candle_cache[(symbol, timeframe)] = (version, rows)
+            return rows
         except FileNotFoundError:
             return []
 
@@ -568,6 +622,9 @@ class IndexScannerService:
         if candles:
             merge_candles_csv(path, candles)
             closed = closed_candles(candles, timeframe, requested_at)
+            self._source_detail[key] = {"expected_closed_candle": self._expected_closed_bar(timeframe, requested_at).isoformat(),
+                                       "latest_closed_candle": _as_ist(closed[-1].timestamp).isoformat() if closed else None,
+                                       "latest_received_candle": _as_ist(candles[-1].timestamp).isoformat()}
             if not closed or _as_ist(closed[-1].timestamp) < self._expected_closed_bar(timeframe, requested_at):
                 return "stale"
             self._candle_refresh[key] = requested_at
@@ -576,18 +633,7 @@ class IndexScannerService:
 
     @staticmethod
     def _expected_closed_bar(frame: str, now: datetime) -> datetime:
-        start = now.replace(hour=9, minute=15, second=0, microsecond=0)
-        end = now.replace(hour=15, minute=30, second=0, microsecond=0)
-        if now >= end:
-            return now.replace(hour=0, minute=0, second=0, microsecond=0) if frame == "day" else end.replace(minute=15)
-        minutes = {"day": 375, "60minute": 60, "15minute": 15}[frame]
-        count = int((now - start).total_seconds() // (minutes * 60))
-        if count > 0:
-            return start + timedelta(minutes=(count - 1) * minutes)
-        previous = now - timedelta(days=1)
-        while not is_market_day(previous.date()):
-            previous -= timedelta(days=1)
-        return previous.replace(hour=0 if frame == "day" else 15, minute=0 if frame == "day" else 15, second=0, microsecond=0)
+        return expected_closed_bar(frame, now)
 
     def _refresh_options(self, symbol: str, owner: str | None = None) -> str:
         lock = self._source_lock("options", symbol)
@@ -624,10 +670,12 @@ class IndexScannerService:
                 return list(csv.DictReader(handle))
         current = read(result.get("history_snapshot") or result["latest_snapshot"])
         previous = read(result.get("archived_previous_latest"))
+        self.option_history.save(symbol, current)
+        rolling = self.option_history.current(symbol, _now())
         self._option_refresh[symbol] = {"current": result["latest_snapshot"],
                                         "previous": result.get("archived_previous_latest"),
                                         "rows": (current, previous),
-                                        "refreshed_at": _now(), "expiry": result.get("expiry")}
+                                        "refreshed_at": _now(), "expiry": result.get("expiry"), "rolling": rolling}
 
     def _footprint(self, symbol: str, spot: float | None) -> dict[str, Any]:
         files = self._option_refresh.get(symbol)
@@ -646,7 +694,8 @@ class IndexScannerService:
         if current_at <= previous_at or current_at - previous_at > timedelta(minutes=20) or _now() - current_at > timedelta(minutes=10):
             return {"bias": "stale", "reason": "Previous option snapshot is too old"}
         return {**option_footprint(current, previous, spot), "snapshot_time": current_at.isoformat(timespec="seconds"),
-                "previous_time": previous_at.isoformat(timespec="seconds"), "expiry": files["expiry"]}
+                "previous_time": previous_at.isoformat(timespec="seconds"), "expiry": files["expiry"],
+                "rolling": files.get("rolling"), "live_filter": "existing_two_snapshot_confluence"}
 
     def run_once(self, symbol: str, refresh: bool = True) -> dict[str, Any]:
         symbol = self._symbol(symbol)
@@ -753,7 +802,7 @@ class IndexScannerService:
                             if active:
                                 signal = self._entry_signal(symbol, horizon, candles, read, index_option,
                                                             leader_rows, confirmation, entry_checks)
-                                if signal:
+                                if signal and not self._events[symbol].is_set():
                                     trade = self.repository.open_trade(symbol, signal)
                                     if trade:
                                         delivery_error = self._notify(trade, "entry")
@@ -766,6 +815,7 @@ class IndexScannerService:
                                 else:
                                     reason = f"Entry candle gate: {entry_checks.get('gate') or 'not confirmed'}"
                 horizons[horizon] = {"technical": read, "option": index_option,
+                                     "confirmation_state": "technical_only" if direction in {"bullish", "bearish"} and index_option["bias"] != direction else "options_aligned" if direction in {"bullish", "bearish"} else "no_setup",
                                      "constituents": leader_rows, "confirmation": confirmation,
                                      "entry_checks": entry_checks, "reason": reason}
                 record_step("analysis", symbol, horizon, "completed", time.monotonic() - tick, reason)
@@ -810,18 +860,42 @@ class IndexScannerService:
                        "confidence": "medium", "reasons": ["Index trend, option OI changes and constituent breadth agree"]}]
         signal = build_live_entry_signal(context, candidates, horizon, candles, now=_now(), diagnostics=diagnostics)
         if signal:
+            signal = prepare_live_entry(signal, LIVE_QUOTES.get(symbol), _now(), diagnostics)
+        if signal:
             signal["metadata"] = {**signal["metadata"], "index_option_footprint": option,
                                    "leader_confirmation": confirmation, "leaders": leaders}
         return signal
 
-    def _check_exits(self, symbol: str, errors: list[str] | None = None) -> int:
+    def _exit_loop(self, symbol):
+        try:
+            while not self._events[symbol].wait(1):
+                if _scan_window():
+                    try:
+                        self._check_exits(symbol, quote_only=True)
+                    except Exception as exc:
+                        diagnostics.record("live_exit_failed", area=symbol.lower(), status="failed", error=str(exc))
+        finally:
+            LIVE_QUOTES.release(symbol)
+
+    def _check_exits(self, symbol: str, errors: list[str] | None = None, quote_only=False) -> int:
+        if not self._exit_locks[symbol].acquire(blocking=False):
+            return 0
+        try:
+            return self._check_exits_locked(symbol, errors, quote_only)
+        finally:
+            self._exit_locks[symbol].release()
+
+    def _check_exits_locked(self, symbol, errors, quote_only):
         count = 0
         for trade in self.repository.open_trades(symbol):
+            if self._events[symbol].is_set():
+                break
             frame = HORIZON_CONFIG[trade["horizon"]]["timeframe"]
-            candles = self._candles(symbol, frame)
-            if technical_read(candles, frame, _now())["bias"] in {"unavailable", "stale"}:
-                continue
-            outcome = evaluate_live_exit(trade, candles, now=_now())
+            quote = LIVE_QUOTES.get(symbol)
+            outcome = live_quote_exit(trade, quote, _now())
+            if not outcome and not quote_only:
+                candles = self._candles(symbol, frame)
+                outcome = price_closed_exit(trade, evaluate_live_exit(trade, candles, now=_now()), quote, _now(), frame)
             if not outcome:
                 continue
             if outcome.get("checked_only"):

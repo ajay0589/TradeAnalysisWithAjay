@@ -28,6 +28,7 @@ _LAST_REQUEST_AT = 0.0
 _MIN_REQUEST_GAP_SECONDS = 0.45
 _MAX_QUEUE_WAIT_SECONDS = 60
 HISTORICAL_MAX_DAYS = {
+    "5minute": 90,
     "day": 1900,
     "60minute": 390,
     "30minute": 190,

@@ -10,11 +10,12 @@ from trading_analysis.scheduler.market_hours import is_market_hours, is_scan_win
 
 
 DEFAULT_INTERVALS = {
-    "candles": 60,
+    "candles": 10,
     "option_chain": 180,
     "iv_snapshot": 300,
     "opportunity_scan": 60,
     "trade_exit": 60,
+    "live_exit": 1,
     "cleanup": 1800,
 }
 
@@ -32,8 +33,10 @@ class MarketScanScheduler:
             self.configure(intervals)
         self.clock = clock or datetime.now
         self._stop_event = threading.Event()
+        self.job_runner.cancelled = self._stop_event.is_set
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        self._lifecycle_lock = threading.RLock()
         self._active_jobs: set[str] = set()
         self._last_started: dict[str, float] = {}
         self._last_started_at: dict[str, datetime] = {}
@@ -43,23 +46,26 @@ class MarketScanScheduler:
         self._stopped_at: str | None = None
         self._last_cycle_started_at: str | None = None
         self._last_cycle_completed_at: str | None = None
+        self._data_versions = {}
 
     def start(self) -> dict[str, Any]:
-        if self._thread and self._thread.is_alive():
+        with self._lifecycle_lock:
+            if self._thread and self._thread.is_alive() or self._active_jobs:
+                return self.status()
+            self._stop_event.clear()
+            self._started_at = self.clock().isoformat(timespec="seconds")
+            self._stopped_at = None
+            self._thread = threading.Thread(target=self._loop, name="nifty-market-scan", daemon=True)
+            self._thread.start()
             return self.status()
-        self._stop_event.clear()
-        self._started_at = self.clock().isoformat(timespec="seconds")
-        self._stopped_at = None
-        self._thread = threading.Thread(target=self._loop, name="nifty-market-scan", daemon=True)
-        self._thread.start()
-        return self.status()
 
     def stop(self) -> dict[str, Any]:
-        self._stop_event.set()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=5)
-        self._stopped_at = self.clock().isoformat(timespec="seconds")
-        return self.status()
+        with self._lifecycle_lock:
+            self._stop_event.set()
+            if self._thread and self._thread.is_alive():
+                self._thread.join(timeout=5)
+            self._stopped_at = self.clock().isoformat(timespec="seconds")
+            return self.status()
 
     def configure(self, intervals: dict[str, int]) -> None:
         for name, seconds in intervals.items():
@@ -75,21 +81,23 @@ class MarketScanScheduler:
             "next_market_open": next_market_open(now),
             "intervals": dict(self.intervals),
             "active_jobs": sorted(self._active_jobs),
-            "last_results": self._last_results,
-            "last_job_run": _latest_job_time(self._last_results),
+            "last_results": dict(self._last_results),
+            "last_job_run": _latest_job_time(dict(self._last_results)),
             "started_at": self._started_at,
             "stopped_at": self._stopped_at,
             "last_cycle_started_at": self._last_cycle_started_at,
             "last_cycle_completed_at": self._last_cycle_completed_at,
             "next_runs": {
                 name: (started + timedelta(seconds=self.intervals[name])).isoformat(timespec="seconds")
-                for name, started in self._last_started_at.items()
+                for name, started in dict(self._last_started_at).items()
                 if name in self.intervals
             },
             "errors": list(self._errors[-10:]),
         }
 
     def run_once(self, force: bool = False) -> dict[str, Any]:
+        if self._stop_event.is_set() and not self._active_jobs:
+            self._stop_event.clear()
         now = self.clock()
         scan_open = is_scan_window(now)
         if not force and not scan_open:
@@ -122,7 +130,9 @@ class MarketScanScheduler:
 
     def _run_due_jobs(self) -> None:
         current = time.monotonic()
-        for name in ("candles", "trade_exit", "opportunity_scan", "option_chain", "iv_snapshot", "cleanup"):
+        for name in ("live_exit", "candles", "trade_exit", "opportunity_scan", "option_chain", "iv_snapshot", "cleanup"):
+            if self._stop_event.is_set():
+                break
             last = self._last_started.get(name, 0.0)
             if current - last >= self.intervals[name]:
                 self._last_started[name] = current
@@ -142,6 +152,19 @@ class MarketScanScheduler:
         try:
             started_at = self.clock().isoformat(timespec="seconds")
             result = self._call_job(name)
+            if name in {"candles", "option_chain"} and not result.get("error"):
+                data = result.get("result") or {}
+                version = (tuple((key, row.get("latest_timestamp"), row.get("saved"))
+                                 for key, row in sorted((data.get("candle_db") or {}).items()))
+                           if name == "candles" else data.get("option_snapshot_id"))
+                # Successful fresh candle responses also matter when an active bar just closed.
+                refreshed = any(row.get("status") not in {"cached", "waiting"} and row.get("candles", 0) > 0
+                                for row in data.get("refresh_results", []))
+                if version != self._data_versions.get(name) or refreshed:
+                    self._data_versions[name] = version
+                    with self._lock:
+                        for dependent in ("opportunity_scan", "trade_exit"):
+                            self._last_started[dependent] = 0
             self._last_results[name] = {
                 "started_at": started_at,
                 "finished_at": datetime.now().isoformat(timespec="seconds"),
@@ -166,6 +189,8 @@ class MarketScanScheduler:
                 self._active_jobs.discard(name)
 
     def _call_job(self, name: str) -> dict[str, Any]:
+        if name == "live_exit":
+            return self.job_runner._run_nifty_exit_scan(quote_only=True)
         if name == "candles":
             return self.job_runner.update_nifty_candles_job(refresh=True)
         if name == "option_chain":

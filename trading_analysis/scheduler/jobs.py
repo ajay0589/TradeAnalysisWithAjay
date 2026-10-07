@@ -6,14 +6,19 @@ from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Callable
 import time
+import threading
 
 from trading_analysis import diagnostics
+from trading_analysis.live_quotes import LIVE_QUOTES
+from trading_analysis.live_timing import prepare_live_entry, live_quote_exit, price_closed_exit, quote_is_fresh, IST
+from trading_analysis.option_history import OptionHistory
+from trading_analysis.notifications.outbox import AlertOutbox
 
 from trading_analysis.candles import candle_path
 from trading_analysis.data_sources.csv_loader import load_candles
 from trading_analysis.nifty.service import NiftyDeskService
 from trading_analysis.nifty.iv_context import record_nifty_iv_snapshot
-from trading_analysis.nifty.live_scanner import HORIZON_CONFIG, build_live_entry_signal, evaluate_live_exit
+from trading_analysis.nifty.live_scanner import HORIZON_CONFIG, build_live_entry_signal, evaluate_live_exit, closed_candles
 from trading_analysis.notifications.telegram import TelegramNotifier, nifty_trade_message
 from trading_analysis.scheduler.alerts import generate_nifty_alerts
 from trading_analysis.scheduler.market_hours import is_scan_window
@@ -53,6 +58,14 @@ class NiftyMarketJobs:
         self.trade_repository = trade_repository or NiftyTradeRepository(repository_db)
         self.notifier = notifier or TelegramNotifier.from_env("NIFTY_")
         self.scan_progress: dict[str, Any] = {"completed": 0, "total": 3, "current": None, "status": "idle"}
+        self._exit_lock = threading.Lock()
+        self.option_history = OptionHistory(repository_db)
+        self.outbox = AlertOutbox(repository_db)
+        self.rolling_options = {}
+        self._persist_versions = {}
+        self._entry_versions = {}
+        self._entry_results = {}
+        self.cancelled = lambda: False
 
     def update_nifty_candles_job(self, refresh: bool = False) -> dict[str, Any]:
         return self._record(
@@ -117,25 +130,15 @@ class NiftyMarketJobs:
             return {"job": {"id": job_id, "job_name": job_name, "status": "failed", "error": str(exc)}, "error": str(exc)}
 
     def _update_nifty_candles(self, refresh: bool) -> dict[str, Any]:
-        context = self.nifty_service.nifty_context(
-            mode="auto",
-            include_option_chain=False,
-            include_iv=False,
-            refresh=refresh,
-            refresh_due_only=True,
-            timeframe="15minute",
-            days=45,
-        )
-        summary = context.get("summary") or {}
+        result = self.nifty_service.refresh_background_candles(refresh)
         candle_db = self._persist_cached_candles()
         return {
             "symbol": "NIFTY",
             "refresh": refresh,
-            "candle_sources": summary.get("candle_sources") or {},
-            "refresh_results": summary.get("refresh_results") or [],
+            "refresh_results": result.get("refresh_results") or [],
             "candle_db": candle_db,
-            "warnings": context.get("warnings") or [],
-            "errors": context.get("errors") or [],
+            "warnings": result.get("warnings") or [],
+            "errors": result.get("errors") or [],
         }
 
     def _update_nifty_option_chain(self, refresh: bool) -> dict[str, Any]:
@@ -154,6 +157,8 @@ class NiftyMarketJobs:
         if fetched:
             raw_file = fetched.get("latest_snapshot")
             rows = _read_option_rows(raw_file)
+            self.option_history.save("NIFTY", rows)
+            self.rolling_options = self.option_history.current("NIFTY")
             analysis_for_db = {**fetched, "rows": rows, "spot": fetched.get("spot") or fetched.get("spot_price")}
             snapshot_id = self.option_repository.save_snapshot(analysis_for_db, raw_file=raw_file)
             if snapshot_id and rows:
@@ -222,7 +227,7 @@ class NiftyMarketJobs:
         }
 
     def _run_nifty_opportunity_scan(self, mode: str, min_score: int) -> dict[str, Any]:
-        if not is_scan_window():
+        if not is_scan_window() or self.cancelled():
             self.scan_progress = {"completed": 0, "total": 0, "current": None, "status": "skipped"}
             return {"symbol": "NIFTY", "mode": mode, "status": "skipped", "reason": "outside_scan_window",
                     "horizons": {}, "alerts_created": 0, "alerts": [], "telegram": {"sent": 0, "errors": []}}
@@ -234,7 +239,20 @@ class NiftyMarketJobs:
         errors: list[str] = []
         telegram = {"configured": self.notifier.configured(), "sent": 0, "errors": []}
         for horizon in horizons:
+            if self.cancelled():
+                break
             self.scan_progress["current"] = f"{horizon} entry checks"
+            config = HORIZON_CONFIG[horizon]
+            candles = self._cached_candles(config["timeframe"])
+            completed = closed_candles(candles, config["timeframe"])
+            option_id = (self.option_repository.load_latest_snapshot() or {}).get("id")
+            last = completed[-1] if completed else None
+            version = (last.timestamp.isoformat() if last else None, last.close if last else None,
+                       option_id, quote_is_fresh(LIVE_QUOTES.get("NIFTY"), datetime.now(IST)))
+            if self._entry_versions.get(horizon) == version:
+                results[horizon] = {**self._entry_results[horizon], "entry_created": False, "unchanged": True}
+                self.scan_progress["completed"] += 1
+                continue
             context = self.nifty_service.nifty_strategy_suggestions(mode=horizon, refresh=False)
             candidates = list(context.get("candidates") or [])
             data_links = self._attach_latest_data_links(context)
@@ -249,25 +267,34 @@ class NiftyMarketJobs:
             candles = self._cached_candles(config["timeframe"])
             checks: dict[str, Any] = {}
             signal = build_live_entry_signal(context, candidates, horizon, candles, min_score=min_score, diagnostics=checks)
+            technical_signal = bool(checks.get("technical_direction") in {"bullish", "bearish"})
+            if signal:
+                signal = prepare_live_entry(signal, LIVE_QUOTES.get("NIFTY"), datetime.now(IST), checks)
             horizon_result: dict[str, Any] = {
+                "technical_signal": technical_signal,
+                "rolling_options": self.rolling_options,
+                "confirmation_state": "entry_ready" if signal else "technical_only" if technical_signal else "no_setup",
                 "candidate_count": len(candidates),
                 "checks": checks,
                 "context_snapshot_id": context_snapshot_id,
                 "candidate_ids": candidate_ids,
                 "entry_created": False,
-                "reason": "No closed-candle setup met every entry gate.",
+                "reason": f"Waiting: {checks.get('gate', 'technical_setup')}.",
             }
             if signal:
                 signal["context_snapshot_id"] = context_snapshot_id
                 signal["metadata"] = {**(signal.get("metadata") or {}), **data_links,
+                                      "rolling_options": self.rolling_options,
                                       "latest_candle_timestamp": signal["entry_candle_timestamp"].isoformat()}
-                opened = self.trade_repository.open_trade(signal)
+                opened = self.trade_repository.open_trade(signal) if not self.cancelled() else {"created": False}
                 if opened.get("created"):
                     trade = opened["trade"]
                     alert = self.alert_repository.create_alert(**self._entry_alert(signal, trade))
                     trade = self.trade_repository.attach_entry_alert(trade["trade_id"], int(alert["id"]))
                     delivery = self._send_nifty_telegram("entry", trade, alert)
                     self.alert_repository.update_telegram_status(int(alert["id"]), delivery["status"], delivery.get("error"))
+                    if delivery["status"] == "queued":
+                        self.outbox.start()
                     telegram["sent"] += int(delivery["sent"])
                     if delivery.get("error"):
                         telegram["errors"].append(delivery["error"])
@@ -276,6 +303,8 @@ class NiftyMarketJobs:
                 else:
                     horizon_result["reason"] = "An open trade already exists for this horizon, or this candle was already processed."
             results[horizon] = horizon_result
+            self._entry_versions[horizon] = version
+            self._entry_results[horizon] = {key: value for key, value in horizon_result.items() if key not in {"trade", "alert"}}
             self.scan_progress["completed"] += 1
             warnings.extend(context.get("warnings") or [])
             errors.extend(context.get("errors") or [])
@@ -292,17 +321,31 @@ class NiftyMarketJobs:
             "errors": list(dict.fromkeys(errors)),
         }
 
-    def _run_nifty_exit_scan(self) -> dict[str, Any]:
-        if not is_scan_window():
+    def _run_nifty_exit_scan(self, quote_only: bool = False) -> dict[str, Any]:
+        if not self._exit_lock.acquire(blocking=False):
+            return {"status": "skipped", "reason": "exit_check_running"}
+        try:
+            return self._check_nifty_exits(quote_only)
+        finally:
+            self._exit_lock.release()
+
+    def _check_nifty_exits(self, quote_only: bool) -> dict[str, Any]:
+        if not is_scan_window() or self.cancelled():
             return {"status": "skipped", "reason": "outside_scan_window", "open_checked": 0,
                     "trades_closed": 0, "alerts": [], "telegram": {"sent": 0, "errors": []}}
         checked = closed = 0
         alerts: list[dict[str, Any]] = []
         telegram = {"configured": self.notifier.configured(), "sent": 0, "errors": []}
         for trade in self.trade_repository.open_trades():
+            if self.cancelled():
+                break
             config = HORIZON_CONFIG[str(trade["horizon"])]
-            candles = self._cached_candles(config["timeframe"])
-            outcome = evaluate_live_exit(trade, candles)
+            now = datetime.now(IST)
+            quote = LIVE_QUOTES.get("NIFTY")
+            outcome = live_quote_exit(trade, quote, now)
+            if not outcome and not quote_only:
+                candles = self._cached_candles(config["timeframe"])
+                outcome = price_closed_exit(trade, evaluate_live_exit(trade, candles), quote, now, config["timeframe"])
             if not outcome:
                 continue
             checked += 1
@@ -311,14 +354,17 @@ class NiftyMarketJobs:
                 continue
             closed_trade = self.trade_repository.close_trade(
                 trade["trade_id"],
-                exit_time=outcome["candle_timestamp"],
+                exit_time=outcome.get("exit_time", now),
                 exit_price=float(outcome["price"]),
                 exit_reason=str(outcome["reason"]),
+                metadata=outcome.get("metadata"),
             )
             alert = self.alert_repository.create_alert(**self._exit_alert(closed_trade))
             closed_trade = self.trade_repository.attach_exit_alert(trade["trade_id"], int(alert["id"]))
             delivery = self._send_nifty_telegram("exit", closed_trade, alert)
             self.alert_repository.update_telegram_status(int(alert["id"]), delivery["status"], delivery.get("error"))
+            if delivery["status"] == "queued":
+                self.outbox.start()
             telegram["sent"] += int(delivery["sent"])
             if delivery.get("error"):
                 telegram["errors"].append(delivery["error"])
@@ -386,7 +432,7 @@ class NiftyMarketJobs:
             "risks": [],
             "metadata": {**(trade.get("metadata") or {}),
                          "latest_candle_timestamp": str(trade.get("exit_time") or ""),
-                         "exit_candle_timestamp": str(trade.get("exit_time") or ""),
+                         "exit_candle_timestamp": (trade.get("metadata") or {}).get("exit_candle_timestamp"),
                          "exit_detected_at": datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()},
             "context_snapshot_id": trade.get("context_snapshot_id"),
             "telegram_status": "pending",
@@ -395,18 +441,20 @@ class NiftyMarketJobs:
     def _send_nifty_telegram(self, event: str, trade: dict[str, Any], alert: dict[str, Any]) -> dict[str, Any]:
         if not self.notifier.configured():
             return {"sent": False, "status": "not_configured", "error": None}
-        result = self.notifier.send_message(nifty_trade_message(event, trade, alert))
-        return {
-            "sent": bool(result.get("sent")),
-            "status": "sent" if result.get("sent") else "failed",
-            "error": result.get("error"),
-        }
+        self.outbox.enqueue("NIFTY", trade["trade_id"], event, "NIFTY_", nifty_trade_message(event, trade, alert), start=False)
+        return {"sent": False, "status": "queued", "error": None}
 
     def _persist_cached_candles(self) -> dict[str, Any]:
         saved: dict[str, Any] = {}
         for timeframe in ("day", "60minute", "15minute"):
             path = candle_path(self.nifty_service.candle_root, timeframe, "NIFTY_50")
             try:
+                info = path.stat()
+                version = (info.st_mtime_ns, info.st_size)
+                prior = self._persist_versions.get(timeframe)
+                if prior and prior[0] == version:
+                    saved[timeframe] = prior[1]
+                    continue
                 candles = load_candles(path)
             except FileNotFoundError:
                 saved[timeframe] = {"saved": 0, "error": f"Missing candle file: {path}"}
@@ -416,6 +464,7 @@ class NiftyMarketJobs:
                 "saved": count,
                 "latest_timestamp": candles[-1].timestamp.isoformat(timespec="seconds") if candles else None,
             }
+            self._persist_versions[timeframe] = (version, saved[timeframe])
         return saved
 
     def _attach_latest_data_links(self, context: dict[str, Any]) -> dict[str, Any]:

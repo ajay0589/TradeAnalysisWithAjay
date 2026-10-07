@@ -55,7 +55,10 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 params = parse_qs(parsed.query)
                 report = diagnostics.export(params.get("date", [None])[0])
                 report["scanners"] = diagnostics.clean(self.all_index_monitor.diagnostics(report["date"]))
-                self._send_json(report)
+                if params.get("format") == ["zip"]:
+                    self._send_zip(report, "trading-app-log")
+                else:
+                    self._send_json(report)
             elif parsed.path == "/api/symbols":
                 self._send_json(self.service.symbols())
             elif parsed.path == "/api/strategies":
@@ -272,7 +275,11 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(self.all_index_monitor.status())
             elif parsed.path == "/api/index-scanners/diagnostics":
                 params = parse_qs(parsed.query)
-                self._send_json(self.all_index_monitor.diagnostics(params.get("date", [None])[0]))
+                report = self.all_index_monitor.diagnostics(params.get("date", [None])[0])
+                if params.get("format") == ["zip"]:
+                    self._send_zip(diagnostics.clean(report), "index-scan-log")
+                else:
+                    self._send_json(report)
             elif parsed.path == "/api/nifty/data/latest":
                 self._send_json(self.nifty_auto_service.latest_data())
             elif parsed.path == "/api/nifty/trades":
@@ -550,6 +557,12 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/nifty/auto/run-once":
                 payload = self._read_json()
                 self._send_json(self.nifty_auto_service.run_once(force=bool(payload.get("force"))))
+            elif parsed.path == "/api/index-scanners/backtest":
+                from trading_analysis.nifty.comparison_service import run_comparison
+                self._send_json(run_comparison(self._read_json(), self.service, self.nifty_auto_service.trade_repository.db_path))
+            elif parsed.path == "/api/index-scanners/backtest-data":
+                from trading_analysis.nifty.comparison_service import refresh_comparison_data
+                self._send_json(refresh_comparison_data(self._read_json(), self.service))
             elif parsed.path == "/api/nifty/scanner-backtest":
                 payload = self._read_json()
                 self._send_json(
@@ -575,6 +588,22 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args) -> None:
         return
+
+    def _send_zip(self, report, prefix):
+        import io
+        import zipfile
+        buffer = io.BytesIO()
+        name = f"{prefix}-{report['date']}"
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(name + ".json", json.dumps(report, default=str, ensure_ascii=True))
+        body = buffer.getvalue()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/zip")
+        self.send_header("Content-Disposition", f'attachment; filename="{name}.zip"')
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
 
     def _send_file(self, path: Path, content_type: str) -> None:
         if not path.exists():

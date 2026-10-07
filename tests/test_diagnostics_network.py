@@ -99,9 +99,11 @@ class DiagnosticsNetworkTests(unittest.TestCase):
         service.nifty_context.return_value = {"iv": {"atm_iv": 18}, "options": {"atm_iv": 18}}
         repositories = {name: MagicMock() for name in ("job_repository", "alert_repository", "context_repository",
             "candle_repository", "option_repository", "iv_repository", "trade_repository")}
-        jobs = NiftyMarketJobs(nifty_service=service, notifier=TelegramNotifier(), **repositories)
-        with patch("trading_analysis.scheduler.jobs.record_nifty_iv_snapshot") as saved:
-            jobs._record_nifty_iv()
+        with tempfile.TemporaryDirectory() as tmp:
+            repositories["alert_repository"].db_path = Path(tmp) / "iv-job.db"
+            jobs = NiftyMarketJobs(nifty_service=service, notifier=TelegramNotifier(), **repositories)
+            with patch("trading_analysis.scheduler.jobs.record_nifty_iv_snapshot") as saved:
+                jobs._record_nifty_iv()
         self.assertFalse(service.nifty_context.call_args.kwargs["refresh"])
         saved.assert_called_once()
         repositories["iv_repository"].record_observation.assert_called_once()
@@ -181,19 +183,24 @@ class DiagnosticsNetworkTests(unittest.TestCase):
                 file = candle_path(tmp, frame, "NIFTY_50")
                 file.parent.mkdir(parents=True, exist_ok=True)
                 file.touch()
-            with patch("trading_analysis.nifty.service.datetime") as clock:
+            from trading_analysis.live_timing import expected_closed_bar
+            with patch("trading_analysis.nifty.service.datetime") as clock, \
+                 patch("trading_analysis.nifty.service.load_candles") as load:
+                load.side_effect = lambda path: [Candle(expected_closed_bar(
+                    path.parent.name if path.parent.name in {"15minute", "60minute"} else "day",
+                    clock.now.return_value), 100, 102, 99, 101, 100)]
                 for minute in range(60):
                     clock.now.return_value = datetime(2026, 10, 6, 9, 15) + timedelta(minutes=minute)
                     service._refresh_latest_candles("15minute", 45, None, [], due_only=True)
-                self.assertEqual(analysis.refresh_candles.call_count, 17)
+                self.assertEqual(analysis.refresh_candles.call_count, 6)
                 clock.now.return_value = datetime(2026, 10, 6, 10, 15)
                 service._refresh_latest_candles("15minute", 45, None, [], due_only=True)
-                self.assertEqual(analysis.refresh_candles.call_count, 20)
+                self.assertEqual(analysis.refresh_candles.call_count, 8)
                 clock.now.return_value = datetime(2026, 10, 6, 15, 30)
                 service._refresh_latest_candles("15minute", 45, None, [], due_only=True)
-                self.assertEqual(analysis.refresh_candles.call_count, 23)
+                self.assertEqual(analysis.refresh_candles.call_count, 11)
                 service._refresh_latest_candles("15minute", 45, None, [], due_only=False)
-                self.assertEqual(analysis.refresh_candles.call_count, 26)
+                self.assertEqual(analysis.refresh_candles.call_count, 14)
 
     def test_api_audits_analyze_latest_symbol_and_other_sections(self):
         class FakeAnalysis:

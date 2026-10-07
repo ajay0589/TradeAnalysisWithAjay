@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -8,6 +8,7 @@ from trading_analysis.index_scanner import IndexScannerService
 from trading_analysis.instrument_master_service import InstrumentMasterService
 from trading_analysis.nifty.auto_scan_service import NiftyAutoScanService
 from trading_analysis.notifications.telegram import TelegramNotifier
+from trading_analysis.live_quotes import LIVE_QUOTES
 
 
 class AllIndexMonitor:
@@ -22,8 +23,8 @@ class AllIndexMonitor:
         bank = self.indexes.status("BANKNIFTY")
         sensex = self.indexes.status("SENSEX")
         recent_delivery = next((alert for alert in nifty.get("recent_alerts") or []
-                                if alert.get("telegram_status") in {"sent", "failed"}), None)
-        recent_failure = recent_delivery if recent_delivery and recent_delivery.get("telegram_status") == "failed" else None
+                                if alert.get("telegram_status") in {"sent", "failed", "retry", "delivery_unknown", "expired"}), None)
+        recent_failure = recent_delivery if recent_delivery and recent_delivery.get("telegram_status") != "sent" else None
         nifty_progress = nifty.get("entry_scan_progress") or {}
         scanners = {"NIFTY": {"running": nifty["running"], "scan_active": bool(nifty["active_jobs"]),
                                "phase": ", ".join(nifty["active_jobs"]) or "waiting",
@@ -41,7 +42,11 @@ class AllIndexMonitor:
                 "any_running": any((nifty["running"], bank["running"], sensex["running"])),
                 "masters_ready": self.masters.status()["ready_for_all"],
                 "unconfigured_telegram": [symbol for symbol, row in scanners.items() if not row["telegram_configured"]],
-                "scanners": scanners}
+                "scanners": scanners, "live_quotes": LIVE_QUOTES.status(),
+                "market_evidence": {"NIFTY": {"rolling": nifty.get("option_evidence") or {}, "signals": nifty.get("signal_states") or {}},
+                                    **{symbol: {"rolling": ((state.get("last_result") or {}).get("horizons", {}).get("intraday", {}).get("option") or {}).get("rolling") or {},
+                                                "signals": (state.get("last_result") or {}).get("horizons") or {}}
+                                       for symbol, state in (("BANKNIFTY", bank), ("SENSEX", sensex))}}}
 
     @staticmethod
     def _index_row(state: dict[str, Any]) -> dict[str, Any]:
@@ -116,14 +121,22 @@ class AllIndexMonitor:
     def diagnostics(self, day: str | None = None) -> dict[str, Any]:
         selected = date.fromisoformat(day) if day else datetime.now(ZoneInfo("Asia/Kolkata")).date()
         stamp = selected.isoformat()
-        jobs = [self._nifty_job(row) for row in self.nifty.job_repository.latest_jobs(limit=10000)
+        jobs = [self._nifty_job(row) for row in self.nifty.job_repository.latest_jobs(limit=None, day=stamp)
                 if str(row.get("started_at") or "").startswith(stamp)]
-        alerts = [row for row in self.nifty.alert_repository.list_recent_alerts(limit=5000)
+        alerts = [row for row in self.nifty.alert_repository.list_recent_alerts(limit=None, day=stamp)
                   if str(row.get("created_at") or "").startswith(stamp)]
-        trades = [row for row in self.nifty.trade_repository.list_trades(status="all", limit=5000)
+        trades = [row for row in self.nifty.trade_repository.list_trades(status="all", limit=None, day=stamp)
                   if str(row.get("created_at") or "").startswith(stamp)
                   or str(row.get("updated_at") or "").startswith(stamp)]
-        return {"schema_version": 1, "date": stamp, "timezone": "Asia/Kolkata",
+        from trading_analysis.option_history import OptionHistory
+        from trading_analysis.notifications.outbox import AlertOutbox
+        start = datetime.combine(selected, datetime.min.time(), ZoneInfo("Asia/Kolkata"))
+        history = OptionHistory(self.nifty.trade_repository.db_path)
+        return {"schema_version": 2, "date": stamp, "timezone": "Asia/Kolkata", "truncated": False,
+                "live_quotes": LIVE_QUOTES.status(),
+                "delivery": AlertOutbox(self.nifty.trade_repository.db_path).history(stamp),
+                "option_observations": {symbol: history.load(symbol, start, start + timedelta(days=1) - timedelta(microseconds=1))
+                                        for symbol in ("NIFTY", "BANKNIFTY", "SENSEX")},
                 "generated_at": datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(timespec="seconds"),
                 "note": "Read-only spot-signal diagnostics; no broker tokens or option orders.",
                 "data_service": dict(self.indexes._data_status),

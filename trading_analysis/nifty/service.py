@@ -34,6 +34,7 @@ class NiftyDeskService:
         self.analysis_service = analysis_service
         self._refresh_locks = {frame: threading.Lock() for frame in ("day", "60minute", "15minute")}
         self._refresh_buckets: dict[str, tuple] = {}
+        self._pending_refresh: dict[str, datetime] = {}
 
     def nifty_context(
         self,
@@ -196,6 +197,11 @@ class NiftyDeskService:
             return []
         return prepare_candles(raw, timeframe, candle_window(days=days, to_date=to_date))
 
+    def refresh_background_candles(self, refresh: bool) -> dict[str, Any]:
+        warnings = []
+        results = self._refresh_latest_candles("15minute", 45, None, warnings, due_only=True) if refresh else []
+        return {"refresh_results": results, "warnings": warnings, "errors": []}
+
     def _refresh_latest_candles(self, timeframe: str, days: int, to_date: str | None, warnings: list[str],
                                due_only: bool = False) -> list[dict[str, Any]]:
         if self.analysis_service is None:
@@ -206,11 +212,17 @@ class NiftyDeskService:
         for item in reversed(timeframes):
             try:
                 with self._refresh_locks[item]:
+                    from trading_analysis.live_timing import expected_closed_bar, as_ist
+                    from trading_analysis.nifty.live_scanner import closed_candles
+                    now = datetime.now(ZoneInfo("Asia/Kolkata"))
                     cached = candle_path(self.candle_root, item, "NIFTY_50")
-                    bucket = refresh_bucket(item, datetime.now(ZoneInfo("Asia/Kolkata")))
+                    bucket = expected_closed_bar(item, now)
+                    retry_at = self._pending_refresh.get(item)
+                    if due_only and retry_at and now < retry_at:
+                        results.append({"symbol": "NIFTY", "timeframe": item, "status": "waiting", "retry_at": retry_at.isoformat()})
+                        continue
                     if due_only and not to_date and cached.exists() and self._refresh_buckets.get(item) == bucket:
                         results.append({"symbol": "NIFTY", "timeframe": item, "status": "cached"})
-                        diagnostics.record("candle_refresh", area="nifty", status="cached", timeframe=item)
                         continue
                     refresh_days = _refresh_days(item, days)
                     if due_only and cached.exists() and not to_date:
@@ -223,7 +235,17 @@ class NiftyDeskService:
                     refreshed = self.analysis_service.refresh_candles("NIFTY", item, window)
                     results.extend(refreshed)
                     if not to_date and any(row.get("candles", 0) > 0 for row in refreshed):
-                        self._refresh_buckets[item] = bucket
+                        completed = closed_candles(load_candles(cached), item, now)
+                        latest = as_ist(completed[-1].timestamp) if completed else None
+                        if latest and latest >= bucket:
+                            self._refresh_buckets[item] = bucket
+                            self._pending_refresh.pop(item, None)
+                        else:
+                            from datetime import timedelta
+                            self._pending_refresh[item] = now + timedelta(seconds=20)
+                            for row in refreshed:
+                                row.update(status="waiting", expected_closed_candle=bucket.isoformat(),
+                                           latest_closed_candle=latest.isoformat() if latest else None)
             except Exception as exc:
                 warnings.append(f"Refresh failed for NIFTY {item}: {exc}")
         return results
