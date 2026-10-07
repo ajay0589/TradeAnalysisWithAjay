@@ -313,15 +313,17 @@ Required data:
 
 UI usage:
 
-1. Open the Web UI and select `NIFTY Desk`.
+1. Open `Index Scanning > NIFTY > Manual Research`.
 2. Choose `Auto`, `Intraday`, `Swing`, or `Positional`.
 3. Select weekly/monthly expiries when cached snapshots exist, or leave them on auto.
 4. Keep `Include option chain` and `Include IV context` checked when those datasets are available.
-5. Click `Run NIFTY Analysis` for market, OI, and IV context.
+5. Click `Run Manual Analysis` for market, OI, and IV context.
 6. Click `Suggest Strategies` to see strategy candidates with suitability score, reasons, risks, and required confirmations.
-7. Start `NIFTY Live Scanner` during market hours to monitor Intraday, Swing, and Positional entries and exits.
-8. Review `NIFTY Trades: Open & Closed` for entry time, exit time, open duration, stop, target, and directional result.
-9. Use `NIFTY Spot Backtest` to compare technical-only setups or the existing scanner rules by date range, horizon, direction, target R, and maximum holding bars.
+7. For live monitoring, switch to `Live Scanner` and start `NIFTY Live Scanner` during market hours to monitor Intraday, Swing, and Positional entries and exits.
+8. Review `NIFTY Trades: Open & Closed` in `Live Scanner` for entry time, exit time, open duration, stop, target, and directional result.
+9. Use `Backtests > Index Spot Backtest` to compare technical-only setups or the existing scanner rules by date range, horizon, direction, target R, and maximum holding bars.
+
+`Live Scanner` is the default NIFTY view. Its schedule, data freshness, job progress, Telegram delivery, alerts and trades stay together. `Manual Analysis Settings` (formerly `NIFTY Controls`) applies only to one-off research: its mode, expiry, date and risk selections do not configure live scanning or create Telegram entry/exit alerts. `Suggest Strategies` uses its own default candle lookback with option/IV context; the strategy risk profile applies to that action only. Research messages and saved alert context are displayed within their respective views. Switching views preserves inputs and results and never starts or stops a scanner. `Start all three` remains the shared live-monitor command.
 
 CLI examples:
 
@@ -400,7 +402,7 @@ Alert traceability:
 
 Web UI usage:
 
-1. Open `NIFTY Desk`.
+1. Open `Index Scanning > NIFTY > Live Scanner`.
 2. Choose the live scan interval and use `Start scanner` during market hours.
 3. Confirm the Started, Next Entry Check, Next Exit Check, and Telegram status values.
 4. Use `Run one cycle` for a forced diagnostic outside market hours; stale inputs cannot create an entry.
@@ -426,7 +428,7 @@ NIFTY scanner backtest:
 
 Technical-only NIFTY spot backtest:
 
-1. In `NIFTY Desk` > `NIFTY Spot Backtest`, select `Technical setup (next candle)`.
+1. In `Index Scanning > NIFTY > Backtests > Index Spot Backtest`, select `Technical setup (next candle)`.
 2. For the daily candidate, select `EMA20 pullback`, `Positional (Daily)`, `Bullish & Bearish`, `Target R = 1`, `Maximum bars = 10`, and `Cost per side = 2 bps`.
 3. Run separate date windows: `2023-01-01` to `2024-12-31` (development), `2025-01-01` to `2025-12-31` (validation), and `2026-01-01` onward (holdout). Compare trade counts, win rate, average R, profit factor, and max drawdown. A date range alone does not change indicator warmup; calculations use prior cached candles.
 4. Other entry setups are `10-candle breakout`, `RSI reversal`, and `Opening range (15m)` (Intraday only). `Existing scanner rules` reproduces the earlier backtest and retains its original assumptions.
@@ -533,7 +535,7 @@ Install updated `requirements.txt` after pulling, or use the launcher's Update a
 - `Index Scanning > Spot quotes & OI evidence` shows quote health, technical/confirmation state, and research OI windows of 3, 6, 15 and 30 minutes. OI comparisons require same-session, same-expiry matched contracts with timestamp coverage. Exchange quote time, receipt time, and last observed OI change are distinct; none establishes the exchange's OI publication time or identifies large traders. Unchanged OI is not treated as a fresh directional update.
 - These rolling filters do **not** replace the live NIFTY or Bank Nifty/Sensex filters. Collect evidence before choosing a live strategy change.
 
-Under `Index Scanning > NIFTY > Index Spot Backtest`, choose `Compare technical / flow / OI`, then select any of the three indices, horizon, dates, costs, target R and holding bars. `Refresh research candles` fetches the required price series (plus the existing benchmark dependency), not historical options. The optional `15m trend / 5m trigger` is intraday research only and uses completed 15-minute trend candles. `Run backtest` compares technical-only, technical plus option price/volume, technical plus rolling OI, and both filters. Review trade counts, missing evidence, net R, drawdown, and the later 30% period, not win rate alone. Download the complete comparison for review.
+Under `Index Scanning > NIFTY > Backtests > Index Spot Backtest`, choose `Compare technical / flow / OI`, then select any of the three indices, horizon, dates, costs, target R and holding bars. `Refresh research candles` fetches the required price series (plus the existing benchmark dependency), not historical options. The optional `15m trend / 5m trigger` is intraday research only and uses completed 15-minute trend candles. `Run backtest` compares technical-only, technical plus option price/volume, technical plus rolling OI, and both filters. Review trade counts, missing evidence, net R, drawdown, and the later 30% period, not win rate alone. Download the complete comparison for review.
 
 Option-filter variants only use observations recorded after this version was installed, at or before each decision. Missing history produces skipped signals, not invented evidence or zero-win trades. The controlled baseline uses EMA20/50, RSI14 and candle direction, next-bar entries, a 1 ATR stop and explicit cost assumptions. It is not a complete replay of live scoring/constituent/latency gates and does not model options P&L. Intraday signal cutoff is 14:45; session exits start at 15:00. Reusing the later period to tune parameters invalidates it as an untouched holdout.
 

@@ -23,6 +23,7 @@ function element(attributes = {}) {
     appendChild(child) { this.children.push(child); },
     querySelector: () => element(), querySelectorAll: () => [],
     parentElement: { hidden: false }, click() { this.handlers.click?.(); },
+    focus() { this.focused = true; },
   };
 }
 
@@ -137,4 +138,121 @@ test("browser errors are recorded without exporting the page or input forms", ()
   ui.events.error({ message: "test error" });
   const request = ui.requests.find((r) => r.url === "/api/diagnostics/client-event");
   assert.deepEqual(Object.keys(JSON.parse(request.options.body)).sort(), ["message", "section", "symbol"]);
+});
+
+test("NIFTY opens on live scanning with separate research and backtest views", () => {
+  const ui = app();
+  assert.equal(ui.ids.get("niftyLiveView").hidden, false);
+  assert.equal(ui.ids.get("niftyResearchView").hidden, true);
+  assert.equal(ui.ids.get("niftyBacktestsView").hidden, true);
+  const requestCount = ui.requests.length;
+  for (const [name, tab, panel] of [
+    ["research", "niftyResearchTab", "niftyResearchView"],
+    ["backtests", "niftyBacktestsTab", "niftyBacktestsView"],
+    ["live", "niftyLiveTab", "niftyLiveView"],
+  ]) {
+    ui.ids.get(tab).click();
+    assert.equal(ui.run("state.nifty.view"), name);
+    assert.equal(ui.ids.get(panel).hidden, false);
+    assert.equal(ui.ids.get(tab).getAttribute("aria-selected"), "true");
+    for (const other of ["niftyLiveView", "niftyResearchView", "niftyBacktestsView"].filter((id) => id !== panel)) {
+      assert.equal(ui.ids.get(other).hidden, true);
+    }
+  }
+  assert.equal(ui.requests.length, requestCount, "View switches must not start, stop or run anything");
+});
+
+test("NIFTY view tabs support keyboard navigation and preserve research inputs", () => {
+  const ui = app();
+  ui.ids.get("niftyMode").value = "swing";
+  let prevented = false;
+  ui.ids.get("niftyLiveTab").handlers.keydown({ key: "ArrowRight", preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(ui.ids.get("niftyResearchTab").focused, true);
+  assert.equal(ui.ids.get("niftyLiveTab").getAttribute("tabindex"), "-1");
+  ui.context.activateIndexSubtab("banknifty");
+  ui.context.activateIndexSubtab("nifty");
+  assert.equal(ui.run("state.nifty.view"), "research");
+  assert.equal(ui.ids.get("niftyMode").value, "swing");
+});
+
+test("manual NIFTY research stays local and clears candidates from older research", async () => {
+  const ui = app();
+  ui.context.setNotes = () => assert.fail("Manual research must not replace the global banner");
+  ui.ids.get("niftyMode").value = "swing";
+  ui.ids.get("niftyDays").value = "90";
+  ui.ids.get("niftyTimeframe").value = "60minute";
+  ui.ids.get("niftyAutoMeta").textContent = "Running / Open";
+  ui.run('state.nifty.candidates = [{label: "Old suggestion"}]');
+  const pending = ui.context.runNiftyContext();
+  ui.context.activateNiftyView("live");
+  const request = ui.requests.find((r) => r.url.startsWith("/api/nifty/context?"));
+  const query = new URL(request.url, "http://localhost").searchParams;
+  assert.equal(query.get("mode"), "swing");
+  assert.equal(query.get("days"), "90");
+  request.resolve({mode: "swing", technical: {spot: 25000}, summary: {points: ["Manual bearish context"]}});
+  await pending;
+  assert.equal(ui.ids.get("niftyResearchStatus").textContent, "Manual bearish context");
+  assert.equal(ui.ids.get("niftyAutoMeta").textContent, "Running / Open");
+  assert.equal(ui.ids.get("niftyStrategyBody").innerHTML, "");
+  assert.match(ui.ids.get("niftyContextCards").innerHTML, /Research Candle Price/);
+  assert.equal(ui.run("state.nifty.view"), "live");
+  assert.equal(ui.requests.some((r) => r.url.includes("/auto/start")), false);
+});
+
+test("live NIFTY start sends only the live interval, never manual research settings", async () => {
+  const ui = app();
+  ui.context.renderNiftyAutoStatus = () => {};
+  ui.ids.get("niftyScanInterval").value = "180";
+  ui.ids.get("niftyMode").value = "positional";
+  ui.ids.get("niftyToDate").value = "2026-01-01";
+  ui.ids.get("niftyResearchStatus").textContent = "Stored research";
+  const pending = ui.context.startNiftyAutoScan();
+  const request = ui.requests.find((r) => r.url === "/api/nifty/auto/start");
+  assert.deepEqual(JSON.parse(request.options.body), {scan_interval_seconds: 180});
+  request.resolve({running: true});
+  await pending;
+  assert.equal(ui.ids.get("niftyResearchStatus").textContent, "Stored research");
+});
+
+test("live status updates do not overwrite manual research or backtest results", () => {
+  const ui = app();
+  ui.ids.get("niftyMeta").textContent = "Historical research";
+  ui.ids.get("niftyScannerBacktestMeta").textContent = "30 historical trades";
+  ui.context.activateNiftyView("research");
+  ui.context.renderNiftyAutoStatus({running: true, market_hours: true});
+  assert.equal(ui.ids.get("niftyAutoMeta").textContent, "Running / Open");
+  assert.equal(ui.ids.get("niftyMeta").textContent, "Historical research");
+  assert.equal(ui.ids.get("niftyScannerBacktestMeta").textContent, "30 historical trades");
+  assert.equal(ui.run("state.nifty.view"), "research");
+});
+
+test("saved alert context remains with live alerts, not manual research", async () => {
+  const ui = app();
+  ui.context.setNotes = () => assert.fail("Alert context must remain inside live alerts");
+  ui.ids.get("niftyMeta").textContent = "My manual analysis";
+  const pending = ui.context.viewNiftyContextSnapshot(7);
+  ui.requests.find((r) => r.url === "/api/nifty/context-snapshots/7").resolve({snapshot: {spot: 24500}});
+  await pending;
+  assert.equal(ui.ids.get("niftyAlertContext").hidden, false);
+  assert.equal(ui.ids.get("niftyAlertContext").open, true);
+  assert.match(ui.ids.get("niftyAlertContextBody").textContent, /Saved context #7/);
+  assert.equal(ui.ids.get("niftyMeta").textContent, "My manual analysis");
+});
+
+test("NIFTY action failures stay within their own view", async () => {
+  const ui = app();
+  ui.context.setNotes = () => assert.fail("NIFTY errors must be view-local");
+  const research = ui.context.runNiftyContext();
+  ui.requests.find((r) => r.url.startsWith("/api/nifty/context?")).reject(new Error("Research failed"));
+  await research;
+  const live = ui.context.startNiftyAutoScan();
+  ui.requests.find((r) => r.url === "/api/nifty/auto/start").reject(new Error("Scanner failed"));
+  await live;
+  const backtest = ui.context.runNiftyScannerBacktest();
+  ui.requests.find((r) => r.url === "/api/nifty/scanner-backtest").reject(new Error("Backtest failed"));
+  await backtest;
+  assert.equal(ui.ids.get("niftyResearchStatus").textContent, "Research failed");
+  assert.equal(ui.ids.get("niftyLiveIssue").textContent, "Scanner failed");
+  assert.equal(ui.ids.get("niftyScannerBacktestMeta").textContent, "Failed: Backtest failed");
 });

@@ -445,10 +445,15 @@
             <button class="index-subtab" data-index-target="sensex" type="button" aria-selected="false">Sensex</button>
           </nav>
         <section id="tab-nifty" class="index-subpane active" data-index-panel="nifty">
-          <section class="workspace">
+          <nav class="nifty-view-tabs" role="tablist" aria-label="NIFTY workspace">
+            <button id="niftyLiveTab" class="index-subtab active" type="button" role="tab" data-nifty-view-target="live" aria-controls="niftyLiveView" aria-selected="true" tabindex="0">Live Scanner</button>
+            <button id="niftyResearchTab" class="index-subtab" type="button" role="tab" data-nifty-view-target="research" aria-controls="niftyResearchView" aria-selected="false" tabindex="-1">Manual Research</button>
+            <button id="niftyBacktestsTab" class="index-subtab" type="button" role="tab" data-nifty-view-target="backtests" aria-controls="niftyBacktestsView" aria-selected="false" tabindex="-1">Backtests</button>
+          </nav>
+          <section id="niftyResearchView" class="workspace" role="tabpanel" aria-labelledby="niftyResearchTab" data-nifty-view-panel="research" hidden>
             <aside class="sidebar">
               <div class="panel">
-                <label title="Choose how the desk weighs NIFTY data. Intraday emphasizes 15-minute/1-hour candles, Swing blends daily and 1-hour, Positional emphasizes daily trend.">NIFTY Controls</label>
+                <h2 class="nifty-settings-title" title="One-off research only. These settings do not change the live scanner or send Telegram alerts.">Manual Analysis Settings</h2>
                 <label for="niftyMode" title="Auto lets the desk choose the most useful horizon from available candles.">Mode</label>
                 <select id="niftyMode">
                   <option value="auto">Auto</option>
@@ -464,7 +469,7 @@
                 <select id="niftyMonthlyExpiry">
                   <option value="">Auto monthly</option>
                 </select>
-                <label for="niftyRiskProfile" title="Defined risk shows spread/iron candidates. Undefined risk shows short straddle/strangle candidates for analysis only.">Risk profile</label>
+                <label for="niftyRiskProfile" title="Applies to Suggest Strategies only, not live alerts. Defined risk shows spread/iron candidates. Undefined risk shows short straddle/strangle candidates for analysis only.">Strategy risk profile</label>
                 <select id="niftyRiskProfile">
                   <option value="defined">Defined risk</option>
                   <option value="undefined">Undefined risk</option>
@@ -498,19 +503,19 @@
                 </div>
                 <label for="niftyToDate" title="Optional. Pick a historical date to understand whether NIFTY was bullish, bearish, or neutral as of that day. Leave blank for latest cached candle.">Analysis date</label>
                 <input id="niftyToDate" type="date" />
-                <button id="niftyRunContextBtn" class="full-btn">Run NIFTY Analysis</button>
-                <button id="niftySuggestBtn" class="full-btn">Suggest Strategies</button>
+                <button id="niftyRunContextBtn" class="full-btn" title="Run one-off market research. Does not start the live scanner or create entry/exit alerts.">Run Manual Analysis</button>
+                <button id="niftySuggestBtn" class="full-btn" title="Research strategy suitability for the selected mode, expiry, risk profile and date. Uses option/IV context and the default candle lookback; does not create live trades.">Suggest Strategies</button>
               </div>
             </aside>
 
             <section class="content">
-              <section class="activity-hero">
+              <section class="nifty-research-heading">
                 <div>
-                  <h2>NIFTY Desk</h2>
-                  <p>Read-only NIFTY context for intraday, swing, and positional setup planning.</p>
+                  <h2>NIFTY Manual Research</h2>
                 </div>
-                <span id="niftyMeta">Idle</span>
+                <span id="niftyMeta">Not run</span>
               </section>
+              <div id="niftyResearchStatus" class="mini-status" role="status" hidden></div>
 
               <section class="summary-grid" id="niftyContextCards"></section>
 
@@ -568,8 +573,8 @@
 
               <section class="table-panel">
                 <div class="panel-head">
-                  <h2>Strategy Candidates</h2>
-                  <span id="niftyStrategyMeta"></span>
+                  <h2>Research Strategy Candidates</h2>
+                  <span id="niftyStrategyMeta">Not run</span>
                 </div>
                 <div class="wide-table">
                   <table class="readable-table">
@@ -593,6 +598,10 @@
                 </div>
               </section>
 
+            </section>
+          </section>
+
+          <section id="niftyLiveView" class="content full-content" role="tabpanel" aria-labelledby="niftyLiveTab" data-nifty-view-panel="live">
               <section class="table-panel" id="niftyLiveScannerPanel">
                 <div class="panel-head">
                   <h2 title="Continuously refreshes NIFTY data and independently checks Intraday, Swing, Positional entries, and open-trade exits during NSE market hours.">NIFTY Live Scanner</h2>
@@ -615,6 +624,7 @@
                 <div class="compact-metrics" id="niftyAutoCards"></div>
                 <div class="compact-metrics" id="niftyDataFreshnessCards"></div>
                 <div id="niftyDeliveryIssue" class="mini-status"></div>
+                <div id="niftyLiveIssue" class="mini-status points-negative" role="status"></div>
                 <div class="button-row">
                   <button id="niftyAutoStartBtn" title="Starts candle, option-chain, IV, entry, and exit monitoring during NSE market hours.">Start scanner</button>
                   <button id="niftyAutoStopBtn" title="Stops new NIFTY scan cycles. Stored alerts and trades remain available.">Stop scanner</button>
@@ -662,6 +672,10 @@
                     <tbody id="niftyAlertsBody"></tbody>
                   </table>
                 </div>
+                <details id="niftyAlertContext" class="market-evidence" hidden>
+                  <summary>Saved Alert Context</summary>
+                  <div id="niftyAlertContextBody" class="mini-status" role="status"></div>
+                </details>
               </section>
 
               <section class="table-panel">
@@ -683,7 +697,9 @@
                   </table>
                 </div>
               </section>
+          </section>
 
+          <section id="niftyBacktestsView" class="content full-content" role="tabpanel" aria-labelledby="niftyBacktestsTab" data-nifty-view-panel="backtests" hidden>
               <section class="table-panel">
                 <div class="panel-head">
                   <h2>Index Spot Backtest</h2>
@@ -711,7 +727,6 @@
                 <div id="niftyScannerBacktestCoverage" class="mini-list"></div>
                 <div class="wide-table"><table class="readable-table"><thead><tr><th>Entry Time</th><th>Direction</th><th>Entry</th><th>Exit Time</th><th>Exit</th><th>Open Time</th><th>R</th><th>Return</th><th>Exit Reason</th></tr></thead><tbody id="niftyScannerBacktestBody"></tbody></table></div>
               </section>
-            </section>
           </section>
         </section>
 

@@ -36,6 +36,7 @@ const state = {
   strategies: [],
   lastGenericBacktest: null,
   nifty: {
+    view: "live",
     context: null,
     candidates: [],
     scannerBacktest: null,
@@ -121,6 +122,20 @@ function activateIndexSubtab(name) {
     $("indexScannerSymbol").value = name.toUpperCase();
     $("indexScannerTitle").textContent = name === "banknifty" ? "Bank Nifty" : "Sensex";
   }
+}
+
+function activateNiftyView(name) {
+  if (!["live", "research", "backtests"].includes(name)) return;
+  state.nifty.view = name;
+  document.querySelectorAll("[data-nifty-view-target]").forEach((button) => {
+    const active = button.dataset.niftyViewTarget === name;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+    button.setAttribute("tabindex", active ? "0" : "-1");
+  });
+  document.querySelectorAll("[data-nifty-view-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.niftyViewPanel !== name;
+  });
 }
 
 const BULK_TIMEFRAME_LABELS = {
@@ -3031,6 +3046,13 @@ async function loadNiftyExpiries() {
   }
 }
 
+function setNiftyResearchStatus(messages, isError = false) {
+  const target = $("niftyResearchStatus");
+  target.textContent = Array.isArray(messages) ? messages.join("\n") : messages;
+  target.hidden = !target.textContent;
+  target.classList.toggle("points-negative", isError);
+}
+
 function niftyContextParams() {
   const params = new URLSearchParams({
     mode: $("niftyMode").value,
@@ -3047,21 +3069,23 @@ function niftyContextParams() {
 }
 
 async function runNiftyContext() {
-  setNotes("Loading NIFTY desk context...");
+  setNiftyResearchStatus("Manual analysis running...");
   $("niftyMeta").textContent = "Running";
   try {
     const data = await api(`/api/nifty/context?${niftyContextParams().toString()}`);
     state.nifty.context = data;
+    state.nifty.candidates = [];
     renderNiftyContext(data);
-    setNotes((data.summary && data.summary.points) || data.warnings || []);
+    $("niftyStrategyMeta").textContent = "Not run for this analysis";
+    setNiftyResearchStatus([...(data.summary?.points || []), ...(data.warnings || []), ...(data.errors || [])], Boolean(data.errors?.length));
   } catch (error) {
     $("niftyMeta").textContent = "Failed";
-    setNotes([error.message], true);
+    setNiftyResearchStatus(error.message, true);
   }
 }
 
 async function runNiftySuggestions() {
-  setNotes("Building NIFTY strategy suitability candidates...");
+  setNiftyResearchStatus("Research strategy candidates running...");
   $("niftyStrategyMeta").textContent = "Running";
   try {
     const data = await postApi("/api/nifty/strategy-suggestions", {
@@ -3076,10 +3100,10 @@ async function runNiftySuggestions() {
     state.nifty.candidates = data.candidates || [];
     renderNiftyContext(data);
     renderNiftyStrategies(data.candidates || []);
-    setNotes(`${(data.candidates || []).length} NIFTY strategy candidate(s) loaded.`);
+    setNiftyResearchStatus([`${(data.candidates || []).length} research strategy candidate(s).`, ...(data.warnings || []), ...(data.errors || [])], Boolean(data.errors?.length));
   } catch (error) {
     $("niftyStrategyMeta").textContent = "Failed";
-    setNotes([error.message], true);
+    setNiftyResearchStatus(error.message, true);
   }
 }
 
@@ -3090,7 +3114,7 @@ function renderNiftyContext(data) {
   const source = (data.summary && data.summary.candle_sources && data.summary.candle_sources.daily) || {};
   $("niftyMeta").textContent = `${data.mode || "auto"} / latest daily ${fmtDateTime(source.to || data.as_of)}`;
   $("niftyContextCards").innerHTML = [
-    ["Spot", fmt(technical.spot)],
+    ["Research Candle Price", fmt(technical.spot)],
     ["Intraday Bias", technical.bias_intraday || "-"],
     ["Swing Bias", technical.bias_swing || "-"],
     ["Positional Bias", technical.bias_positional || "-"],
@@ -3142,7 +3166,7 @@ function renderNiftyContext(data) {
   ]
     .map(([metric, value, read]) => `<tr><td>${metric}</td><td>${value}</td><td>${read}</td></tr>`)
     .join("");
-  renderNiftyStrategies(data.candidates || state.nifty.candidates || []);
+  renderNiftyStrategies(data.candidates || []);
 }
 
 function candleSourceText(sources) {
@@ -3213,6 +3237,7 @@ async function loadNiftyLatestData() {
 
 async function startNiftyAutoScan() {
   $("niftyAutoMeta").textContent = "Starting";
+  $("niftyLiveIssue").textContent = "";
   try {
     const data = await postApi("/api/nifty/auto/start", {
       scan_interval_seconds: Number($("niftyScanInterval").value || 60),
@@ -3221,24 +3246,26 @@ async function startNiftyAutoScan() {
     renderNiftyAutoStatus(data);
     startNiftyAutoPolling();
   } catch (error) {
-    setNotes([error.message], true);
+    $("niftyLiveIssue").textContent = error.message;
   }
 }
 
 async function stopNiftyAutoScan() {
   $("niftyAutoMeta").textContent = "Stopping";
+  $("niftyLiveIssue").textContent = "";
   try {
     const data = await postApi("/api/nifty/auto/stop", {});
     state.nifty.autoStatus = data;
     renderNiftyAutoStatus(data);
     stopNiftyAutoPolling();
   } catch (error) {
-    setNotes([error.message], true);
+    $("niftyLiveIssue").textContent = error.message;
   }
 }
 
 async function runNiftyAutoOnce() {
   $("niftyAutoMeta").textContent = "Running one cycle";
+  $("niftyLiveIssue").textContent = "";
   try {
     const data = await postApi("/api/nifty/auto/run-once", { force: true });
     state.nifty.autoStatus = data;
@@ -3246,7 +3273,7 @@ async function runNiftyAutoOnce() {
     await loadNiftyAlerts();
     await loadNiftyTrades();
   } catch (error) {
-    setNotes([error.message], true);
+    $("niftyLiveIssue").textContent = error.message;
   }
 }
 
@@ -3448,8 +3475,7 @@ async function runNiftyScannerBacktest() {
     state.nifty.scannerBacktest = data;
     renderNiftyScannerBacktest(data);
   } catch (error) {
-    $("niftyScannerBacktestMeta").textContent = "Failed";
-    setNotes([error.message], true);
+    $("niftyScannerBacktestMeta").textContent = `Failed: ${error.message}`;
   } finally {
     $("niftyScannerBacktestBtn").disabled = false;
   }
@@ -3532,16 +3558,20 @@ function renderNiftyScannerBacktest(data) {
 }
 
 async function viewNiftyContextSnapshot(contextId) {
+  const target = $("niftyAlertContextBody");
+  $("niftyAlertContext").hidden = false;
+  $("niftyAlertContext").open = true;
+  target.textContent = `Loading saved context #${contextId}...`;
   try {
     const data = await api(`/api/nifty/context-snapshots/${contextId}`);
     const snapshot = data.snapshot || {};
     const points = (snapshot.summary && snapshot.summary.points) || [];
-    setNotes([
-      `Context #${contextId}: spot ${fmt(snapshot.spot)}, intraday ${snapshot.intraday_bias}, swing ${snapshot.swing_bias}, positional ${snapshot.positional_bias}, option ${snapshot.option_bias}, IV ${snapshot.iv_regime}.`,
+    target.textContent = [
+      `Saved context #${contextId}: reference spot ${fmt(snapshot.spot)}, intraday ${snapshot.intraday_bias}, swing ${snapshot.swing_bias}, positional ${snapshot.positional_bias}, option ${snapshot.option_bias}, IV ${snapshot.iv_regime}.`,
       ...points,
-    ]);
+    ].join("\n");
   } catch (error) {
-    setNotes([error.message], true);
+    target.textContent = error.message;
   }
 }
 
@@ -4074,6 +4104,19 @@ document.querySelectorAll("[data-index-target]").forEach((button) => {
     activateTab("indices");
   });
 });
+document.querySelectorAll("[data-nifty-view-target]").forEach((button) => {
+  button.addEventListener("click", () => activateNiftyView(button.dataset.niftyViewTarget));
+  button.addEventListener("keydown", (event) => {
+    const tabs = [...document.querySelectorAll("[data-nifty-view-target]")];
+    const current = tabs.indexOf(button);
+    const next = { ArrowRight: (current + 1) % tabs.length, ArrowLeft: (current + tabs.length - 1) % tabs.length, Home: 0, End: tabs.length - 1 }[event.key];
+    if (next === undefined) return;
+    event.preventDefault();
+    activateNiftyView(tabs[next].dataset.niftyViewTarget);
+    tabs[next].focus();
+  });
+});
+activateNiftyView("live");
 $("indexDiagnosticsDate").value = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Kolkata" });
 $("indexDiagnosticsDownload").addEventListener("click", downloadIndexDiagnostics);
 $("appDiagnosticsDate").value = $("indexDiagnosticsDate").value;
