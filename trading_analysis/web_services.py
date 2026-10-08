@@ -2530,11 +2530,19 @@ class AnalysisService:
         strategy_params: dict[str, Any] | None = None,
         backtest_params: dict[str, Any] | None = None,
         limit_symbols: int | None = None,
+        context_filters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         strategy = get_strategy(strategy_id)
         validated_strategy_params = strategy.validate_params(strategy_params)
         normalized_timeframe = normalize_timeframe(timeframe or strategy.default_timeframe)
         window = candle_window(from_date=from_date, to_date=to_date, days=days)
+        from trading_analysis.pullback_context import PullbackContext, PULLBACKS
+        context = PullbackContext(self, context_filters)
+        enabled = context.settings["market"] or context.settings["sector"]
+        if enabled and (strategy_id not in PULLBACKS or normalized_timeframe not in {"day", "60minute", "15minute"}):
+            raise ValueError("Market/sector filters support bullish/bearish pullbacks on Daily, 1h and 15m candles")
+        if limit_symbols is not None and limit_symbols < 1:
+            raise ValueError("Symbols limit must be positive or all")
 
         requested_symbols = [symbol for symbol in (symbols or []) if str(symbol).strip()]
         if requested_symbols:
@@ -2569,7 +2577,10 @@ class AnalysisService:
             except Exception as exc:
                 errors.append({"symbol": candidate, "error": str(exc)})
 
-        payload = backtest_strategy_for_symbols(symbol_candles, strategy, config)
+        payload = backtest_strategy_for_symbols(symbol_candles, strategy, config, context.check if enabled else None)
+        payload["context_filters"] = context.settings
+        payload["context_counts"] = dict(context.counts)
+        payload["selected_symbols"] = scan_symbols
         payload["errors"] = [*(payload.get("errors") or []), *errors]
         payload["requested_symbols"] = requested_symbols
         payload["limit_symbols"] = effective_limit

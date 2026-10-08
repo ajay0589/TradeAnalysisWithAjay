@@ -14,6 +14,8 @@ from trading_analysis.nifty.service import NiftyDeskService
 from trading_analysis.index_scanner import IndexScannerService
 from trading_analysis.instrument_master_service import InstrumentMasterService
 from trading_analysis.all_index_monitor import AllIndexMonitor
+from trading_analysis.pullback_scanner import PullbackScanner
+from trading_analysis.notifications.telegram import TelegramNotifier
 from trading_analysis.web_services import AnalysisService
 from trading_analysis import diagnostics
 
@@ -38,6 +40,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
     index_scanner_service = IndexScannerService(analysis_service=service)
     instrument_master_service = InstrumentMasterService(analysis_service=service)
     all_index_monitor = AllIndexMonitor(nifty_auto_service, index_scanner_service, instrument_master_service)
+    pullback_scanner = PullbackScanner(service)
 
     @diagnostics.audit_http
     def do_GET(self) -> None:
@@ -51,10 +54,15 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_file(WEB_ROOT / "app.js", "application/javascript; charset=utf-8")
             elif parsed.path == "/api/health":
                 self._send_json({"status": "ok", **diagnostics.runtime(), "port": self.server.server_port})
+            elif parsed.path == "/api/pullbacks/status":
+                self._send_json(self.pullback_scanner.status())
+            elif parsed.path == "/api/pullbacks/export":
+                self._send_json(diagnostics.clean(self.pullback_scanner.export()))
             elif parsed.path == "/api/diagnostics/export":
                 params = parse_qs(parsed.query)
                 report = diagnostics.export(params.get("date", [None])[0])
                 report["scanners"] = diagnostics.clean(self.all_index_monitor.diagnostics(report["date"]))
+                report["pullbacks"] = diagnostics.clean(self.pullback_scanner.export())
                 if params.get("format") == ["zip"]:
                     self._send_zip(report, "trading-app-log")
                 else:
@@ -246,7 +254,8 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         days=_optional_int(params.get("days", [None])[0]),
                         strategy_params=_optional_json(params.get("params", ["{}"])[0]),
                         backtest_params=_optional_json(params.get("backtest_params", ["{}"])[0]),
-                        limit_symbols=_optional_limit(params.get("limit_symbols", ["50"])[0]),
+                        limit_symbols=_optional_limit(params.get("limit_symbols", ["all"])[0]),
+                        context_filters=_optional_json(params.get("context_filters", ["{}"])[0]),
                     )
                 )
             elif parsed.path == "/api/nifty/context":
@@ -440,7 +449,8 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         days=_optional_int(payload.get("days")),
                         strategy_params=payload.get("strategy_params") or payload.get("params") or {},
                         backtest_params=payload.get("backtest_params") or {},
-                        limit_symbols=_optional_limit(str(payload.get("limit_symbols") or "50")),
+                        limit_symbols=_optional_limit(str(payload.get("limit_symbols") or "all")),
+                        context_filters=payload.get("context_filters") or {},
                     )
                 )
             elif parsed.path == "/api/krishna-purple-touch-live-scan":
@@ -541,6 +551,24 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         to_date=payload.get("to_date") or None,
                     )
                 )
+            elif parsed.path in {"/api/pullbacks/start", "/api/pullbacks/start-all"}:
+                payload = self._read_json()
+                was_running = self.pullback_scanner.status()["running"]
+                result = self.pullback_scanner.start(payload)
+                if parsed.path.endswith("start-all"):
+                    try:
+                        self.all_index_monitor.start()
+                    except Exception:
+                        if not was_running:
+                            self.pullback_scanner.stop()
+                        raise
+                self._send_json(result)
+            elif parsed.path == "/api/pullbacks/stop":
+                self._read_json()
+                self._send_json(self.pullback_scanner.stop())
+            elif parsed.path == "/api/pullbacks/test-telegram":
+                self._read_json()
+                self._send_json(TelegramNotifier.from_env("PULLBACK_").send_message("F&O pullback TEST MESSAGE. Not a trade alert."))
             elif parsed.path == "/api/nifty/payoff":
                 self._send_json(self.nifty_service.nifty_payoff(self._read_json()))
             elif parsed.path == "/api/nifty/backtest":

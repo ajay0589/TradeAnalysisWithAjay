@@ -50,9 +50,9 @@ def entry_price_for(signal: StrategySignal, candles: list[Candle], signal_index:
         for index in _entry_candidate_indexes(candles, entry_index, config.entry_valid_bars):
             candle = candles[index]
             if signal.side == "long" and candle.high >= wanted:
-                return index, wanted
+                return index, max(wanted, candle.open)
             if signal.side == "short" and candle.low <= wanted:
-                return index, wanted
+                return index, min(wanted, candle.open)
         return None, None
     if config.entry == "limit_retest":
         for index in _entry_candidate_indexes(candles, entry_index, config.entry_valid_bars):

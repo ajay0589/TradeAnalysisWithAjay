@@ -50,16 +50,25 @@ const state = {
   indexGroup: { pollTimer: null, active: "nifty" },
   research: { active: "analyze" },
   instrumentMaster: { pollTimer: null },
+  pullbacks: { pollTimer: null, data: null },
 };
 
 const $ = (id) => document.getElementById(id);
 
 function activateTab(name) {
-  if (["analyze", "scans", "krishna", "backtest"].includes(name)) {
+  if (["analyze", "scans", "pullbacks", "krishna", "backtest"].includes(name)) {
     state.research.active = name;
     name = "research";
   }
   const panelName = name === "research" ? state.research.active : name;
+  $("notes").hidden = ["backtest", "pullbacks"].includes(panelName);
+  if (panelName === "pullbacks") {
+    loadPullbacks();
+    if (!state.pullbacks.pollTimer) state.pullbacks.pollTimer = setInterval(loadPullbacks, 5000);
+  } else if (state.pullbacks.pollTimer) {
+    clearInterval(state.pullbacks.pollTimer);
+    state.pullbacks.pollTimer = null;
+  }
   state.activeTab = panelName;
   document.querySelectorAll("[data-tab-target]").forEach((button) => {
     const active = button.dataset.tabTarget === name;
@@ -136,6 +145,58 @@ function activateNiftyView(name) {
   document.querySelectorAll("[data-nifty-view-panel]").forEach((panel) => {
     panel.hidden = panel.dataset.niftyViewPanel !== name;
   });
+}
+
+function activateBacktestView(name) {
+  if (!["generic", "krishna"].includes(name)) return;
+  document.querySelectorAll("[data-backtest-target]").forEach((button) => {
+    const active = button.dataset.backtestTarget === name;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  document.querySelectorAll("[data-backtest-view]").forEach((panel) => { panel.hidden = panel.dataset.backtestView !== name; });
+}
+
+async function loadPullbacks() {
+  try {
+    const data = await api("/api/pullbacks/status");
+    state.pullbacks.data = data;
+    renderPullbacks(data);
+  } catch (error) { $("pullbackStatus").textContent = error.message; }
+}
+
+async function controlPullbacks(action) {
+  $("pullbackActionStatus").textContent = `${action} requested`;
+  try {
+    const payload = action.startsWith("start") ? {timeframe: $("pullbackFrame").value, benchmark: $("pullbackBenchmark").value, structure: $("pullbackStructure").checked} : {};
+    const data = await postApi(`/api/pullbacks/${action}`, payload);
+    $("pullbackActionStatus").textContent = action === "test-telegram" ? (data.sent ? "Test sent" : data.error || "Delivery failed") : "";
+    if (action !== "test-telegram") { state.pullbacks.data = data; renderPullbacks(data); }
+  } catch (error) { $("pullbackActionStatus").textContent = error.message; }
+}
+
+function renderPullbacks(data) {
+  $("pullbackStatus").textContent = `Paper only / ${data.running ? "Running" : "Stopped"} / ${data.phase}`;
+  $("pullbackStart").disabled = data.running || data.phase === "stopping";
+  $("pullbackStop").disabled = !data.running;
+  $("pullbackStartAll").disabled = data.phase === "stopping";
+  for (const id of ["pullbackFrame", "pullbackBenchmark", "pullbackStructure"]) $(id).disabled = data.running;
+  if (data.running) {
+    $("pullbackFrame").value = data.settings.timeframe;
+    $("pullbackBenchmark").value = data.settings.benchmark;
+    $("pullbackStructure").checked = data.settings.structure;
+  }
+  $("pullbackTelegram").textContent = data.telegram_configured ? "Separate pullback Telegram configured" : "PULLBACK_TELEGRAM_BOT_TOKEN / PULLBACK_TELEGRAM_CHAT_ID not configured";
+  $("pullbackMetrics").innerHTML = [["Started (IST)", fmtDateTime(data.started_at)], ["Stopped (IST)", fmtDateTime(data.stopped_at)], ["Completed (IST)", fmtDateTime(data.last_completed)], ["Progress", `${data.completed} / ${data.total}`], ["Current stock", data.current || "-"]]
+    .map(([label, value]) => `<div class="compact-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+  $("pullbackRefresh").textContent = `Candle refresh: ${data.refresh?.current || "idle"} | Last success ${fmtDateTime(data.refresh?.last_success)}`;
+  $("pullbackErrors").textContent = (data.errors || []).join(" | ");
+  $("pullbackDecisionCount").textContent = `${(data.decisions || []).length} stock(s)`;
+  $("pullbackDecisions").innerHTML = (data.decisions || []).map((r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.reason)}</td><td>${fmtDateTime(r.checked_at)}</td></tr>`).join("");
+  const rows = (data.setups || []).filter((r) => ($("pullbackSide").value === "all" || r.side === $("pullbackSide").value) && ($("pullbackState").value === "all" || r.status === $("pullbackState").value));
+  $("pullbackSetupCount").textContent = `${rows.length} shown / ${data.setup_total} total`;
+  $("pullbackSetups").innerHTML = rows.map((r) => `<tr><td>${escapeHtml(r.symbol)}<div class="cell-note">${escapeHtml(r.id)}</div></td><td>${escapeHtml(r.side)} / ${escapeHtml(r.timeframe)}</td><td>${escapeHtml(r.status)}</td><td>${fmtDateTime(r.signal_time)}</td><td>${fmt(r.trigger)} / ${fmt(r.stop)} / ${fmt(r.target)}</td><td>${fmt(r.entry_price)}<br>${fmtDateTime(r.entry_time)}</td><td>${fmt(r.exit_price)}<br>${fmtDateTime(r.exit_time)}</td><td>${r.entry_time ? formatSeconds(r.open_seconds ?? (Date.now() - parseDateTime(r.entry_time)) / 1000) : "-"}</td><td>${Object.values(r.context?.evidence || {}).map((e) => escapeHtml(`${e.index}: ${e.direction}`)).join("<br>")}</td><td>${escapeHtml(r.discard_reason || r.exit_reason || "-")}</td></tr>`).join("");
+  $("pullbackDelivery").innerHTML = (data.delivery || []).map((r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.trade_id)}</td><td>${escapeHtml(r.event_kind)}</td><td>${fmtDateTime(r.created_at)}</td><td>${escapeHtml(r.status)}</td><td>${escapeHtml(r.error || "-")}</td></tr>`).join("");
 }
 
 const BULK_TIMEFRAME_LABELS = {
@@ -2249,6 +2310,11 @@ function populateStrategyParams() {
   if (!selected) return;
   $("genericStrategyParams").value = JSON.stringify(selected.default_params || {}, null, 2);
   $("genericBacktestTimeframe").value = selected.default_timeframe || "day";
+  const pullback = ["bullish_pullback", "bearish_pullback"].includes(selected.strategy_id);
+  $("genericContextControls").hidden = !pullback;
+  $("genericBacktestParams").value = JSON.stringify(pullback
+    ? {entry: "breakout_stop", entry_valid_bars: 3, holding_bars: 5, stop_type: "signal", target_type: "risk_multiple", target_r_multiple: 2, slippage_bps: 2, brokerage_bps: 2}
+    : {entry: "next_open", holding_bars: 5, stop_type: "atr", stop_atr: 1.5, target_type: "risk_multiple", target_r_multiple: 2}, null, 2);
 }
 
 function parseJsonTextarea(id, label) {
@@ -2267,7 +2333,7 @@ function parseJsonTextarea(id, label) {
 
 async function runGenericBacktest() {
   $("genericBacktestStatus").textContent = "Running";
-  setNotes("Running generic strategy backtest on cached candles...");
+  $("genericBacktestRunBtn").disabled = true;
   try {
     const symbolsText = $("genericBacktestSymbol").value.trim();
     const payload = {
@@ -2279,15 +2345,20 @@ async function runGenericBacktest() {
       to_date: $("genericBacktestToDate").value || null,
       strategy_params: parseJsonTextarea("genericStrategyParams", "Strategy params"),
       backtest_params: parseJsonTextarea("genericBacktestParams", "Backtest params"),
-      limit_symbols: $("genericLimitSymbols").value.trim() || "50",
+      limit_symbols: $("genericLimitSymbols").value.trim() || "all",
+      context_filters: $("genericContextControls").hidden ? {} : {
+        market: $("genericMarketGate").checked, sector: $("genericSectorGate").checked,
+        structure: $("genericStructureGate").checked, benchmark: $("genericBenchmark").value,
+      },
     };
     const data = await postApi("/api/backtest-strategy", payload);
     state.lastGenericBacktest = data;
     renderGenericBacktest(data);
-    setNotes("Generic backtest complete. Review score buckets, symbol performance, and trade log before trusting any setup.");
+    $("genericBacktestExport").disabled = false;
   } catch (error) {
-    $("genericBacktestStatus").textContent = "Failed";
-    setNotes([error.message], true);
+    $("genericBacktestStatus").textContent = `Failed: ${error.message}`;
+  } finally {
+    $("genericBacktestRunBtn").disabled = false;
   }
 }
 
@@ -2302,9 +2373,9 @@ function renderGenericBacktest(data) {
     ["Avg return", fmtPct(metrics.avg_return)],
     ["Expectancy", fmtPct(metrics.expectancy)],
     ["Profit factor", fmt(metrics.profit_factor)],
-    ["Max DD", fmtPct(metrics.max_drawdown)],
-    ["Ending return", fmtPct(metrics.ending_return)],
-    ["Avg R", fmt(metrics.avg_r_multiple)],
+    ["Sequential DD (not portfolio)", fmtPct(metrics.max_drawdown)],
+    ["Sequential return (not portfolio)", fmtPct(metrics.ending_return)],
+    ["Avg R (before costs)", fmt(metrics.avg_r_multiple)],
   ];
   $("genericBacktestSummaryCards").innerHTML = cards
     .map(([label, value]) => `<div class="compact-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`)
@@ -2316,6 +2387,10 @@ function renderGenericBacktest(data) {
   renderGenericBacktestSymbols(data.symbol_performance || []);
   renderGenericBacktestMonthly(data.monthly_performance || []);
   renderGenericBacktestTrades(data.trades || []);
+  const context = data.context_filters || {};
+  $("genericContextSummary").textContent = `Market: ${context.market ? context.benchmark : "off"}; sector: ${context.sector ? "required" : "off"}. ` +
+    Object.entries(data.context_counts || {}).map(([reason, count]) => `${reason}: ${count}`).join(" | ") +
+    ((data.errors || []).length ? ` | Data errors: ${data.errors.map((row) => `${row.symbol}: ${row.error}`).join("; ")}` : "");
 }
 
 function renderGenericBacktestBuckets(rows) {
@@ -2410,7 +2485,6 @@ function renderGenericBacktestTrades(rows) {
 }
 
 async function runKrishnaBacktest() {
-  setNotes("Running Krishna setup backtest on cached daily candles...");
   $("backtestStatus").textContent = "Running";
   try {
     const params = new URLSearchParams();
@@ -2436,10 +2510,8 @@ async function runKrishnaBacktest() {
     const data = await api(`/api/krishna-setup-backtest?${params.toString()}`);
     state.lastBacktest = data;
     renderBacktest(data);
-    setNotes("Backtest complete. Use the score buckets and forward accuracy to judge whether the setup has useful directional edge.");
   } catch (error) {
-    $("backtestStatus").textContent = "Failed";
-    setNotes([error.message], true);
+    $("backtestStatus").textContent = `Failed: ${error.message}`;
   }
 }
 
@@ -4032,6 +4104,20 @@ $("purpleBacktestRunBtn").addEventListener("click", runPurpleBacktest);
 $("purpleBacktestDownloadBtn").addEventListener("click", downloadPurpleBacktestTrades);
 $("genericStrategySelect").addEventListener("change", populateStrategyParams);
 $("genericBacktestRunBtn").addEventListener("click", runGenericBacktest);
+$("genericBacktestExport").addEventListener("click", () => {
+  if (state.lastGenericBacktest) downloadBlob(new Blob([JSON.stringify(state.lastGenericBacktest, null, 2)], {type: "application/json"}), "stock-strategy-backtest.json");
+});
+document.querySelectorAll("[data-backtest-target]").forEach((button) => button.addEventListener("click", () => activateBacktestView(button.dataset.backtestTarget)));
+activateBacktestView("generic");
+$("pullbackStart").addEventListener("click", () => controlPullbacks("start"));
+$("pullbackStop").addEventListener("click", () => controlPullbacks("stop"));
+$("pullbackStartAll").addEventListener("click", () => controlPullbacks("start-all"));
+$("pullbackTestTelegram").addEventListener("click", () => controlPullbacks("test-telegram"));
+$("pullbackExport").addEventListener("click", async () => {
+  try { downloadBlob(new Blob([JSON.stringify(await api("/api/pullbacks/export"), null, 2)], {type: "application/json"}), "pullback-scanner-log.json"); }
+  catch (error) { $("pullbackActionStatus").textContent = error.message; }
+});
+for (const id of ["pullbackSide", "pullbackState"]) $(id).addEventListener("change", () => { if (state.pullbacks.data) renderPullbacks(state.pullbacks.data); });
 $("backtestRunBtn").addEventListener("click", runKrishnaBacktest);
 $("backtestDownloadTradesBtn").addEventListener("click", downloadBacktestTrades);
 $("backtestDownloadSignalsBtn").addEventListener("click", downloadBacktestSignals);

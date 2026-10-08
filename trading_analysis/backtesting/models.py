@@ -107,6 +107,8 @@ class BacktestTrade:
     reasons: list[str]
     warnings: list[str]
     indicators: dict[str, Any]
+    entry_time: str = ""
+    exit_time: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

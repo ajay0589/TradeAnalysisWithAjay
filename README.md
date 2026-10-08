@@ -545,6 +545,14 @@ In a mocked 09:15-10:14 run with one-minute polling, the candle scheduler issues
 
 ## Regression checks
 
+### F&O Pullbacks (v5)
+
+`Stock Research > Backtest` now separates Generic Strategy and Krishna Setup into independent workspaces. Generic bullish/bearish pullbacks support as-of Daily market and sector filters, choosing NIFTY 50/100/200/500. `Stock Research > F&O Pullbacks` adds an independent, persistent paper-alert scanner and optional combined start with the three index monitors. Configure `PULLBACK_TELEGRAM_BOT_TOKEN` and `PULLBACK_TELEGRAM_CHAT_ID` for its separate destination.
+
+Read the [v5 pullback guide and measured backtest comparisons](docs/pullback-scanner-v5.md) for exact rules, symbol-limit meaning, setup/entry/exit lifecycle and limitations. The filtered breakout tests were not profitable after assumed costs; this is paper monitoring, not a validated trading recommendation. Sequential backtest compounding is explicitly labelled as not portfolio performance.
+
+### Test Commands
+
 Run from the project folder using the server's Python environment and Node.js:
 
 ```powershell

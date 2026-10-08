@@ -256,3 +256,60 @@ test("NIFTY action failures stay within their own view", async () => {
   assert.equal(ui.ids.get("niftyLiveIssue").textContent, "Scanner failed");
   assert.equal(ui.ids.get("niftyScannerBacktestMeta").textContent, "Failed: Backtest failed");
 });
+
+test("stock backtest types keep their controls and results separate without running either", () => {
+  const ui = app();
+  const before = ui.requests.length;
+  for (const name of ["generic", "krishna", "generic"]) {
+    ui.context.activateBacktestView(name);
+    const panels = ui.run('[...document.querySelectorAll("[data-backtest-view]")].map(p => ({name:p.dataset.backtestView, hidden:p.hidden}))');
+    assert.equal(panels.length, 4);
+    for (const panel of panels) assert.equal(panel.hidden, panel.name !== name);
+  }
+  assert.equal(ui.requests.length, before);
+  ui.context.activateTab("backtest");
+  assert.equal(ui.ids.get("notes").hidden, true);
+});
+
+test("pullback defaults and market filters are passed only to generic backtesting", async () => {
+  const ui = app();
+  assert.equal(ui.ids.get("genericLimitSymbols").value, "all");
+  ui.run('state.strategies = [{strategy_id:"bullish_pullback", default_params:{rsi_min:40}, default_timeframe:"day"}]');
+  ui.ids.get("genericStrategySelect").value = "bullish_pullback";
+  ui.context.populateStrategyParams();
+  assert.equal(JSON.parse(ui.ids.get("genericBacktestParams").value).entry, "breakout_stop");
+  ui.ids.get("genericMarketGate").checked = true;
+  ui.ids.get("genericSectorGate").checked = true;
+  ui.ids.get("genericStructureGate").checked = true;
+  ui.ids.get("genericBenchmark").value = "NIFTY 200";
+  ui.context.renderGenericBacktest = () => {};
+  const pending = ui.context.runGenericBacktest();
+  const request = ui.requests.find(r => r.url === "/api/backtest-strategy");
+  assert.equal(JSON.parse(request.options.body).limit_symbols, "all");
+  assert.deepEqual(JSON.parse(request.options.body).context_filters, {market:true, sector:true, structure:true, benchmark:"NIFTY 200"});
+  request.resolve({trades: []});
+  await pending;
+  assert.equal(ui.ids.get("genericBacktestRunBtn").disabled, false);
+  assert.equal(ui.ids.get("genericBacktestExport").disabled, false);
+});
+
+test("empty generic symbol limit means all; numeric limits remain supported", async () => {
+  for (const [value, expected] of [["", "all"], ["50", "50"]]) {
+    const ui = app();
+    ui.ids.get("genericLimitSymbols").value = value;
+    ui.context.renderGenericBacktest = () => {};
+    const pending = ui.context.runGenericBacktest();
+    const request = ui.requests.find(r => r.url === "/api/backtest-strategy");
+    assert.equal(JSON.parse(request.options.body).limit_symbols, expected);
+    request.resolve({trades: []});
+    await pending;
+  }
+});
+
+test("pullback navigation loads status but cannot start live scans", () => {
+  const ui = app();
+  ui.context.activateTab("pullbacks");
+  assert.equal(ui.ids.get("tab-pullbacks").classList.contains("active"), true);
+  assert.ok(ui.requests.some(r => r.url === "/api/pullbacks/status"));
+  assert.equal(ui.requests.some(r => r.url === "/api/pullbacks/start"), false);
+});

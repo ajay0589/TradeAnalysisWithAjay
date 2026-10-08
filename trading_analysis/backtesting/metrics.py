@@ -8,6 +8,7 @@ FORWARD_HORIZONS = (1, 3, 5, 10, 15)
 
 
 def calculate_metrics(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    trades = sorted(trades, key=lambda row: (row.get("exit_time") or row.get("exit_date", ""), row.get("symbol", "")))
     returns = [float(trade["return_percent"]) for trade in trades]
     if not returns:
         return {

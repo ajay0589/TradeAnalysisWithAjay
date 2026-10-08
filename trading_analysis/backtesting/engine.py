@@ -21,6 +21,7 @@ def backtest_strategy_for_symbol(
     candles: list[Candle],
     strategy: StrategyDefinition,
     config: BacktestConfig,
+    context_gate=None,
 ) -> dict[str, Any]:
     candles = sorted(candles, key=lambda candle: candle.timestamp)
     params = strategy.validate_params(config.strategy_params)
@@ -41,6 +42,13 @@ def backtest_strategy_for_symbol(
 
         signal_row = _signal_row(signal, candles, signal_index)
         signals.append(signal_row)
+        if context_gate is not None:
+            from trading_analysis.nifty.live_scanner import candle_close_time
+            evidence = context_gate(symbol, signal.side, candle_close_time(candles[signal_index].timestamp, config.timeframe))
+            signal_row["context"] = evidence
+            if not evidence["passed"]:
+                signal_row["trade_status"] = "blocked_context"
+                continue
         if signal.side not in {"long", "short"}:
             signal_row["trade_status"] = "signal_only"
             continue
@@ -48,7 +56,7 @@ def backtest_strategy_for_symbol(
             signal_row["trade_status"] = "skipped_overlap"
             continue
 
-        trade = _simulate_trade(symbol, candles, signal_index, signal, strategy, config)
+        trade = _simulate_trade(symbol, candles, signal_index, signal, strategy, config, context_gate)
         if trade is None:
             signal_row["trade_status"] = "expired_no_entry" if config.entry in {"breakout_stop", "limit_retest"} else "skipped_no_entry"
             continue
@@ -56,7 +64,7 @@ def backtest_strategy_for_symbol(
         trades.append(trade_row)
         signal_row["trade_status"] = "taken"
         if not config.allow_overlap:
-            next_available_signal_index = _index_for_date(candles, trade.exit_date) + 1
+            next_available_signal_index = next(i for i, row in enumerate(candles) if row.timestamp.isoformat() == trade.exit_time) + 1
 
     return {"symbol": symbol.upper(), "signals": signals, "trades": trades, "status": "ok"}
 
@@ -65,12 +73,13 @@ def backtest_strategy_for_symbols(
     symbol_candles_map: dict[str, list[Candle]],
     strategy: StrategyDefinition,
     config: BacktestConfig,
+    context_gate=None,
 ) -> dict[str, Any]:
     results = []
     errors: list[dict[str, str]] = []
     for symbol, candles in symbol_candles_map.items():
         try:
-            results.append(backtest_strategy_for_symbol(symbol, candles, strategy, config))
+            results.append(backtest_strategy_for_symbol(symbol, candles, strategy, config, context_gate))
         except Exception as exc:
             errors.append({"symbol": symbol, "error": str(exc)})
 
@@ -97,8 +106,11 @@ def backtest_strategy_for_symbols(
         "points": [
             "Historical simulation uses cached candles only and does not place orders.",
             "Signals are generated using candles available up to the signal bar.",
-            "Default entry is the next candle open; signal-close entries still evaluate exits after the signal bar.",
+            f"Entry model: {config.entry}; signal-close entries evaluate exits after the signal bar. Bar timestamps are not exact historical fills.",
             "If stop and target are hit in the same candle, stop is assumed first and the trade is marked ambiguous.",
+            "Prices are underlying spot candles, not futures fills or option premiums; lot sizes, margin, rollovers and option decay are not modeled.",
+            "Sequential compounded return/drawdown are trade-series diagnostics, not a capital-constrained portfolio equity curve. Stocks can overlap.",
+            "The current watchlist and sector map are used historically; past F&O membership and sector changes are not reconstructed (survivorship bias).",
         ]
     }
     return payload
@@ -111,10 +123,23 @@ def _simulate_trade(
     signal: StrategySignal,
     strategy: StrategyDefinition,
     config: BacktestConfig,
+    context_gate=None,
 ) -> BacktestTrade | None:
     entry_index, entry_price = entry_price_for(signal, candles, signal_index, config)
     if entry_index is None or entry_price is None or entry_index >= len(candles):
         return None
+    evidence = None
+    if context_gate is not None:
+        from trading_analysis.live_timing import as_ist
+        from trading_analysis.nifty.live_scanner import candle_close_time
+        decision = as_ist(candles[entry_index].timestamp)
+        if config.entry == "signal_close":
+            decision = candle_close_time(candles[entry_index].timestamp, config.timeframe)
+        elif config.timeframe == "day":
+            decision = decision.replace(hour=9, minute=15)
+        evidence = context_gate(symbol, signal.side, decision)
+        if not evidence["passed"]:
+            return None
     stop_loss = resolve_stop(signal, entry_price, config)
     target = resolve_target(signal, entry_price, stop_loss, config)
     exit_start_index = entry_index + 1 if config.entry == "signal_close" else entry_index
@@ -153,7 +178,9 @@ def _simulate_trade(
         target=target,
         reasons=list(signal.reasons),
         warnings=list(signal.warnings),
-        indicators=dict(signal.indicators),
+        indicators={**signal.indicators, **({"context_at_entry": evidence} if evidence is not None else {})},
+        entry_time=candles[entry_index].timestamp.isoformat(),
+        exit_time=candles[exit_index].timestamp.isoformat(),
     )
 
 

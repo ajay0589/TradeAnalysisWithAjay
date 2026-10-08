@@ -38,6 +38,7 @@
       <nav id="researchSubtabs" class="index-subtabs" aria-label="Stock research">
         <button class="index-subtab active" data-research-target="analyze" type="button" aria-selected="true">Analyze</button>
         <button class="index-subtab" data-research-target="scans" type="button" aria-selected="false">Scans</button>
+        <button class="index-subtab" data-research-target="pullbacks" type="button" aria-selected="false">F&amp;O Pullbacks</button>
         <button class="index-subtab" data-research-target="krishna" type="button" aria-selected="false">Krishna Setup</button>
         <button class="index-subtab" data-research-target="backtest" type="button" aria-selected="false">Backtest</button>
       </nav>
@@ -1703,9 +1704,13 @@
         </section>
 
         <section id="tab-backtest" class="tab-pane" data-tab-panel="backtest">
+          <nav class="index-subtabs" aria-label="Stock backtest type">
+            <button class="index-subtab active" data-backtest-target="generic" type="button" aria-selected="true">Generic Strategy Backtest</button>
+            <button class="index-subtab" data-backtest-target="krishna" type="button" aria-selected="false">Krishna Setup Backtest</button>
+          </nav>
           <section class="workspace">
             <aside class="sidebar">
-              <div class="panel">
+              <div class="panel" data-backtest-view="generic">
                 <label>Generic Strategy Backtest</label>
                 <div class="field-hint">Parameterized historical simulation using cached candles only.</div>
                 <label for="genericStrategySelect">Strategy</label>
@@ -1738,16 +1743,24 @@
                     <input id="genericBacktestToDate" type="date" />
                   </div>
                 </div>
-                <label for="genericLimitSymbols">Symbols Limit</label>
-                <input id="genericLimitSymbols" placeholder="50 or all" value="50" />
+                <label for="genericLimitSymbols" title="Maximum watchlist symbols in stored order, not top-ranked stocks or a trade limit. Explicit symbol lists bypass this limit. Use all for the complete watchlist.">Maximum watchlist symbols</label>
+                <input id="genericLimitSymbols" placeholder="all or a number" value="all" />
+                <div id="genericContextControls" hidden>
+                  <label class="check-row"><input id="genericMarketGate" type="checkbox" checked />Aligned market trend</label>
+                  <label for="genericBenchmark">Market benchmark</label>
+                  <select id="genericBenchmark"><option>NIFTY 50</option><option>NIFTY 100</option><option>NIFTY 200</option><option>NIFTY 500</option></select>
+                  <label class="check-row"><input id="genericSectorGate" type="checkbox" checked />Aligned sector trend</label>
+                  <label class="check-row" title="Require confirmed higher highs/higher lows for bullish context, lower highs/lower lows for bearish context, in addition to moving-average trend."><input id="genericStructureGate" type="checkbox" checked />Confirmed index swing structure</label>
+                </div>
                 <label for="genericStrategyParams">Strategy Params JSON</label>
                 <textarea id="genericStrategyParams" rows="5" spellcheck="false">{}</textarea>
                 <label for="genericBacktestParams">Backtest Params JSON</label>
                 <textarea id="genericBacktestParams" rows="7" spellcheck="false">{"entry":"next_open","holding_bars":5,"stop_type":"atr","stop_atr":1.5,"target_type":"risk_multiple","target_r_multiple":2}</textarea>
                 <button id="genericBacktestRunBtn" class="full-btn">Run strategy backtest</button>
+                <button id="genericBacktestExport" class="full-btn" disabled>Download full result</button>
               </div>
 
-              <div class="panel">
+              <div class="panel" data-backtest-view="krishna" hidden>
                 <label>Krishna Setup Backtest</label>
                 <div class="field-hint">Daily futures-style validation. Blank symbol tests the F&O watchlist; use cached daily candles.</div>
                 <label for="backtestSymbol">Symbol</label>
@@ -1793,10 +1806,11 @@
             </aside>
 
             <section class="content">
+              <section class="content" data-backtest-view="generic">
               <section class="activity-hero">
                 <div>
                   <h2>Generic Strategy Backtest</h2>
-                  <p>Runs selected setup rules through a no-lookahead futures-style simulation for historical validation.</p>
+                  <p>Underlying spot simulation</p>
                 </div>
                 <span id="genericBacktestMeta"></span>
               </section>
@@ -1809,6 +1823,7 @@
                 <div class="ops-body">
                   <div id="genericBacktestSummaryCards" class="compact-metrics"></div>
                   <div id="genericBacktestSummaryPoints" class="mini-list"></div>
+                  <div id="genericContextSummary" class="mini-list"></div>
                 </div>
               </section>
 
@@ -1898,9 +1913,11 @@
                 </div>
               </section>
 
+              </section>
+              <section class="content" data-backtest-view="krishna" hidden>
               <section class="activity-hero">
                 <div>
-                  <h2>Setup Backtest</h2>
+                  <h2>Krishna Setup Backtest</h2>
                   <p>Checks whether the Krishna daily setup had directional edge before option-selling rules are added.</p>
                 </div>
                 <span id="backtestMeta"></span>
@@ -2028,6 +2045,42 @@
                   </table>
                 </div>
               </section>
+              </section>
+            </section>
+          </section>
+        </section>
+
+        <section id="tab-pullbacks" class="tab-pane" data-tab-panel="pullbacks">
+          <section class="workspace">
+            <aside class="sidebar"><div class="panel">
+              <h2 class="nifty-settings-title">F&amp;O Pullback Scanners</h2>
+              <label for="pullbackFrame">Setup candles</label>
+              <select id="pullbackFrame"><option value="day">Daily</option><option value="60minute">1 hour</option><option value="15minute">15 min</option></select>
+              <label for="pullbackBenchmark">Market benchmark</label>
+              <select id="pullbackBenchmark"><option>NIFTY 50</option><option>NIFTY 100</option><option>NIFTY 200</option><option>NIFTY 500</option></select>
+              <label class="check-row"><input id="pullbackStructure" type="checkbox" checked />Confirmed index swing structure</label>
+              <div class="button-row"><button id="pullbackStart">Start paper alerts</button><button id="pullbackStop" disabled>Stop pullbacks</button></div>
+              <button id="pullbackStartAll" class="full-btn">Start indices + pullbacks</button>
+              <div id="pullbackTelegram" class="mini-status"></div>
+              <button id="pullbackTestTelegram" class="full-btn">Test pullback Telegram</button>
+              <button id="pullbackExport" class="full-btn">Download scanner log</button>
+              <div id="pullbackActionStatus" class="mini-status" role="status"></div>
+            </div></aside>
+            <section class="content">
+              <section class="table-panel">
+                <div class="panel-head"><h2>Pullback Paper Scanner</h2><span id="pullbackStatus">Stopped</span></div>
+                <div class="ops-body"><div id="pullbackMetrics" class="compact-metrics"></div><div id="pullbackRefresh" class="mini-status"></div><div id="pullbackErrors" class="mini-list"></div></div>
+              </section>
+              <section class="table-panel">
+                <div class="panel-head"><h2>Stock Decisions</h2><span id="pullbackDecisionCount"></span></div>
+                <div class="wide-table"><table class="readable-table"><thead><tr><th>Stock</th><th>Latest check</th><th>Time (IST)</th></tr></thead><tbody id="pullbackDecisions"></tbody></table></div>
+              </section>
+              <section class="table-panel">
+                <div class="panel-head"><h2>Waiting Setups &amp; Spot Trades</h2><span id="pullbackSetupCount"></span></div>
+                <div class="date-grid compact-controls"><div><label for="pullbackSide">Direction</label><select id="pullbackSide"><option value="all">Both</option><option value="long">Bullish</option><option value="short">Bearish</option></select></div><div><label for="pullbackState">Status</label><select id="pullbackState"><option value="all">All</option><option>waiting</option><option>open</option><option>closed</option><option>discarded</option></select></div></div>
+                <div class="wide-table"><table class="readable-table"><thead><tr><th>Stock / ID</th><th>Side / Frame</th><th>Status</th><th>Setup (IST)</th><th>Trigger / Stop / Target</th><th>Entry / time (IST)</th><th>Exit / time (IST)</th><th>Open time</th><th>Market / Sector</th><th>Reason</th></tr></thead><tbody id="pullbackSetups"></tbody></table></div>
+              </section>
+              <section class="table-panel"><div class="panel-head"><h2>Pullback Alert Delivery</h2></div><div class="wide-table"><table class="readable-table"><thead><tr><th>Stock</th><th>Trade ID</th><th>Event</th><th>Created (IST)</th><th>Telegram</th><th>Issue</th></tr></thead><tbody id="pullbackDelivery"></tbody></table></div></section>
             </section>
           </section>
         </section>
