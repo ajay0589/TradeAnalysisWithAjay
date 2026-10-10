@@ -15,6 +15,7 @@ from trading_analysis.index_scanner import IndexScannerService
 from trading_analysis.instrument_master_service import InstrumentMasterService
 from trading_analysis.all_index_monitor import AllIndexMonitor
 from trading_analysis.pullback_scanner import PullbackScanner
+from trading_analysis.nifty_lab.service import NiftySetupLab
 from trading_analysis.notifications.telegram import TelegramNotifier
 from trading_analysis.web_services import AnalysisService
 from trading_analysis import diagnostics
@@ -41,6 +42,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
     instrument_master_service = InstrumentMasterService(analysis_service=service)
     all_index_monitor = AllIndexMonitor(nifty_auto_service, index_scanner_service, instrument_master_service)
     pullback_scanner = PullbackScanner(service)
+    nifty_lab = NiftySetupLab(service)
 
     @diagnostics.audit_http
     def do_GET(self) -> None:
@@ -52,6 +54,17 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_file(WEB_ROOT / "app.css", "text/css; charset=utf-8")
             elif parsed.path == "/app.js":
                 self._send_file(WEB_ROOT / "app.js", "application/javascript; charset=utf-8")
+            elif parsed.path == "/nifty-lab.js":
+                self._send_file(WEB_ROOT / "nifty-lab.js", "application/javascript; charset=utf-8")
+            elif parsed.path == "/api/nifty-lab/status":
+                self._send_json(self.nifty_lab.status(parse_qs(parsed.query).get("date", [None])[0]))
+            elif parsed.path == "/api/nifty-lab/export":
+                params = parse_qs(parsed.query)
+                report = self.nifty_lab.export(params.get("date", [None])[0])
+                if params.get("format") == ["zip"]:
+                    self._send_zip(report, "nifty-setup-lab")
+                else:
+                    self._send_json(report)
             elif parsed.path == "/api/health":
                 self._send_json({"status": "ok", **diagnostics.runtime(), "port": self.server.server_port})
             elif parsed.path == "/api/pullbacks/status":
@@ -63,6 +76,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 report = diagnostics.export(params.get("date", [None])[0])
                 report["scanners"] = diagnostics.clean(self.all_index_monitor.diagnostics(report["date"]))
                 report["pullbacks"] = diagnostics.clean(self.pullback_scanner.export())
+                report["nifty_setup_lab"] = self.nifty_lab.export(report["date"])
                 if params.get("format") == ["zip"]:
                     self._send_zip(report, "trading-app-log")
                 else:
@@ -551,6 +565,14 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         to_date=payload.get("to_date") or None,
                     )
                 )
+            elif parsed.path == "/api/nifty-lab/start":
+                payload = self._read_json()
+                self._send_json(self.nifty_lab.start(payload.get("setup"), payload.get("telegram_enabled", False)))
+            elif parsed.path == "/api/nifty-lab/stop":
+                self._send_json(self.nifty_lab.stop(self._read_json().get("setup")))
+            elif parsed.path == "/api/nifty-lab/test-telegram":
+                self._read_json()
+                self._send_json(TelegramNotifier.from_env("NIFTY_LAB_").send_message("NIFTY Setup Lab TEST. Paper experiments only, not a trade alert."))
             elif parsed.path in {"/api/pullbacks/start", "/api/pullbacks/start-all"}:
                 payload = self._read_json()
                 was_running = self.pullback_scanner.status()["running"]

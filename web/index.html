@@ -30,6 +30,7 @@
       <nav class="activity-tabs" aria-label="Decision desk activities">
         <button class="tab-btn active" data-tab-target="research" type="button">Stock Research</button>
         <button class="tab-btn" data-tab-target="indices" type="button">Index Scanning</button>
+        <button class="tab-btn" data-tab-target="nifty-lab" type="button">NIFTY Setup Lab</button>
         <button class="tab-btn" data-tab-target="purple" type="button">Purple Touch</button>
         <button class="tab-btn" data-tab-target="data" type="button">Data Ops</button>
         <button class="tab-btn" data-tab-target="reports" type="button">Reports</button>
@@ -417,6 +418,52 @@
           </section>
         </section>
 
+        <section id="tab-nifty-lab" class="tab-pane" data-tab-panel="nifty-lab">
+          <div class="lab-content">
+            <header class="lab-heading"><div><h2>NIFTY Setup Lab</h2><span class="muted">Intraday paper observations / NIFTY spot / IST</span></div><strong id="labStatus" role="status">Not loaded</strong></header>
+            <div class="lab-controls">
+              <button id="labStartAll" type="button">Start all five</button><button id="labStopAll" type="button" disabled>Stop all five</button>
+              <label class="lab-check"><input id="labTelegram" type="checkbox"> Telegram paper alerts</label>
+              <button id="labTestTelegram" type="button">Send test</button><span id="labTelegramStatus" class="muted"></span>
+              <label>Session (IST)<input id="labDate" type="date"></label>
+              <a id="labDownload" class="lab-download" href="/api/nifty-lab/export?format=zip" download>Download trades &amp; logs (.zip)</a>
+              <button id="labCsv" type="button">Download trades (.csv)</button>
+            </div>
+            <p id="labAction" role="status" class="lab-status"></p>
+            <div class="lab-scroll"><table class="readable-table lab-comparison"><thead><tr><th>Setup</th><th>Monitor</th><th>Started / stopped (IST)</th><th>Last check / candle (IST)</th><th>Technical only<br>Closed / win % / net R</th><th>Technical + options<br>Closed / win % / net R</th><th>Controls</th></tr></thead><tbody id="labOverview"></tbody></table></div>
+            <details class="lab-details"><summary>Shared data &amp; option evidence <span id="labDataSummary" class="muted"></span></summary>
+              <p id="labFeeds"></p>
+              <div class="lab-scroll"><table class="readable-table"><thead><tr><th>Source</th><th>Status</th><th>Latest candle / observation (IST)</th><th>Expected closed candle (IST)</th></tr></thead><tbody id="labFreshness"></tbody></table></div>
+              <div class="lab-scroll"><table class="readable-table"><thead><tr><th>Window</th><th>Direction hypothesis</th><th>Matched / coverage</th><th>From / to (IST)</th><th>Evidence</th></tr></thead><tbody id="labOptions"></tbody></table></div>
+              <p class="muted">Option price/OI interpretations are hypotheses, not identified buyers or sellers. Premiums also reflect volatility and time decay.</p>
+            </details>
+            <nav class="lab-tabs" aria-label="NIFTY setups">
+              <button type="button" data-lab-setup="Nifty_Setup1" class="active" aria-selected="true">Nifty_Setup1</button>
+              <button type="button" data-lab-setup="Nifty_Setup2" aria-selected="false">Nifty_Setup2</button>
+              <button type="button" data-lab-setup="Nifty_Setup3" aria-selected="false">Nifty_Setup3</button>
+              <button type="button" data-lab-setup="Nifty_Setup4" aria-selected="false">Nifty_Setup4</button>
+              <button type="button" data-lab-setup="Nifty_Setup5" aria-selected="false">Nifty_Setup5</button>
+            </nav>
+            <section class="lab-section"><h3 id="labSetupTitle">EMA pullback</h3><p id="labRules"></p>
+              <p class="muted">1 ATR stop / 2R target / maximum 90 minutes / last entry 14:30 / session exit 15:20 IST. Cost assumption: 2 bps per side.</p>
+              <div id="labMetrics" class="lab-scroll"></div>
+              <div class="lab-chart-heading"><h4>Session cumulative net R</h4><span><i class="lab-key technical"></i> Technical only <i class="lab-key combined"></i> Technical + options</span></div>
+              <canvas id="labCurve" width="1100" height="210" aria-label="Cumulative net R for both variants" role="img"></canvas>
+              <p id="labSample" class="muted"></p>
+            </section>
+            <section class="lab-section"><div class="lab-heading"><h3>Trades</h3><div class="lab-controls">
+              <label>Variant<select id="labVariant"><option value="all">Both variants</option><option value="technical">Technical only</option><option value="combined">Technical + options</option></select></label>
+              <label>Status<select id="labTradeState"><option value="all">All</option><option value="open">Open</option><option value="closed">Closed</option></select></label>
+            </div></div>
+              <div class="lab-scroll"><table class="readable-table"><thead><tr><th>Trade / variant</th><th>Direction / status</th><th>Entry (IST)</th><th>Entry spot</th><th>Exit (IST)</th><th>Exit spot</th><th>Open time</th><th>Stop / target</th><th>Net R</th><th>Result basis / reason</th><th>Telegram</th></tr></thead><tbody id="labTrades"></tbody></table></div>
+              <div class="lab-controls"><button id="labPrev" type="button" title="Previous trades" aria-label="Previous trades">&#8592;</button><span id="labPage"></span><button id="labNext" type="button" title="Next trades" aria-label="Next trades">&#8594;</button></div>
+            </section>
+            <details class="lab-details"><summary>Signal decisions <span id="labDecisionCount" class="muted"></span></summary>
+              <div class="lab-scroll"><table class="readable-table"><thead><tr><th>Checked (IST)</th><th>Candle close (IST)</th><th>Technicals</th><th>Technical result</th><th>Combined result</th><th>Evidence</th></tr></thead><tbody id="labDecisions"></tbody></table></div>
+            </details>
+            <details class="lab-details"><summary>Monitor events</summary><div id="labEvents" class="lab-event-list"></div></details>
+          </div>
+        </section>
         <section id="tab-indices" class="tab-pane" data-tab-panel="indices">
           <section class="index-monitor-band">
             <div class="index-monitor-inner">
@@ -2201,5 +2248,6 @@
 
     </main>
     <script src="/app.js"></script>
+    <script src="/nifty-lab.js"></script>
   </body>
 </html>

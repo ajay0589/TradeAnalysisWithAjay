@@ -1362,3 +1362,42 @@ tr:last-child td {
     grid-template-columns: 1fr;
   }
 }
+.lab-content { padding: 20px 24px; min-width: 0; }
+.lab-heading, .lab-chart-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.lab-heading h2, .lab-heading h3, .lab-chart-heading h4 { margin: 0 0 6px; }
+.lab-heading h2 { font-size: 22px; }
+.lab-section h3 { font-size: 18px; }
+.lab-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 12px 0; }
+.lab-controls label:not(.lab-check) { display: grid; gap: 4px; font-size: 12px; }
+.lab-check { display: flex; gap: 6px; align-items: center; align-self: center; }
+.lab-check input { width: 16px; height: 16px; }
+.lab-download { padding: 10px 0; }
+.lab-status { min-height: 20px; color: #984a13; overflow-wrap: anywhere; }
+.lab-scroll { width: 100%; overflow: auto; }
+.lab-scroll table { min-width: 850px; width: 100%; }
+.lab-comparison { min-width: 1250px !important; }
+.lab-comparison td:first-child { min-width: 155px; }
+.lab-comparison td:last-child { min-width: 140px; }
+.lab-comparison button { margin: 3px; }
+.lab-details { border-bottom: 1px solid var(--line); padding: 14px 0; }
+.lab-details summary { cursor: pointer; font-weight: 600; }
+.lab-details summary span { font-weight: 400; margin-left: 12px; }
+.lab-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); margin-top: 24px; }
+.lab-tabs button { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; }
+.lab-tabs button.active { border-bottom-color: #137967; color: #106150; font-weight: 700; }
+.lab-section { padding: 18px 0; border-bottom: 1px solid var(--line); }
+.lab-chart-heading { margin-top: 20px; font-size: 12px; }
+.lab-key { display: inline-block; width: 16px; height: 3px; margin: 0 4px 3px 10px; }
+.lab-key.technical { background: #137967; }
+.lab-key.combined { background: #bd541c; }
+#labCurve { display: block; width: 100%; height: 210px; background: white; }
+.lab-event-list { max-height: 320px; overflow: auto; }
+.lab-event-list p { padding: 8px 0; margin: 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.lab-content .muted { color: var(--muted); }
+.lab-content .cell-note { max-width: 340px; overflow-wrap: anywhere; }
+.lab-details pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 450px; max-height: 300px; overflow: auto; }
+@media (max-width: 600px) {
+  .lab-content { padding: 16px 12px; }
+  .lab-tabs button { padding: 10px 8px; font-size: 12px; }
+  .lab-controls select, .lab-controls input { max-width: 100%; }
+}

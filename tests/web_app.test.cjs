@@ -27,7 +27,7 @@ function element(attributes = {}) {
   };
 }
 
-function app() {
+function app(includeLab = false) {
   const nodes = [...html.matchAll(/<[a-z][^>]*>/gi)].map(([tag]) => {
     const attrs = Object.fromEntries([...tag.matchAll(/([\w-]+)="([^"]*)"/g)].map((m) => [m[1], m[2]]));
     return element(attrs);
@@ -44,7 +44,7 @@ function app() {
     createElement: () => element(),
   };
   const context = vm.createContext({
-    document, console, URL, URLSearchParams, Blob, Intl, Date,
+    document, console, URL, URLSearchParams, Blob, Intl, Date, confirm: () => true,
     setInterval: () => 1, clearInterval() {}, setTimeout: () => 1, clearTimeout() {},
     window: { setInterval: () => 1, clearInterval() {}, addEventListener: (name, fn) => { events[name] = fn; } },
     localStorage: { getItem: () => null, setItem() {} },
@@ -52,6 +52,7 @@ function app() {
       resolve: (body, ok = true) => resolve({ ok, json: async () => body })})); },
   });
   vm.runInContext(source, context, { filename: "web/app.js" });
+  if (includeLab) vm.runInContext(fs.readFileSync(path.join(root, "web/nifty-lab.js"), "utf8"), context, {filename: "web/nifty-lab.js"});
   return {context, requests, ids, events, run: (code) => vm.runInContext(code, context)};
 }
 
@@ -312,4 +313,63 @@ test("pullback navigation loads status but cannot start live scans", () => {
   assert.equal(ui.ids.get("tab-pullbacks").classList.contains("active"), true);
   assert.ok(ui.requests.some(r => r.url === "/api/pullbacks/status"));
   assert.equal(ui.requests.some(r => r.url === "/api/pullbacks/start"), false);
+});
+
+test("NIFTY Lab navigation is separate and never starts scanners", async () => {
+  const ui = app(true);
+  ui.context.activateTab("nifty-lab");
+  const pending = ui.context.loadNiftyLab();
+  ui.context.renderNiftyLab = () => {};
+  ui.requests.find(r => r.url.startsWith("/api/nifty-lab/status")).resolve({date:ui.ids.get("labDate").value});
+  await pending;
+  assert.equal(ui.ids.get("tab-nifty-lab").classList.contains("active"), true);
+  assert.equal(ui.ids.get("tab-indices").classList.contains("active"), false);
+  assert.equal(ui.ids.get("notes").hidden, true);
+  assert.equal(ui.requests.some(r => r.url.includes("/nifty-lab/start")), false);
+});
+
+test("Lab filters and pagination keep setup and variant ledgers separate", () => {
+  const ui = app(true);
+  const trades = Array.from({length:45}, (_, i) => ({id:`NL-${i}`, setup:"Nifty_Setup1", variant:"technical", status:"closed", entry_price:100, entry_time:"2026-10-08T10:00:00+05:30", exit_price:110, exit_time:"2026-10-08T10:10:00+05:30", open_seconds:600, net_r:1, performance_eligible:true}));
+  trades.push({id:"NL-OTHER", setup:"Nifty_Setup2", variant:"combined", status:"open"});
+  ui.run(`niftyLab.data = ${JSON.stringify({trades, delivery:[]})}`);
+  ui.ids.get("labVariant").value = "technical";
+  ui.ids.get("labTradeState").value = "all";
+  ui.context.renderLabTrades();
+  assert.equal(ui.ids.get("labPage").textContent, "Page 1 of 3 / 45 trades");
+  assert.equal(ui.ids.get("labTrades").innerHTML.includes("NL-OTHER"), false);
+  ui.ids.get("labNext").handlers.click();
+  assert.equal(ui.ids.get("labPage").textContent, "Page 2 of 3 / 45 trades");
+  ui.ids.get("labVariant").value = "combined";
+  ui.ids.get("labVariant").handlers.change();
+  assert.equal(ui.ids.get("labPage").textContent, "Page 1 of 1 / 0 trades");
+});
+
+test("Lab date change rejects older responses and export uses selected session", async () => {
+  const ui = app(true);
+  ui.context.activateTab("nifty-lab");
+  ui.context.renderNiftyLab = () => {};
+  ui.ids.get("labDate").value = "2026-10-08";
+  const first = ui.context.loadNiftyLab();
+  ui.ids.get("labDate").value = "2026-10-07";
+  ui.ids.get("labDate").handlers.change();
+  ui.requests.find(r => r.url.endsWith("date=2026-10-08")).resolve({date:"2026-10-08"});
+  await first;
+  assert.equal(ui.run("niftyLab.data"), null);
+  const second = ui.requests.find(r => r.url.endsWith("date=2026-10-07"));
+  assert.ok(second);
+  second.resolve({date:"2026-10-07"});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.run("niftyLab.data.date"), "2026-10-07");
+  assert.equal(ui.ids.get("labDownload").href, "/api/nifty-lab/export?date=2026-10-07&format=zip");
+});
+
+test("Lab start-all targets only the lab and Telegram is opt-in", async () => {
+  const ui = app(true);
+  const pending = ui.context.controlNiftyLab("start");
+  const request = ui.requests.find(r => r.url === "/api/nifty-lab/start");
+  assert.deepEqual(JSON.parse(request.options.body), {setup:null, telegram_enabled:false});
+  request.resolve({});
+  await pending;
+  assert.equal(ui.requests.some(r => /index-scanners\/start|pullbacks\/start|nifty\/auto\/start/.test(r.url)), false);
 });

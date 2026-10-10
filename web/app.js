@@ -61,7 +61,7 @@ function activateTab(name) {
     name = "research";
   }
   const panelName = name === "research" ? state.research.active : name;
-  $("notes").hidden = ["backtest", "pullbacks"].includes(panelName);
+  $("notes").hidden = ["backtest", "pullbacks", "nifty-lab"].includes(panelName);
   if (panelName === "pullbacks") {
     loadPullbacks();
     if (!state.pullbacks.pollTimer) state.pullbacks.pollTimer = setInterval(loadPullbacks, 5000);
