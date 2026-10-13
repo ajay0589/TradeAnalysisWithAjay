@@ -402,9 +402,13 @@ class AnalysisService:
             )
             self._purple_refresh_thread.start()
             self._purple_monitor_thread.start()
+            from trading_analysis.live_quotes import LIVE_QUOTES
+            LIVE_QUOTES.acquire("PURPLE_TOUCH")
         return self.purple_monitor_status()
 
     def stop_purple_monitor(self) -> dict[str, Any]:
+        from trading_analysis.live_quotes import LIVE_QUOTES
+        LIVE_QUOTES.release("PURPLE_TOUCH")
         self._purple_stop_event.set()
         with self._purple_monitor_lock:
             self._purple_monitor_state["running"] = False

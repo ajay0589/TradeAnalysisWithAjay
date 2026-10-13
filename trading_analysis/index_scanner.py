@@ -17,6 +17,7 @@ from trading_analysis.live_quotes import LIVE_QUOTES
 from trading_analysis.live_timing import expected_closed_bar, prepare_live_entry, live_quote_exit, price_closed_exit
 from trading_analysis.option_history import OptionHistory
 from trading_analysis.notifications.outbox import AlertOutbox
+from trading_analysis.trade_context import capture_vix, result_mark
 
 from trading_analysis.brokers.zerodha import load_instruments_csv, merge_candles_csv, resolve_instrument_token
 from trading_analysis.candles import candle_path, candle_window, fetch_interval
@@ -138,7 +139,7 @@ class IndexScanRepository:
                 VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (trade_id, symbol, signal["horizon"], signal["direction"], candle_time, stamp,
                   signal["entry_price"], signal["stop_level"], signal["target_level"], signal["score"],
-                  candle_time, json.dumps(signal.get("metadata") or {}, default=str), stamp, stamp))
+                  candle_time, json.dumps({**(signal.get("metadata") or {}), "india_vix_entry": capture_vix(stamp)}, default=str), stamp, stamp))
             if not cursor.rowcount:
                 return None
             return dict(conn.execute("SELECT * FROM index_scan_trades WHERE trade_id = ?", (trade_id,)).fetchone())
@@ -165,6 +166,7 @@ class IndexScanRepository:
                 exit_reason = ?, open_seconds = ?, updated_at = ? WHERE trade_id = ?""",
                 (exit_time, float(outcome["price"]), outcome["reason"], duration, _iso(), trade_id))
             context = {**json.loads(row["context_json"] or "{}"), **(outcome.get("metadata") or {})}
+            context["india_vix_exit"] = capture_vix(exit_time)
             conn.execute("UPDATE index_scan_trades SET context_json = ? WHERE trade_id = ?", (json.dumps(context, default=str), trade_id))
             return dict(conn.execute("SELECT * FROM index_scan_trades WHERE trade_id = ?", (trade_id,)).fetchone())
 
@@ -184,6 +186,8 @@ class IndexScanRepository:
                 "SELECT * FROM index_scan_alerts WHERE symbol = ? ORDER BY id DESC LIMIT 100", (symbol,)).fetchall()]
         for row in trades:
             row["context"] = json.loads(row.pop("context_json") or "{}")
+            row["result"] = result_mark(row["entry_price"], row["direction"], row["status"], row["exit_price"],
+                                        LIVE_QUOTES.get(symbol), exit_time=row["exit_time"])
         return {"trades": trades, "alerts": alerts}
 
     def start_run(self, symbol: str, total_steps: int) -> int:

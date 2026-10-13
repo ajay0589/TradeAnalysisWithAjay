@@ -16,6 +16,7 @@ from trading_analysis.instrument_master_service import InstrumentMasterService
 from trading_analysis.all_index_monitor import AllIndexMonitor
 from trading_analysis.pullback_scanner import PullbackScanner
 from trading_analysis.nifty_lab.service import NiftySetupLab
+from trading_analysis.scanner_dashboard import ScannerDashboard
 from trading_analysis.notifications.telegram import TelegramNotifier
 from trading_analysis.web_services import AnalysisService
 from trading_analysis import diagnostics
@@ -56,6 +57,15 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_file(WEB_ROOT / "app.js", "application/javascript; charset=utf-8")
             elif parsed.path == "/nifty-lab.js":
                 self._send_file(WEB_ROOT / "nifty-lab.js", "application/javascript; charset=utf-8")
+            elif parsed.path in {"/scanner-dashboard.js", "/table-pagination.js"}:
+                self._send_file(WEB_ROOT / parsed.path[1:], "application/javascript; charset=utf-8")
+            elif parsed.path == "/api/scanner-dashboard":
+                self._send_json(ScannerDashboard(self).status())
+            elif parsed.path == "/api/trade-ledger":
+                params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+                if set(params) - {"source", "status", "from_date", "to_date", "date_basis", "page"}:
+                    raise ValueError("Unknown trade filter")
+                self._send_json(ScannerDashboard(self).ledger(**params))
             elif parsed.path == "/api/nifty-lab/status":
                 self._send_json(self.nifty_lab.status(parse_qs(parsed.query).get("date", [None])[0]))
             elif parsed.path == "/api/nifty-lab/export":
@@ -195,7 +205,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(
                     self.service.krishna_purple_touch_alerts(
                         limit=_optional_int(params.get("limit", ["50"])[0]) or 50,
-                        page_size=_optional_int(params.get("page_size", ["25"])[0]) or 25,
+                        page_size=_optional_int(params.get("page_size", ["10"])[0]) or 10,
                         entry_page=_optional_int(params.get("entry_page", ["1"])[0]) or 1,
                         exit_page=_optional_int(params.get("exit_page", ["1"])[0]) or 1,
                         trade_page=_optional_int(params.get("trade_page", ["1"])[0]) or 1,
@@ -231,7 +241,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(
                     self.service.krishna_purple_setups(
                         page=_optional_int(params.get("page", ["1"])[0]) or 1,
-                        page_size=_optional_int(params.get("page_size", ["25"])[0]) or 25,
+                        page_size=_optional_int(params.get("page_size", ["10"])[0]) or 10,
                         profile=params.get("profile", [None])[0] or None,
                         status=params.get("status", [None])[0] or None,
                         symbol=params.get("symbol", [None])[0] or None,

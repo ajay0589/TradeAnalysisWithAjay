@@ -61,7 +61,7 @@ function activateTab(name) {
     name = "research";
   }
   const panelName = name === "research" ? state.research.active : name;
-  $("notes").hidden = ["backtest", "pullbacks", "nifty-lab"].includes(panelName);
+  $("notes").hidden = ["backtest", "pullbacks", "nifty-lab", "dashboard"].includes(panelName);
   if (panelName === "pullbacks") {
     loadPullbacks();
     if (!state.pullbacks.pollTimer) state.pullbacks.pollTimer = setInterval(loadPullbacks, 5000);
@@ -70,6 +70,7 @@ function activateTab(name) {
     state.pullbacks.pollTimer = null;
   }
   state.activeTab = panelName;
+  if (name === "dashboard" && typeof loadScannerDashboard === "function") loadScannerDashboard();
   document.querySelectorAll("[data-tab-target]").forEach((button) => {
     const active = button.dataset.tabTarget === name;
     button.classList.toggle("active", active);
@@ -195,7 +196,7 @@ function renderPullbacks(data) {
   $("pullbackDecisions").innerHTML = (data.decisions || []).map((r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.reason)}</td><td>${fmtDateTime(r.checked_at)}</td></tr>`).join("");
   const rows = (data.setups || []).filter((r) => ($("pullbackSide").value === "all" || r.side === $("pullbackSide").value) && ($("pullbackState").value === "all" || r.status === $("pullbackState").value));
   $("pullbackSetupCount").textContent = `${rows.length} shown / ${data.setup_total} total`;
-  $("pullbackSetups").innerHTML = rows.map((r) => `<tr><td>${escapeHtml(r.symbol)}<div class="cell-note">${escapeHtml(r.id)}</div></td><td>${escapeHtml(r.side)} / ${escapeHtml(r.timeframe)}</td><td>${escapeHtml(r.status)}</td><td>${fmtDateTime(r.signal_time)}</td><td>${fmt(r.trigger)} / ${fmt(r.stop)} / ${fmt(r.target)}</td><td>${fmt(r.entry_price)}<br>${fmtDateTime(r.entry_time)}</td><td>${fmt(r.exit_price)}<br>${fmtDateTime(r.exit_time)}</td><td>${r.entry_time ? formatSeconds(r.open_seconds ?? (Date.now() - parseDateTime(r.entry_time)) / 1000) : "-"}</td><td>${Object.values(r.context?.evidence || {}).map((e) => escapeHtml(`${e.index}: ${e.direction}`)).join("<br>")}</td><td>${escapeHtml(r.discard_reason || r.exit_reason || "-")}</td></tr>`).join("");
+  $("pullbackSetups").innerHTML = rows.map((r) => `<tr><td>${escapeHtml(r.symbol)}<div class="cell-note">${escapeHtml(r.id)}</div></td><td>${escapeHtml(r.side)} / ${escapeHtml(r.timeframe)}</td><td>${escapeHtml(r.status)}</td><td>${fmtDateTime(r.signal_time)}</td><td>${fmt(r.trigger)} / ${fmt(r.stop)} / ${fmt(r.target)}</td><td>${fmt(r.entry_price)}<br>${fmtDateTime(r.entry_time)}</td><td>${fmt(r.exit_price)}<br>${fmtDateTime(r.exit_time)}</td><td>${r.entry_time ? formatSeconds(r.open_seconds ?? (Date.now() - parseDateTime(r.entry_time)) / 1000) : "-"}</td><td>${vixCell(r.india_vix_entry)}</td><td>${vixCell(r.india_vix_exit)}</td><td>${Object.values(r.context?.evidence || {}).map((e) => escapeHtml(`${e.index}: ${e.direction}`)).join("<br>")}</td><td>${escapeHtml(r.discard_reason || r.exit_reason || "-")}</td></tr>`).join("");
   $("pullbackDelivery").innerHTML = (data.delivery || []).map((r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.trade_id)}</td><td>${escapeHtml(r.event_kind)}</td><td>${fmtDateTime(r.created_at)}</td><td>${escapeHtml(r.status)}</td><td>${escapeHtml(r.error || "-")}</td></tr>`).join("");
 }
 
@@ -229,7 +230,7 @@ const PURPLE_PROFILE_ANALYSIS_DETAILS = {
   day: "Analyzing Daily touch, Weekly confirmation, 10-minute early/exit, and 30-minute final-entry rules.",
 };
 
-const PURPLE_PAGE_SIZE = 25;
+const PURPLE_PAGE_SIZE = 10;
 const PURPLE_PROFILE_ORDER = { month: 0, week: 1, day: 2 };
 
 const OPPORTUNITY_LABELS = {
@@ -497,7 +498,6 @@ function renderFiiDii(data) {
   const columns = Object.keys(rows[0]).slice(0, 6);
   $("fiiDiiHead").innerHTML = `<tr>${columns.map((key) => `<th>${key}</th>`).join("")}</tr>`;
   $("fiiDiiBody").innerHTML = rows
-    .slice(0, 6)
     .map((row) => `<tr>${columns.map((key) => `<td>${row[key] || "-"}</td>`).join("")}</tr>`)
     .join("");
 }
@@ -2040,11 +2040,12 @@ function renderPurpleAlerts(data = null) {
           <td>${fmt(trade.entry_price)}</td>
           <td>${fmt(trade.exit_price)}</td>
           <td>${escapeHtml(trade.exit_timeframe || "-")}</td>
+          <td>${vixCell(trade.metadata?.india_vix_entry)}</td><td>${vixCell(trade.metadata?.india_vix_exit)}</td>
         </tr>
       `,
     )
     .join("")
-    : emptyTableRow(11, "No open or closed entry trades match these filters.");
+    : emptyTableRow(13, "No open or closed entry trades match these filters.");
   document.querySelectorAll("#purpleExitAlertsBody .linkBtn").forEach((button) => {
     button.addEventListener("click", () => {
       $("symbolInput").value = button.dataset.symbol;
@@ -2232,7 +2233,7 @@ function renderPurpleBacktest(data) {
     : emptyTableRow(6, "No coverage rows are available.");
   const trades = data.trades || [];
   $('purpleBacktestTradesBody').innerHTML = trades.length
-    ? trades.slice(0, 250).map((trade) => `
+    ? trades.map((trade) => `
       <tr>
         <td>${escapeHtml(trade.symbol)}</td>
         <td>${escapeHtml(purpleProfileLabel(trade.profile))}</td>
@@ -2451,7 +2452,7 @@ function renderGenericBacktestMonthly(rows) {
 }
 
 function renderGenericBacktestTrades(rows) {
-  const shown = rows.slice(0, 200);
+  const shown = rows;
   $("genericBacktestTradeMeta").textContent = `${shown.length} shown / ${rows.length} trade(s)`;
   $("genericBacktestTradeBody").innerHTML = shown
     .map((row) => {
@@ -2625,7 +2626,7 @@ function renderBacktestMonthly(rows) {
 }
 
 function renderBacktestTrades(rows) {
-  const shown = rows.slice(0, 200);
+  const shown = rows;
   $("backtestTradeMeta").textContent = `${shown.length} shown / ${rows.length} trade(s)`;
   $("backtestTradeBody").innerHTML = shown
     .map((row) => {
@@ -3404,7 +3405,6 @@ function renderNiftyAutoStatus(data) {
     .map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${value}</strong></div>`)
     .join("");
   $("niftyAutoJobBody").innerHTML = (data.recent_jobs || [])
-    .slice(0, 12)
     .map((job) => `
       <tr>
         <td>${job.job_name}</td>
@@ -3489,6 +3489,7 @@ function renderNiftyTrades(data) {
       `${fmtPct(row.win_rate)} / ${fmtInt(row.trades)} trades`,
     ]),
   ].map(([label, value]) => `<div class="compact-metric"><span>${label}</span><strong>${value}</strong></div>`).join("");
+  if (typeof loadTradeLedger === "function") { loadTradeLedger("nifty"); return; }
   $("niftyTradesBody").innerHTML = (data.trades || []).map((trade) => `
     <tr>
       <td>${trade.trade_id}</td>
@@ -3509,6 +3510,12 @@ function signalPriceCell(price, metadata = {}, event = "entry") {
   const reference = event === "entry" ? m.reference_price : m.exit_reference_price;
   const delay = event === "entry" ? m.signal_delay_seconds : m.exit_delay_seconds;
   return `${fmt(price)}<div class="cell-note">${escapeHtml(statusLabel(basis || "legacy_candle_reference"))}${reference == null ? "" : `<br>Reference ${fmt(reference)}`}${delay == null ? "" : `<br>Delay ${fmt(delay, 0)}s`}</div>`;
+}
+
+function vixCell(snapshot) {
+  if (!snapshot) return '<span class="cell-note">Not recorded</span>';
+  if (snapshot.value == null) return `<span class="cell-note">Unavailable<br>${fmtDateTime(snapshot.captured_at)}</span>`;
+  return `${fmt(snapshot.value)}<div class="cell-note">${fmtDateTime(snapshot.quote_time)}</div>`;
 }
 
 function formatSeconds(value) {
@@ -3990,7 +3997,8 @@ function renderIndexScanner(data) {
   $("indexScannerLeadersMeta").textContent = data.profile.source_date ? `Weights as of ${data.profile.source_date}` : "Selected leaders, unweighted";
   $("indexScannerLeaders").innerHTML = leaders.length ? leaders.map((row) => `<tr><td>${escapeHtml(row.symbol)}</td><td>${row.weight_pct == null ? "-" : fmtPct(row.weight_pct)}</td><td>${escapeHtml(row.technical_bias)}</td><td>${escapeHtml(row.option_bias)}</td><td>${fmtPct(row.change_pct)}</td><td>${fmtInt(row.put_oi_change)}</td><td>${fmtInt(row.call_oi_change)}</td></tr>`).join("") : indexScannerTableRow("No constituent analysis yet", 7);
   $("indexScannerAlerts").innerHTML = (history.alerts || []).length ? history.alerts.map((row) => `<tr><td>${fmtDateTime(row.created_at)}</td><td>${escapeHtml(row.horizon)}</td><td>${escapeHtml(row.event_kind)}</td><td>${escapeHtml(row.trade_id)}</td><td>${escapeHtml(row.telegram_status)}${row.telegram_error ? `<div class="cell-note points-negative">${escapeHtml(row.telegram_error)}</div>` : ""}</td></tr>`).join("") : indexScannerTableRow("No alerts yet", 5);
-  $("indexScannerTrades").innerHTML = (history.trades || []).length ? history.trades.map((row) => `<tr><td>${escapeHtml(row.trade_id)}</td><td>${escapeHtml(row.horizon)}</td><td>${escapeHtml(row.direction)}</td><td>${signalPriceCell(row.entry_price, row.context, "entry")}</td><td>${fmtDateTime(row.entry_time)}</td><td>${signalPriceCell(row.exit_price, row.context, "exit")}</td><td>${fmtDateTime(row.exit_time)}</td><td>${row.open_seconds == null ? "Open" : escapeHtml(durationMinutes(row.open_seconds / 60))}</td><td>${escapeHtml(row.status)}</td></tr>`).join("") : indexScannerTableRow("No trades yet", 9);
+  if (typeof loadTradeLedger === "function") loadTradeLedger("index");
+  else $("indexScannerTrades").innerHTML = (history.trades || []).length ? history.trades.map((row) => `<tr><td>${escapeHtml(row.trade_id)}</td><td>${escapeHtml(row.horizon)}</td><td>${escapeHtml(row.direction)}</td><td>${signalPriceCell(row.entry_price, row.context, "entry")}</td><td>${fmtDateTime(row.entry_time)}</td><td>${signalPriceCell(row.exit_price, row.context, "exit")}</td><td>${fmtDateTime(row.exit_time)}</td><td>${row.open_seconds == null ? "Open" : escapeHtml(durationMinutes(row.open_seconds / 60))}</td><td>${escapeHtml(row.status)}</td></tr>`).join("") : indexScannerTableRow("No trades yet", 9);
   const errors = result.errors || data.errors || [];
   $("indexScannerErrorCount").textContent = `${errors.length} issue(s)`;
   $("indexScannerErrors").innerHTML = errors.length ? errors.map((message) => `<div>${escapeHtml(message)}</div>`).join("") : "No data issues reported";

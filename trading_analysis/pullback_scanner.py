@@ -12,6 +12,8 @@ from trading_analysis.brokers.zerodha import merge_candles_csv, resolve_instrume
 from trading_analysis.candles import candle_path
 from trading_analysis.data_sources.csv_loader import load_candles
 from trading_analysis.live_timing import IST, as_ist, expected_closed_bar, quote_is_fresh
+from trading_analysis.live_quotes import LIVE_QUOTES
+from trading_analysis.trade_context import capture_vix
 from trading_analysis.nifty.live_scanner import closed_candles
 from trading_analysis.notifications.outbox import AlertOutbox
 from trading_analysis.notifications.telegram import TelegramNotifier
@@ -125,6 +127,7 @@ class PullbackScanner:
             self._seen.clear()
             self._stop.clear()
             self.state.update(running=True, phase="starting", started_at=now.isoformat(), stopped_at=None, errors=[])
+            LIVE_QUOTES.acquire("PULLBACKS")
             self._threads = [threading.Thread(target=self._loop, args=(self.refresh, 20), daemon=True, name="pullback-candles"),
                              threading.Thread(target=self._loop, args=(self.cycle, 15), daemon=True, name="pullback-checker")]
             for thread in self._threads:
@@ -135,6 +138,7 @@ class PullbackScanner:
     def stop(self):
         with self._lock:
             self._stop.set()
+            LIVE_QUOTES.release("PULLBACKS")
             self.state.update(running=False, phase="stopping" if any(t.is_alive() for t in self._threads) else "stopped",
                               stopped_at=datetime.now(IST).isoformat())
         return self.status()
@@ -300,7 +304,7 @@ class PullbackScanner:
         previous = row["status"]
         price = float(quote["price"])
         sign = 1 if row["side"] == "long" else -1
-        row.update(last_price=price, last_checked=now.isoformat())
+        row.update(last_price=price, last_checked=now.isoformat(), last_quote=dict(quote))
         event = None
         if previous == "open":
             reason = "stop" if (price - row["stop"]) * sign <= 0 else "target" if (price - row["target"]) * sign >= 0 else None
@@ -346,6 +350,7 @@ class PullbackScanner:
             return
         message = None
         if event:
+            row[f"india_vix_{event}"] = capture_vix(now)
             message = (f"F&O PULLBACK PAPER {event.upper()} ALERT\n{row['id']} | {row['symbol']} | {row['strategy']}\n"
                        f"Setup frame: {row['timeframe']} | Score: {row['score']}\n"
                        f"Observed stock spot: {price:.2f} at {now.isoformat()} IST\n"

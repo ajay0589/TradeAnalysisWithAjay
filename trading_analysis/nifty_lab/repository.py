@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 
 from trading_analysis.live_timing import as_ist
+from trading_analysis.trade_context import capture_vix
 from trading_analysis.notifications.outbox import AlertOutbox
 from trading_analysis.nifty_lab.setups import SETUPS, VARIANTS, VERSION
 
@@ -73,7 +74,8 @@ class LabRepository:
                     continue
                 digest = hashlib.sha256((decision["id"] + variant).encode()).hexdigest()[:12].upper()
                 trade = {**trade, "id": "NL-" + digest, "decision_id": decision["id"], "variant": variant,
-                         "setup": decision["setup"], "version": VERSION, "status": "open"}
+                         "setup": decision["setup"], "version": VERSION, "status": "open",
+                         "india_vix_entry": capture_vix(trade["entry_time"])}
                 conn.execute("INSERT INTO lab_trades VALUES(?,?,?,'open',?,NULL,?)",
                              (trade["id"], trade["setup"], variant, trade["entry_time"][:10], json.dumps(trade)))
                 if trade["telegram_enabled"]:
@@ -94,6 +96,7 @@ class LabRepository:
         points = (price - trade["entry_price"]) * sign
         cost = (price + trade["entry_price"]) * trade["cost_bps_per_side"] / 10000
         trade.update(status="closed", exit_price=price, exit_time=now.isoformat(), exit_reason=reason,
+                     india_vix_exit=capture_vix(now),
                      exit_price_basis=basis, exit_detected_at=(detected_at or now).isoformat(),
                      open_seconds=max(0, (now - as_ist(trade["entry_time"])).total_seconds()),
                      gross_points=points, cost_points=cost, net_points=points - cost,

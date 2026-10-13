@@ -10,6 +10,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from trading_analysis.models import Candle
+from trading_analysis.trade_context import capture_vix as _capture_vix
 
 
 DEFAULT_DB_PATH = Path("data/db/trading_analysis.db")
@@ -759,7 +760,7 @@ class NiftyTradeRepository:
                     signal.get("confidence"),
                     entry_price,
                     now,
-                    _json(signal.get("metadata") or {}),
+                    _json({**(signal.get("metadata") or {}), "india_vix_entry": _capture_vix(entry_time)}),
                     now,
                     now,
                 ),
@@ -837,9 +838,8 @@ class NiftyTradeRepository:
                 """,
                 (exit_alert_id, closed_at, exit_price, open_seconds, exit_price, _now(), exit_reason, _now(), trade_id),
             )
-            if metadata:
-                combined = {**json.loads(existing["metadata_json"] or "{}"), **metadata}
-                conn.execute("UPDATE nifty_trades SET metadata_json = ? WHERE trade_id = ?", (_json(combined), trade_id))
+            combined = {**json.loads(existing["metadata_json"] or "{}"), **(metadata or {}), "india_vix_exit": _capture_vix(closed_at)}
+            conn.execute("UPDATE nifty_trades SET metadata_json = ? WHERE trade_id = ?", (_json(combined), trade_id))
             row = conn.execute("SELECT * FROM nifty_trades WHERE trade_id = ?", (trade_id,)).fetchone()
         return _nifty_trade_row(row) if row else {}
 
@@ -1228,6 +1228,7 @@ class KrishnaPurpleAlertRepository:
         warnings = list(match.get("warnings") or []) + list(entry.get("warnings") or [])
         metadata = {
             "entry": entry,
+            "india_vix_entry": _capture_vix(now),
             "profile": match.get("profile") or {},
             "exit_rule": match.get("exit_rule"),
         }
@@ -1334,6 +1335,9 @@ class KrishnaPurpleAlertRepository:
                     trade["trade_id"],
                 ),
             )
+            updated = conn.execute("SELECT * FROM krishna_purple_trades WHERE trade_id = ?", (trade["trade_id"],)).fetchone()
+            metadata = {**json.loads(updated["metadata_json"] or "{}"), "india_vix_exit": _capture_vix(now)}
+            conn.execute("UPDATE krishna_purple_trades SET metadata_json=? WHERE trade_id=?", (_json(metadata), trade["trade_id"]))
             updated = conn.execute("SELECT * FROM krishna_purple_trades WHERE trade_id = ?", (trade["trade_id"],)).fetchone()
         return {"created": True, "trade": _purple_trade_row(updated), "alert": alert}
 

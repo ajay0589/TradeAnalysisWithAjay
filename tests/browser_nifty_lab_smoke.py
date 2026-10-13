@@ -53,11 +53,15 @@ def main():
         expect(page.locator("#labStatus")).to_contain_text("0 / 5", timeout=15000)
         assert not commands
         expect(page.locator("#labOverview tr")).to_have_count(5)
-        expect(page.locator("#labTrades tr")).to_have_count(20)
+        expect(page.locator("#labTrades tr")).to_have_count(10)
+        page.locator("#labNext").click()
+        expect(page.locator("#labTrades tr")).to_have_count(10)
         page.locator("#labNext").click()
         expect(page.locator("#labTrades tr")).to_have_count(5)
         page.locator("#labVariant").select_option("combined")
-        expect(page.locator("#labTrades tr")).to_have_count(13)
+        expect(page.locator("#labTrades tr")).to_have_count(10)
+        page.locator("#labNext").click()
+        expect(page.locator("#labTrades tr")).to_have_count(3)
         for i in range(1,6):
             page.locator(f'[data-lab-setup="Nifty_Setup{i}"]').click()
             expect(page.locator("#labSetupTitle")).to_contain_text(f"Nifty_Setup{i}")

@@ -1401,3 +1401,18 @@ tr:last-child td {
   .lab-tabs button { padding: 10px 8px; font-size: 12px; }
   .lab-controls select, .lab-controls input { max-width: 100%; }
 }
+/* Shared ledger and compact scanner inventory. */
+.dashboard-band { padding: 18px 24px; border-bottom: 1px solid #d8e0e8; min-width: 0; }
+.section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.section-heading h2 { font-size: 19px; margin: 0; }
+.section-heading > span { color: #526174; font-size: 13px; }
+.ledger-scroll { max-width: 100%; overflow-x: auto; }
+.ledger-scroll table { min-width: 1250px; }
+.ledger-filters { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; margin: 12px 0; }
+.ledger-filters label { display: grid; gap: 4px; min-width: 130px; font-size: 12px; }
+.ledger-filters input, .ledger-filters select { width: 100%; min-width: 0; }
+.compact-pagination { display: flex; align-items: center; gap: 12px; padding: 10px 0; font-size: 13px; }
+.compact-pagination button { width: 36px; min-width: 36px; height: 34px; padding: 0; flex-shrink: 0; }
+.table-pagination[hidden], tr[hidden] { display: none !important; }
+.table-pagination span { overflow-wrap: anywhere; }
+@media (max-width: 600px) { .ledger-filters label { flex: 1 1 140px; } .dashboard-band { padding: 12px; } }

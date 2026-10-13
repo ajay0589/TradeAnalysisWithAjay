@@ -28,6 +28,7 @@
       </div>
 
       <nav class="activity-tabs" aria-label="Decision desk activities">
+        <button class="tab-btn" data-tab-target="dashboard" type="button">Dashboard</button>
         <button class="tab-btn active" data-tab-target="research" type="button">Stock Research</button>
         <button class="tab-btn" data-tab-target="indices" type="button">Index Scanning</button>
         <button class="tab-btn" data-tab-target="nifty-lab" type="button">NIFTY Setup Lab</button>
@@ -47,6 +48,17 @@
       <section class="notes" id="notes"></section>
 
       <section class="tab-panes">
+        <section id="tab-dashboard" class="tab-pane" data-tab-panel="dashboard">
+          <section class="dashboard-band">
+            <div class="section-heading"><h2>Scanner Overview</h2><span id="dashboardStatus" role="status">Loading...</span></div>
+            <div id="dashboardIssues" class="points-warn" role="status"></div>
+            <div class="wide-table"><table class="readable-table"><thead><tr><th>Scanner</th><th>Status</th><th>Scope</th><th>Started (IST)</th><th>Last checked (IST)</th><th>Stopped (IST)</th><th></th></tr></thead><tbody id="dashboardScanners"></tbody></table></div>
+          </section>
+          <section class="dashboard-band">
+            <div class="section-heading"><h2 id="dashboardTradeTitle">Open Trades</h2><span id="dashboardVix"></span></div>
+            <div id="dashboardLedger"></div>
+          </section>
+        </section>
         <section id="tab-analyze" class="tab-pane active" data-tab-panel="analyze">
           <section class="workspace">
             <aside class="sidebar">
@@ -455,7 +467,7 @@
               <label>Variant<select id="labVariant"><option value="all">Both variants</option><option value="technical">Technical only</option><option value="combined">Technical + options</option></select></label>
               <label>Status<select id="labTradeState"><option value="all">All</option><option value="open">Open</option><option value="closed">Closed</option></select></label>
             </div></div>
-              <div class="lab-scroll"><table class="readable-table"><thead><tr><th>Trade / variant</th><th>Direction / status</th><th>Entry (IST)</th><th>Entry spot</th><th>Exit (IST)</th><th>Exit spot</th><th>Open time</th><th>Stop / target</th><th>Net R</th><th>Result basis / reason</th><th>Telegram</th></tr></thead><tbody id="labTrades"></tbody></table></div>
+              <div class="lab-scroll"><table class="readable-table"><thead><tr><th>Trade / variant</th><th>Direction / status</th><th>Entry (IST)</th><th>Entry spot</th><th>Exit (IST)</th><th>Exit spot</th><th>Open time</th><th>Stop / target</th><th>Net R</th><th>India VIX at entry</th><th>India VIX at exit</th><th>Result basis / reason</th><th>Telegram</th></tr></thead><tbody id="labTrades"></tbody></table></div>
               <div class="lab-controls"><button id="labPrev" type="button" title="Previous trades" aria-label="Previous trades">&#8592;</button><span id="labPage"></span><button id="labNext" type="button" title="Next trades" aria-label="Next trades">&#8594;</button></div>
             </section>
             <details class="lab-details"><summary>Signal decisions <span id="labDecisionCount" class="muted"></span></summary>
@@ -731,6 +743,7 @@
                   <h2>NIFTY Trades: Open &amp; Closed</h2>
                   <span id="niftyTradesMeta">No trades loaded</span>
                 </div>
+                <div class="cell-note">All-time performance</div>
                 <div id="niftyTradePerformanceCards" class="compact-metrics"></div>
                 <div class="wide-table">
                   <table class="readable-table">
@@ -1588,7 +1601,7 @@
                         <th>Holding Duration</th>
                         <th>Entry Price</th>
                         <th>Exit Price</th>
-                        <th>Exit TF</th>
+                        <th>Exit TF</th><th>India VIX at entry</th><th>India VIX at exit</th>
                       </tr>
                     </thead>
                     <tbody id="purpleTradesBody"></tbody>
@@ -2125,7 +2138,7 @@
               <section class="table-panel">
                 <div class="panel-head"><h2>Waiting Setups &amp; Spot Trades</h2><span id="pullbackSetupCount"></span></div>
                 <div class="date-grid compact-controls"><div><label for="pullbackSide">Direction</label><select id="pullbackSide"><option value="all">Both</option><option value="long">Bullish</option><option value="short">Bearish</option></select></div><div><label for="pullbackState">Status</label><select id="pullbackState"><option value="all">All</option><option>waiting</option><option>open</option><option>closed</option><option>discarded</option></select></div></div>
-                <div class="wide-table"><table class="readable-table"><thead><tr><th>Stock / ID</th><th>Side / Frame</th><th>Status</th><th>Setup (IST)</th><th>Trigger / Stop / Target</th><th>Entry / time (IST)</th><th>Exit / time (IST)</th><th>Open time</th><th>Market / Sector</th><th>Reason</th></tr></thead><tbody id="pullbackSetups"></tbody></table></div>
+                <div class="wide-table"><table class="readable-table"><thead><tr><th>Stock / ID</th><th>Side / Frame</th><th>Status</th><th>Setup (IST)</th><th>Trigger / Stop / Target</th><th>Entry / time (IST)</th><th>Exit / time (IST)</th><th>Open time</th><th>India VIX at entry</th><th>India VIX at exit</th><th>Market / Sector</th><th>Reason</th></tr></thead><tbody id="pullbackSetups"></tbody></table></div>
               </section>
               <section class="table-panel"><div class="panel-head"><h2>Pullback Alert Delivery</h2></div><div class="wide-table"><table class="readable-table"><thead><tr><th>Stock</th><th>Trade ID</th><th>Event</th><th>Created (IST)</th><th>Telegram</th><th>Issue</th></tr></thead><tbody id="pullbackDelivery"></tbody></table></div></section>
             </section>
@@ -2248,6 +2261,8 @@
 
     </main>
     <script src="/app.js"></script>
+    <script src="/scanner-dashboard.js"></script>
+    <script src="/table-pagination.js"></script>
     <script src="/nifty-lab.js"></script>
   </body>
 </html>

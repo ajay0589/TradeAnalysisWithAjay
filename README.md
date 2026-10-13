@@ -543,6 +543,19 @@ Optional UI regression check (local server already running, Chrome installed): `
 
 In a mocked 09:15-10:14 run with one-minute polling, the candle scheduler issues 17 source refreshes instead of the previous 180, excluding option-chain requests. This tests request reduction, not measured market-network latency. Broker timings in the next live log will show remaining queue, network, or write delays. Temporary Windows file-replacement locks are retried while preserving the previous cache; keeping live data outside OneDrive can avoid sync contention.
 
+## Scanner Dashboard And Trade Review
+
+Open `Dashboard` for a read-only inventory of index scanners, the five NIFTY Lab setups, both pullback directions, Purple Touch profiles, and on-demand research tools. Its trade ledger defaults to open trades across all scanners. Opening this page does not start scanners, quote streams, downloads, or alerts; use each scanner's existing controls.
+
+- NIFTY, Bank Nifty, Sensex, and the common ledger have All/Open/Closed filters, inclusive IST From/To dates, and an Entry date/Exit date selector. An exit-date range excludes trades that have not exited. NIFTY's performance cards remain all-time metrics, separate from the filtered table.
+- Tables paginate at ten rows. Index trade filtering reads the complete retained history before pagination, not just the latest 100/200 trades. The common ledger also provides date-range review for Lab, Purple Touch, and pullback trades.
+- `Result` is direction-adjusted underlying price movement in points and percent, before costs. Closed trades use their stored exit price; open trades require an exchange-timestamped quote no older than 30 seconds. A missing/stale quote is unavailable, never an invented zero-profit result. These are paper observations, not option premiums or actual broker P&L.
+- New live trades store immutable India VIX entry and separate exit snapshots from the shared read-only quote feed. Both exchange and receipt timestamps must be no more than 60 seconds old and not later than the event. Older records show `Not recorded`; unavailable VIX does not change entry/exit rules. JSON trade exports retain the snapshots, and the Lab CSV includes them too.
+- India VIX is NIFTY-derived expected volatility, not a bullish/bearish signal or Bank Nifty/Sensex-specific volatility. See [NSE's India VIX description](https://www.nseindia.com/static/products-services/indices-indiavix-index). No VIX threshold is added to trading logic, and today's VIX is never assigned to historical backtests.
+- `NIFTY Setup Lab` is **intraday only**, with technical-only and technical-plus-options paper ledgers for each of five setups. It does not generate swing/positional trades. The existing index scanners continue to cover Intraday, Swing, and Positional independently.
+
+Read-only browser regression: `python tests/browser_dashboard_smoke.py http://127.0.0.1:8766`. This uses fixture trades and intercepts commands so it cannot start monitors or send Telegram alerts.
+
 ## Regression checks
 
 ### F&O Pullbacks (v5)
@@ -557,7 +570,7 @@ Run from the project folder using the server's Python environment and Node.js:
 
 ```powershell
 python -m pip install -r requirements.txt pytest tzdata
-python -m pytest -q
+python -m pytest tests -q
 node --check web/app.js
 node --test tests/web_app.test.cjs
 python -m compileall -q trading_analysis tests

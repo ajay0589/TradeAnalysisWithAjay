@@ -336,13 +336,23 @@ test("Lab filters and pagination keep setup and variant ledgers separate", () =>
   ui.ids.get("labVariant").value = "technical";
   ui.ids.get("labTradeState").value = "all";
   ui.context.renderLabTrades();
-  assert.equal(ui.ids.get("labPage").textContent, "Page 1 of 3 / 45 trades");
+  assert.equal(ui.ids.get("labPage").textContent, "Page 1 of 5 / 45 trades");
+  assert.equal((ui.ids.get("labTrades").innerHTML.match(/<tr>/g) || []).length, 10);
   assert.equal(ui.ids.get("labTrades").innerHTML.includes("NL-OTHER"), false);
   ui.ids.get("labNext").handlers.click();
-  assert.equal(ui.ids.get("labPage").textContent, "Page 2 of 3 / 45 trades");
+  assert.equal(ui.ids.get("labPage").textContent, "Page 2 of 5 / 45 trades");
   ui.ids.get("labVariant").value = "combined";
   ui.ids.get("labVariant").handlers.change();
   assert.equal(ui.ids.get("labPage").textContent, "Page 1 of 1 / 0 trades");
+});
+
+test("Purple Touch pagers use ten rows and clamp shrinking results", () => {
+  const ui = app();
+  const rows = Array.from({length: 23}, (_, i) => ({id:i}));
+  assert.equal(ui.context.paginatePurpleRows(rows, "step1", "purpleStep1").rows.length, 10);
+  ui.run('state.purplePages.step1 = 3');
+  assert.equal(ui.context.paginatePurpleRows(rows, "step1", "purpleStep1").rows.length, 3);
+  assert.equal(ui.context.paginatePurpleRows([], "step1", "purpleStep1").page, 1);
 });
 
 test("Lab date change rejects older responses and export uses selected session", async () => {

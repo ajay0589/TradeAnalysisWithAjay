@@ -8,7 +8,7 @@ from trading_analysis import diagnostics
 from trading_analysis.live_timing import IST, as_ist, quote_is_fresh
 from trading_analysis.scheduler.market_hours import is_scan_window, is_market_hours
 
-KEYS = {"NIFTY": "NSE:NIFTY 50", "BANKNIFTY": "NSE:NIFTY BANK", "SENSEX": "BSE:SENSEX"}
+KEYS = {"NIFTY": "NSE:NIFTY 50", "BANKNIFTY": "NSE:NIFTY BANK", "SENSEX": "BSE:SENSEX", "INDIAVIX": "NSE:INDIA VIX"}
 
 
 class LiveQuoteService:
@@ -71,7 +71,12 @@ class LiveQuoteService:
             exchange, name = key.split(":", 1)
             path = Path(f"data/raw/zerodha/instruments_{exchange}.csv")
             if path.exists():
-                token = resolve_instrument_token(load_instruments_csv(path), exchange, name)
+                try:
+                    token = resolve_instrument_token(load_instruments_csv(path), exchange, name)
+                except ValueError:
+                    if symbol == "INDIAVIX":
+                        continue
+                    raise
                 self._tokens[int(token)] = symbol
         if not self._tokens:
             raise ValueError("Index instrument masters are missing")
