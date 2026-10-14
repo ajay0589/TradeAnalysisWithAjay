@@ -16,7 +16,7 @@ import uuid
 
 
 ROOT = Path(__file__).resolve().parent.parent
-BRANCH = "scanner-audit-and-v4"
+BRANCH = "scanner-audit-and-v5"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 

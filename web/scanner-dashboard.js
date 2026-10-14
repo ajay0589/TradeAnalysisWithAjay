@@ -1,13 +1,13 @@
 /* Read-only views. Opening these panels never starts a scanner or quote feed. */
 const ledgerViews = {};
-const ledgerSources = ["NIFTY", "BANKNIFTY", "SENSEX", "pullbacks", "purple", ...Array.from({length: 5}, (_, i) => `Nifty_Setup${i + 1}`)];
+const ledgerSources = ["NIFTY", "BANKNIFTY", "SENSEX", "MCX", "pullbacks", "purple", ...Array.from({length: 5}, (_, i) => `Nifty_Setup${i + 1}`)];
 const ledgerHeading = '<tr><th>Trade / scanner</th><th>Status / direction</th><th>Result (points / %)</th><th>Horizon / variant</th><th>Entry (IST)</th><th>Entry price</th><th>Exit (IST)</th><th>Exit price</th><th>Open time</th><th>Stop / target</th><th>India VIX at entry</th><th>India VIX at exit</th><th>Exit reason</th></tr>';
 
 function tradeResultCell(result) {
   if (!result || result.percent == null) return '<span class="cell-note">Quote unavailable</span>';
   const color = result.percent > 0 ? "points-positive" : result.percent < 0 ? "points-negative" : "";
   const sign = result.percent > 0 ? "+" : "";
-  return `<span class="${color}">${sign}${fmt(result.points)} / ${sign}${fmt(result.percent)}%</span><div class="cell-note">${result.basis === "closed" ? "Closed" : "Live spot"}<br>${fmtDateTime(result.time)}</div>`;
+  return `<span class="${color}">${sign}${fmt(result.points)} / ${sign}${fmt(result.percent)}%</span><div class="cell-note">${result.basis === "closed" ? "Closed" : "Live underlying"}<br>${fmtDateTime(result.time)}</div>`;
 }
 
 function mountTradeLedger(key, bodyId, source) {

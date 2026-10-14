@@ -16,6 +16,7 @@ from trading_analysis.instrument_master_service import InstrumentMasterService
 from trading_analysis.all_index_monitor import AllIndexMonitor
 from trading_analysis.pullback_scanner import PullbackScanner
 from trading_analysis.nifty_lab.service import NiftySetupLab
+from trading_analysis.mcx.service import McxSwingScanner
 from trading_analysis.scanner_dashboard import ScannerDashboard
 from trading_analysis.notifications.telegram import TelegramNotifier
 from trading_analysis.web_services import AnalysisService
@@ -28,6 +29,8 @@ WEB_ROOT = ROOT / "web"
 
 class ReusableThreadingHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = os.name != "nt"
+    # Browser startup loads assets and several independent status panels at once.
+    request_queue_size = 64
 
     def server_bind(self):
         if os.name == "nt":
@@ -44,6 +47,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
     all_index_monitor = AllIndexMonitor(nifty_auto_service, index_scanner_service, instrument_master_service)
     pullback_scanner = PullbackScanner(service)
     nifty_lab = NiftySetupLab(service)
+    mcx_scanner = McxSwingScanner()
 
     @diagnostics.audit_http
     def do_GET(self) -> None:
@@ -57,8 +61,26 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_file(WEB_ROOT / "app.js", "application/javascript; charset=utf-8")
             elif parsed.path == "/nifty-lab.js":
                 self._send_file(WEB_ROOT / "nifty-lab.js", "application/javascript; charset=utf-8")
-            elif parsed.path in {"/scanner-dashboard.js", "/table-pagination.js"}:
+            elif parsed.path in {"/scanner-dashboard.js", "/table-pagination.js", "/mcx.js"}:
                 self._send_file(WEB_ROOT / parsed.path[1:], "application/javascript; charset=utf-8")
+            elif parsed.path in {"/api/mcx/status", "/api/mcx/export"}:
+                params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+                if set(params) - {"from_date", "to_date", "format"}:
+                    raise ValueError("Unknown MCX filter")
+                dates = {k: params.get(k) for k in ("from_date", "to_date")}
+                if parsed.path.endswith("status"):
+                    self._send_json(self.mcx_scanner.status(**dates))
+                elif params.get("format") == "zip":
+                    body = self.mcx_scanner.export_zip(**dates)
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header("Content-Type", "application/zip")
+                    self.send_header("Content-Disposition", 'attachment; filename="mcx-swing-review.zip"')
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    self.wfile.write(body)
+                else:
+                    self._send_json(self.mcx_scanner.export(**dates))
             elif parsed.path == "/api/scanner-dashboard":
                 self._send_json(ScannerDashboard(self).status())
             elif parsed.path == "/api/trade-ledger":
@@ -87,6 +109,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 report["scanners"] = diagnostics.clean(self.all_index_monitor.diagnostics(report["date"]))
                 report["pullbacks"] = diagnostics.clean(self.pullback_scanner.export())
                 report["nifty_setup_lab"] = self.nifty_lab.export(report["date"])
+                report["mcx"] = self.mcx_scanner.export(report["date"], report["date"])
                 if params.get("format") == ["zip"]:
                     self._send_zip(report, "trading-app-log")
                 else:
@@ -575,6 +598,17 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         to_date=payload.get("to_date") or None,
                     )
                 )
+            elif parsed.path == "/api/mcx/start":
+                self._send_json(self.mcx_scanner.start(self._read_json()))
+            elif parsed.path == "/api/mcx/download":
+                self._read_json()
+                self._send_json(self.mcx_scanner.start({}, download_only=True))
+            elif parsed.path == "/api/mcx/stop":
+                self._read_json()
+                self._send_json(self.mcx_scanner.stop())
+            elif parsed.path == "/api/mcx/test-telegram":
+                self._read_json()
+                self._send_json(TelegramNotifier.from_env("MCX_").send_message("MCX SWING - CONNECTION TEST ONLY. No trade or order."))
             elif parsed.path == "/api/nifty-lab/start":
                 payload = self._read_json()
                 self._send_json(self.nifty_lab.start(payload.get("setup"), payload.get("telegram_enabled", False)))

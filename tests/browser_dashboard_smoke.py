@@ -62,7 +62,7 @@ def main():
         expect(page.locator("#dashboardScanners tr:visible")).to_have_count(10)
         inventory_pager = page.locator("#tab-dashboard .auto-pagination").first
         inventory_pager.locator("button").last.click()
-        expect(page.locator("#dashboardScanners tr:visible")).to_have_count(6)
+        expect(page.locator("#dashboardScanners tr:visible")).to_have_count(10)
         inventory_pager.locator("button").first.click()
         expect(page.locator("#dashboardLedger tbody tr")).to_have_count(10)
         filters = page.locator("#tab-dashboard .ledger-filters")

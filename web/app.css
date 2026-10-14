@@ -1416,3 +1416,12 @@ tr:last-child td {
 .table-pagination[hidden], tr[hidden] { display: none !important; }
 .table-pagination span { overflow-wrap: anywhere; }
 @media (max-width: 600px) { .ledger-filters label { flex: 1 1 140px; } .dashboard-band { padding: 12px; } }
+/* MCX uses the same unframed operational bands as the scanner dashboard. */
+.mcx-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0; }
+.mcx-toolbar .check-row { margin: 0; }
+.mcx-chart { width: 100%; height: 180px; margin: 14px 0 8px; }
+.mcx-chart canvas { display: block; width: 100%; height: 180px; }
+#tab-mcx .section-heading { flex-wrap: wrap; gap: 8px; }
+#tab-mcx .section-heading span { font-size: 13px; color: #526274; }
+#tab-mcx pre { max-width: 600px; white-space: pre-wrap; overflow-wrap: anywhere; }
+#mcxAction, #mcxError { overflow-wrap: anywhere; }

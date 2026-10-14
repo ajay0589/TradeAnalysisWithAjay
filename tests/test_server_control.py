@@ -101,7 +101,7 @@ def test_second_launcher_cannot_run_overlapping_operation(control):
         pass
 
 
-@pytest.mark.parametrize("branch,dirty", [("main", ""), (BRANCH, " M web/app.js")])
+@pytest.mark.parametrize("branch,dirty", [("main", ""), ("", ""), ("scanner-audit-and-v4", ""), (BRANCH, " M web/app.js")])
 def test_update_preflight_preserves_wrong_branch_or_dirty_folder(control, branch, dirty):
     replies = {("git", "rev-parse", "--show-toplevel"): str(control.root),
                ("git", "branch", "--show-current"): branch,
@@ -126,6 +126,16 @@ def test_update_stops_pulls_installs_and_restarts_in_order(control):
     assert calls[1] == ["git", "pull", "--ff-only", "origin", BRANCH]
     assert calls[2][:4] == [control.python, "-m", "pip", "install"]
     assert calls[-1] == "start"
+
+
+def test_v5_update_preflight_uses_checked_out_release(control):
+    assert BRANCH == "scanner-audit-and-v5"
+    replies = {("git", "rev-parse", "--show-toplevel"): str(control.root),
+               ("git", "branch", "--show-current"): BRANCH,
+               ("git", "status", "--porcelain", "--untracked-files=normal"): "",
+               ("git", "remote", "get-url", "origin"): "https://example.test/repo.git"}
+    with patch.object(control, "_run", side_effect=lambda args, **kw: replies[tuple(args)]):
+        control._check_update()
 
 
 @pytest.mark.parametrize("failure", ["pull", "pip"])
@@ -185,9 +195,11 @@ def test_launcher_window_actions_and_status_rendering(control):
         with patch.object(ui, "controller", return_value=control), patch("webbrowser.open") as opened:
             ui.buttons["open"].invoke()
             opened.assert_called_once_with(control.url)
-        with patch.object(ui, "run") as action, patch("tkinter.messagebox.askyesno", return_value=True):
+        with patch.object(ui, "run") as action, patch("tkinter.messagebox.askyesno", return_value=True) as confirm:
             ui.buttons["update"].invoke()
             action.assert_called_once_with("update")
+            assert "origin/scanner-audit-and-v5" in confirm.call_args.args[1]
+            assert "scanner-audit-and-v4" not in confirm.call_args.args[1]
         ui.show_status({"state": "stopped", "url": control.url})
         assert str(ui.buttons["stop"]["state"]) == "disabled"
         assert str(ui.buttons["start"]["state"]) == "normal"

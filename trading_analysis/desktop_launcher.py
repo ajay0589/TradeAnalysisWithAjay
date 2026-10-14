@@ -10,7 +10,7 @@ import threading
 import time
 import webbrowser
 
-from trading_analysis.server_control import ROOT, NO_WINDOW, ServerController, safe_text
+from trading_analysis.server_control import BRANCH, ROOT, NO_WINDOW, ServerController, safe_text
 
 
 def support_log(controller):
@@ -175,7 +175,7 @@ class Launcher:
     def confirm(self, action):
         from tkinter import messagebox
         message = ("Stop the server and all its scanners? Stored data and trade history will be kept." if action == "stop"
-                   else "Update from origin/scanner-audit-and-v4 and install dependencies?\n\nThe server will stop during the update, then restart if it was running. Scanners must be started again afterward. Local file changes will not be overwritten.")
+                   else f"Update from origin/{BRANCH} and install dependencies?\n\nThe server will stop during the update, then restart if it was running. Scanners must be started again afterward. Local file changes will not be overwritten.")
         if messagebox.askyesno("Stop Server" if action == "stop" else "Update App", message, parent=self.window):
             self.run(action)
 

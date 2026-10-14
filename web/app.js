@@ -61,7 +61,7 @@ function activateTab(name) {
     name = "research";
   }
   const panelName = name === "research" ? state.research.active : name;
-  $("notes").hidden = ["backtest", "pullbacks", "nifty-lab", "dashboard"].includes(panelName);
+  $("notes").hidden = ["backtest", "pullbacks", "nifty-lab", "dashboard", "mcx"].includes(panelName);
   if (panelName === "pullbacks") {
     loadPullbacks();
     if (!state.pullbacks.pollTimer) state.pullbacks.pollTimer = setInterval(loadPullbacks, 5000);
@@ -70,6 +70,7 @@ function activateTab(name) {
     state.pullbacks.pollTimer = null;
   }
   state.activeTab = panelName;
+  if (name === "mcx" && typeof loadMcx === "function") loadMcx();
   if (name === "dashboard" && typeof loadScannerDashboard === "function") loadScannerDashboard();
   document.querySelectorAll("[data-tab-target]").forEach((button) => {
     const active = button.dataset.tabTarget === name;

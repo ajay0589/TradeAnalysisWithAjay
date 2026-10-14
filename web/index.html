@@ -32,6 +32,7 @@
         <button class="tab-btn active" data-tab-target="research" type="button">Stock Research</button>
         <button class="tab-btn" data-tab-target="indices" type="button">Index Scanning</button>
         <button class="tab-btn" data-tab-target="nifty-lab" type="button">NIFTY Setup Lab</button>
+        <button class="tab-btn" data-tab-target="mcx" type="button">MCX Swing</button>
         <button class="tab-btn" data-tab-target="purple" type="button">Purple Touch</button>
         <button class="tab-btn" data-tab-target="data" type="button">Data Ops</button>
         <button class="tab-btn" data-tab-target="reports" type="button">Reports</button>
@@ -57,6 +58,47 @@
           <section class="dashboard-band">
             <div class="section-heading"><h2 id="dashboardTradeTitle">Open Trades</h2><span id="dashboardVix"></span></div>
             <div id="dashboardLedger"></div>
+          </section>
+        </section>
+        <section id="tab-mcx" class="tab-pane" data-tab-panel="mcx">
+          <section class="dashboard-band">
+            <div class="section-heading"><h2>MCX Swing</h2><span id="mcxStatus" role="status">Stopped</span></div>
+            <div class="mcx-toolbar">
+              <button id="mcxStart" type="button">Start swing scanner</button>
+              <button id="mcxStop" type="button" disabled>Stop</button>
+              <button id="mcxDownloadData" type="button">Download MCX history</button>
+              <label class="check-row"><input id="mcxTelegram" type="checkbox">Telegram alerts</label>
+              <button id="mcxTest" type="button">Test MCX Telegram</button>
+              <span id="mcxTelegramStatus" class="cell-note"></span>
+            </div>
+            <div id="mcxAction" role="status" class="points-warn"></div>
+            <div id="mcxError" role="status" class="points-negative"></div>
+            <div id="mcxTiming" class="mini-status"></div>
+            <div class="wide-table"><table class="readable-table"><thead><tr><th>Commodity</th><th>Selected futures contract</th><th>Expiry</th><th>Bid / Ask</th><th>Quote (IST)</th><th>Data</th><th>Latest decision</th></tr></thead><tbody id="mcxOverview"></tbody></table></div>
+          </section>
+          <nav class="index-subtabs" aria-label="MCX commodity"><button type="button" class="index-subtab active" data-mcx-root="SILVERM" aria-selected="true">SILVERM</button><button type="button" class="index-subtab" data-mcx-root="GOLDM" aria-selected="false">GOLDM</button><button type="button" class="index-subtab" data-mcx-root="NATURALGAS" aria-selected="false">NATURALGAS</button><button type="button" class="index-subtab" data-mcx-root="CRUDEOIL" aria-selected="false">CRUDEOIL</button></nav>
+          <section class="dashboard-band">
+            <div class="section-heading"><h2 id="mcxContractTitle">SILVERM</h2><span>Daily trend / 1-hour breakout / Swing only / Paper</span></div>
+            <div class="mcx-chart"><canvas id="mcxChart" aria-label="Closed daily futures prices" role="img"></canvas></div>
+            <div id="mcxChartNote" class="cell-note"></div>
+            <div class="wide-table"><table class="readable-table"><thead><tr><th>Daily close</th><th>Daily EMA20 / EMA50</th><th>Daily ATR / ATR%</th><th>Hourly close</th><th>Hourly EMA20 / EMA50</th><th>Hourly RSI14</th><th>20-hour high / low</th><th>Daily OI / change</th></tr></thead><tbody id="mcxTechnicals"></tbody></table></div>
+          </section>
+          <section class="dashboard-band">
+            <div class="section-heading"><h2>Trades &amp; Performance</h2><span>Model results, not broker fills</span></div>
+            <div class="ledger-filters">
+              <label>Review from (IST)<input id="mcxFrom" type="date"></label><label>To (IST)<input id="mcxTo" type="date"></label>
+              <label>Trade status<select id="mcxTradeState"><option value="all">All</option><option value="open">Open</option><option value="closed">Closed</option></select></label>
+              <a id="mcxExport" class="lab-download" href="/api/mcx/export?format=zip" download>Download trades &amp; logs (.zip)</a>
+            </div>
+            <div id="mcxMetrics" class="compact-metrics"></div>
+            <div class="wide-table"><table class="readable-table" data-managed-pagination="true"><thead><tr><th>Trade / contract</th><th>Status / direction</th><th>Result (points / %)</th><th>Entry (IST) / price</th><th>Signal close (IST) / reference</th><th>Exit (IST) / price</th><th>Held</th><th>Stop / target</th><th>Net model R</th><th>ATR% at entry</th><th>Exit / audit note</th></tr></thead><tbody id="mcxTrades"></tbody></table></div>
+            <div class="table-pagination compact-pagination"><button id="mcxPrev" type="button" title="Previous page" aria-label="Previous page">&#8592;</button><span id="mcxPage" role="status"></span><button id="mcxNext" type="button" title="Next page" aria-label="Next page">&#8594;</button></div>
+          </section>
+          <section class="dashboard-band">
+            <div class="section-heading"><h2>Candle Data &amp; Scan Log</h2><span id="mcxDataProgress"></span></div>
+            <div class="wide-table"><table class="readable-table"><thead><tr><th>Contract / frame</th><th>Freshness</th><th>Latest closed (IST)</th><th>Expected closed (IST)</th><th>Last download (IST)</th><th>Bars</th><th>Issue</th></tr></thead><tbody id="mcxFreshness"></tbody></table></div>
+            <div class="wide-table"><table class="readable-table"><thead><tr><th>Time (IST)</th><th>Event</th><th>Details</th></tr></thead><tbody id="mcxEvents"></tbody></table></div>
+            <div class="wide-table"><table class="readable-table"><thead><tr><th>Trade</th><th>Event</th><th>Created (IST)</th><th>Telegram delivery</th><th>Issue</th></tr></thead><tbody id="mcxDelivery"></tbody></table></div>
           </section>
         </section>
         <section id="tab-analyze" class="tab-pane active" data-tab-panel="analyze">
@@ -2264,5 +2306,6 @@
     <script src="/scanner-dashboard.js"></script>
     <script src="/table-pagination.js"></script>
     <script src="/nifty-lab.js"></script>
+    <script src="/mcx.js"></script>
   </body>
 </html>

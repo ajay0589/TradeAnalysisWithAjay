@@ -84,10 +84,19 @@ class ScannerDashboard:
                 row = _json(raw["body"])
                 if source == "all" or row["setup"] == source:
                     rows.append(normalize(row, row["setup"], now))
+        if source in {"all", "MCX"} and hasattr(h, "mcx_scanner"):
+            with h.mcx_scanner._lock:
+                quotes = dict(h.mcx_scanner._quotes)
+            for row in h.mcx_scanner.repository.trades(open_only=status == "open"):
+                if status != "all" and row["status"] != status:
+                    continue
+                quote = quotes.get(row["symbol"], {})
+                row["last_quote"] = {**quote, "price": quote.get("bid" if row["direction"] == "bullish" else "ask")} if quote.get("fresh") else {}
+                rows.append(normalize(row, "MCX", now))
         return sorted(rows, key=lambda r: (r["entry_time"] or "", str(r["id"])), reverse=True)
 
     def ledger(self, source="all", status="all", from_date=None, to_date=None, date_basis="entry", page=1):
-        allowed = {"all", "NIFTY", "BANKNIFTY", "SENSEX", "pullbacks", "purple", *[f"Nifty_Setup{i}" for i in range(1, 6)]}
+        allowed = {"all", "NIFTY", "BANKNIFTY", "SENSEX", "MCX", "pullbacks", "purple", *[f"Nifty_Setup{i}" for i in range(1, 6)]}
         if source not in allowed or status not in {"all", "open", "closed"} or date_basis not in {"entry", "exit"}:
             raise ValueError("Invalid scanner, trade status, or date basis")
         start, end = (date.fromisoformat(v) if v else None for v in (from_date, to_date))
@@ -137,6 +146,10 @@ class ScannerDashboard:
         with h.nifty_lab._lock:
             for key, state in h.nifty_lab.states.items():
                 add(key, key, dict(state), "nifty-lab", "Intraday / technical + combined ledgers", key)
+        if hasattr(h, "mcx_scanner"):
+            with h.mcx_scanner._lock:
+                for root in ("SILVERM", "GOLDM", "NATURALGAS", "CRUDEOIL"):
+                    add(f"mcx_{root}", f"MCX {root}", dict(h.mcx_scanner.state), "mcx", "Swing futures / Daily trend + hourly breakout")
         with h.pullback_scanner._lock:
             for side in ("bullish", "bearish"):
                 add(f"pullback_{side}", f"F&O {side} pullback", h.pullback_scanner.state, "pullbacks", "Shared pullback monitor")

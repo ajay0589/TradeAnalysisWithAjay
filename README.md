@@ -4,6 +4,10 @@ Read-only automation for Indian stock and options preparation. The first goal is
 
 This project is analysis support only. It does not place orders, and its output is not financial advice.
 
+MCX swing monitoring for SILVERM, GOLDM, NATURALGAS and CRUDEOIL is available in
+the **MCX Swing** tab. See the [MCX setup and audit guide](docs/mcx-swing-v5.md)
+for data downloads, rules, expiry handling and Telegram configuration.
+
 ## Current Phase
 
 - Local CSV candle ingestion
@@ -187,10 +191,12 @@ Double-click `Trading Desk.cmd` in the project folder. A desktop control window 
 - `Start Server`: starts this project's server on port 8766, or recognizes an already-running copy. It does not automatically start market scanners.
 - `Stop Server`: stops the verified server and its scanner workers. Stored candles, credentials, and trade history are retained.
 - `Open App`: opens the app in your browser.
-- `Update App`: requires the `scanner-audit-and-v4` branch and a clean working folder, stops the server if running, executes `git pull --ff-only origin scanner-audit-and-v4`, installs `requirements.txt` with the selected Python, and restarts only if the server was previously running. Start the market scanners again in the app afterward. Update outside market hours.
+- `Update App`: requires the `scanner-audit-and-v5` branch and a clean working folder, stops the server if running, executes `git pull --ff-only origin scanner-audit-and-v5`, installs `requirements.txt` with the selected Python, and restarts only if the server was previously running. Start the market scanners again in the app afterward. Update outside market hours.
 - `View Logs` / `Save Support Log`: shows or exports launcher and server log tails for troubleshooting. Review exported logs before sharing.
 
 Updates never reset, stash, overwrite local edits, or erase data. A failed pull or dependency installation leaves the server stopped and displays the error. Authentication errors require Git access to be configured once; the launcher does not ask for passwords or store Git credentials. Reopen the launcher after updating to load changes to the launcher itself. Closing the launcher asks whether to stop the server or leave it running.
+
+An older launcher may still require v4. After switching your working folder to v5, close the launcher and run `git pull --ff-only origin scanner-audit-and-v5` once, then reopen `Trading Desk.cmd`. Subsequent updates use the v5 `Update App` button. The server port remains `8766`; local `.env`, candle caches, and trade databases are not replaced by Git updates.
 
 If a port belongs to another project or an old server without identifying health metadata, the launcher refuses to stop it. Inspect that process or ask the maintainer for help. A startup timeout cleans up only the process tree it just launched, instead of leaving a hidden process occupying the port. Local health checks bypass network proxies and verify the project, port, and launch identity, not the Python alias path or launcher PID.
 
