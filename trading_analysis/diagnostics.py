@@ -90,7 +90,16 @@ def runtime() -> dict:
             "logging_error": _LOG_ERROR, "launch_id": os.getenv("TRADING_SERVER_LAUNCH_ID")}
 
 
-def export(day: str | None = None) -> dict:
+def export(day: str | None = None, from_date=None, to_date=None) -> dict:
+    from trading_analysis.audit_exports import date_window, days
+    first, last = date_window(day, from_date, to_date)
+    if first != last:
+        reports = [export(selected) for selected in days(first, last)]
+        events = [row for report in reports for row in report["events"]]
+        return {**reports[-1], "date": first, "from_date": first, "to_date": last,
+                "events": events, "event_count": len(events),
+                "incomplete_lines": sum(r["incomplete_lines"] for r in reports)}
+    day = first
     selected = date.fromisoformat(day) if day else datetime.now(IST).date()
     events = []
     malformed = 0
@@ -109,7 +118,8 @@ def export(day: str | None = None) -> dict:
             except (ValueError, UnicodeError):
                 malformed += 1
     events.sort(key=lambda row: row.get("timestamp", ""))
-    return {"schema_version": 2, "date": str(selected), "timezone": "Asia/Kolkata", "runtime": runtime(),
+    return {"schema_version": 3, "date": str(selected), "from_date": first, "to_date": last,
+            "timezone": "Asia/Kolkata", "runtime": runtime(),
             "events": [clean(row) for row in events], "event_count": len(events),
             "truncated_events": 0, "incomplete_lines": malformed}
 

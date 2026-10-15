@@ -38,6 +38,7 @@ class Settings:
     cost_bps_per_side: float = COST_BPS_PER_SIDE
     trigger_minutes: int = 15
     ema_exit: bool = False
+    session_exit: time = time(15, 0)
 
 
 def _clock(candle: Candle) -> time:
@@ -140,12 +141,12 @@ def _exit(
         if settings.ema_exit and ema_values and ema_values[index] is not None:
             if (candle.close - ema_values[index]) * (1 if direction == "bullish" else -1) < 0:
                 return index, candle.close, "ema20_reversal"
-        if settings.horizon == "intraday" and _clock(candle) >= time(15, 0):
+        if settings.horizon == "intraday" and _clock(candle) >= settings.session_exit:
             return index, candle.close, "session_close"
     return end, candles[end].close, "max_bars"
 
 
-def simulate(candles: list[Candle], settings: Settings, entry_filter=None) -> list[dict]:
+def simulate(candles: list[Candle], settings: Settings, entry_filter=None, signal_provider=None) -> list[dict]:
     closes = [row.close for row in candles]
     fast, slow, momentum, volatility = (
         _ema_series(closes, 20), _ema_series(closes, 50),
@@ -155,7 +156,7 @@ def simulate(candles: list[Candle], settings: Settings, entry_filter=None) -> li
     trades: list[dict] = []
     index = 60
     while index < len(candles) - 1:
-        signal = _signal(candles, index, settings, fast, slow, momentum, opening_range)
+        signal = signal_provider(index) if signal_provider else _signal(candles, index, settings, fast, slow, momentum, opening_range)
         if signal is None or volatility[index] is None:
             index += 1
             continue

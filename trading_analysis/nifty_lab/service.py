@@ -36,6 +36,7 @@ class NiftySetupLab:
         self._threads = []
         self._shutdown = threading.Event()
         self._refresh_attempts = {}
+        self._verified_through = {}
         self._owner = "NIFTY_SETUP_LAB"
         self.states = {key: {"enabled": False, "generation": 0, "phase": "stopped", "started_at": None,
                             "stopped_at": None, "last_checked": None, "last_bar": None, "reason": "not_started",
@@ -133,7 +134,11 @@ class NiftySetupLab:
             stamp = (path.stat().st_mtime_ns, path.stat().st_size)
             if self._cache.get(frame, (None,))[0] != stamp:
                 self._cache[frame] = (stamp, load_candles(path))
-            return self._cache[frame][1]
+            # A cached forming candle cannot become final merely as time passes.
+            # Existing shared CSVs may contain partial bars from another downloader.
+            verified_at = self._verified_through.get(frame)
+            cutoff = verified_at or datetime.fromtimestamp(path.stat().st_mtime, IST)
+            return closed_candles(self._cache[frame][1], frame, cutoff)
 
     def refresh_candles(self):
         if not self._enabled() or not is_scan_window():
@@ -151,14 +156,21 @@ class NiftySetupLab:
             try:
                 rows = closed_candles(self.candles(frame), frame, now)
                 expected = expected_closed_bar(frame, now)
-                if rows and as_ist(rows[-1].timestamp) == expected and len(rows) >= (2 if frame == "day" else 60):
+                if (rows and as_ist(rows[-1].timestamp) == expected
+                        and self._verified_through.get(frame)
+                        and expected_closed_bar(frame, self._verified_through[frame]) == expected
+                        and len(rows) >= (2 if frame == "day" else 60)):
                     continue
                 self._refresh_attempts[frame] = now
                 with self._lock:
                     self.data_state["candles"].update(status="refreshing", current=frame, started_at=now.isoformat())
                 start = as_ist(rows[-1].timestamp) - timedelta(days=2) if len(rows) >= 60 else now - timedelta(days=45)
                 fresh = _zerodha_client().historical_candles(token, frame, start, now)
-                merge_candles_csv(candle_path(self.analysis.daily_data_dir, frame, "NIFTY_50"), fresh)
+                final = closed_candles(fresh, frame, now)
+                if not final:
+                    raise ValueError(f"No completed {frame} candles returned")
+                merge_candles_csv(candle_path(self.analysis.daily_data_dir, frame, "NIFTY_50"), final)
+                self._verified_through[frame] = as_ist(candle_close_time(final[-1].timestamp, frame))
                 with self._lock:
                     self.data_state["candles"].update(status="waiting", last_success=datetime.now(IST).isoformat(), error=None)
             except Exception as exc:
@@ -229,7 +241,7 @@ class NiftySetupLab:
             if prepared and as_ist(quote["quote_time"]) < as_ist(reading["closed_at"]):
                 checks["gate"] = "spot_quote_before_signal_close"
             if checks.get("gate") in {"spot_quote_unavailable_or_stale", "spot_quote_before_signal_close"}:
-                self._progress(setup, state, now, "waiting_quote", checks["gate"], reading)
+                self._progress(setup, state, now, "waiting_quote", checks["gate"], {**reading, "entry_checks": checks})
                 return
             if now.time().replace(tzinfo=None) >= time(14, 30):
                 prepared = None
@@ -273,7 +285,8 @@ class NiftySetupLab:
             if self._valid(setup, state["generation"]):
                 previous = self.states[setup]
                 if (previous["phase"], previous["reason"]) != (phase, reason):
-                    self.repo.event("progress", now, setup=setup, phase=phase, reason=reason)
+                    self.repo.event("progress", now, setup=setup, phase=phase, reason=reason,
+                                    entry_checks=(reading or {}).get("entry_checks"))
                 self.states[setup].update(phase=phase, reason=reason, last_checked=now.isoformat(), error=None)
                 if reading:
                     self.states[setup].update(last_bar=reading["bar_time"], indicators=reading.get("indicators", {}))
@@ -338,13 +351,27 @@ class NiftySetupLab:
                 "delivery": self.repo.outbox.history(day), "events": self.repo.events(day)[-100:],
                 "telegram_configured": TelegramNotifier.from_env("NIFTY_LAB_").configured()}
 
-    def export(self, day=None):
+    def export(self, day=None, from_date=None, to_date=None):
+        from trading_analysis.audit_exports import date_window, days
+        first, last = date_window(day, from_date, to_date)
+        if first != last:
+            reports = [self.export(selected) for selected in days(first, last)]
+            result = dict(reports[-1])
+            for key in ("trades", "decisions", "events", "delivery", "option_snapshots", "trade_entry_decisions"):
+                rows = [row for report in reports for row in report[key]]
+                result[key] = list({json.dumps(r, sort_keys=True): r for r in rows}.values())
+            result.update(date=first, from_date=first, to_date=last,
+                          decision_count=len(result["decisions"]),
+                          comparisons_by_date={r["date"]: r["comparisons"] for r in reports})
+            result.pop("comparisons", None)
+            return result
+        day = first
         report = self.status(day)
         day = report["date"]
         begin = as_ist(day + "T00:00:00")
         report.update(decisions=self.repo.decisions(day), events=self.repo.events(day),
                       option_snapshots=self.options.load("NIFTY", begin, begin + timedelta(days=1) - timedelta(microseconds=1)),
-                      runtime=diagnostics.runtime(), timezone="Asia/Kolkata",
+                      runtime=diagnostics.runtime(), timezone="Asia/Kolkata", from_date=first, to_date=last,
                       limitations=["Forward paper observations, not broker fills or option P&L.",
                                    "Interrupted monitoring and recovered session references are excluded from performance.",
                                    "Daily performance groups exits by IST date. No exchange holiday calendar.",

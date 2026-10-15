@@ -7,7 +7,7 @@ from pathlib import Path
 import sqlite3
 from math import isfinite
 
-from trading_analysis.live_timing import IST, as_ist
+from trading_analysis.live_timing import CLOCK_SKEW_SECONDS, IST, as_ist
 
 WINDOWS = (3, 6, 15, 30)
 FIELDS = ("tradingsymbol", "strike", "option_type", "oi", "volume", "last_price",
@@ -70,7 +70,7 @@ def _contracts(snapshot):
 def _fresh_contract(row, received):
     try:
         age = (received - as_ist(row["exchange_timestamp"])).total_seconds()
-        return 0 <= age <= 180
+        return -CLOCK_SKEW_SECONDS <= age <= 180
     except (KeyError, ValueError, TypeError, AttributeError):
         return False
 

@@ -3795,15 +3795,23 @@ async function testIndexTelegram(symbol, button) {
   }
 }
 
-async function downloadIndexDiagnostics() {
+function auditRange(fromId, toId) {
+  const from = $(fromId).value, to = $(toId).value || from;
+  if (!from || !to || from > to) throw new Error("Choose a valid From / To date range.");
+  return {query: from === to ? `date=${encodeURIComponent(from)}` : `from_date=${encodeURIComponent(from)}&to_date=${encodeURIComponent(to)}`,
+    label: from === to ? from : `${from}-to-${to}`};
+}
+
+async function downloadIndexDiagnostics(format = "zip") {
   const date = $("indexDiagnosticsDate").value;
   if (!date) return;
   const button = $("indexDiagnosticsDownload");
   button.disabled = true;
   $("indexDiagnosticsStatus").textContent = "Preparing scan log...";
   try {
-    await downloadArchive(`/api/index-scanners/diagnostics?date=${encodeURIComponent(date)}&format=zip`, `index-scan-log-${date}.zip`);
-    $("indexDiagnosticsStatus").textContent = "Full-day scan log, option evidence and delivery audit downloaded.";
+    const range = auditRange("indexDiagnosticsDate", "indexDiagnosticsTo");
+    await downloadArchive(`/api/index-scanners/diagnostics?${range.query}&format=${format}`, `index-${format === "csv" ? "trades" : "scan-log"}-${range.label}.${format}`);
+    $("indexDiagnosticsStatus").textContent = "Selected-period trade history downloaded" + (format === "zip" ? " with scan logs, option evidence and delivery audit." : ".");
   } catch (error) {
     $("indexDiagnosticsStatus").textContent = error.message;
   } finally {
@@ -3817,8 +3825,9 @@ async function downloadAppDiagnostics() {
   $("appDiagnosticsDownload").disabled = true;
   $("appDiagnosticsStatus").textContent = "Preparing app log...";
   try {
-    await downloadArchive(`/api/diagnostics/export?date=${encodeURIComponent(date)}&format=zip`, `trading-app-log-${date}.zip`);
-    $("appDiagnosticsStatus").textContent = "Full-day application and scanner audit downloaded.";
+    const range = auditRange("appDiagnosticsDate", "appDiagnosticsTo");
+    await downloadArchive(`/api/diagnostics/export?${range.query}&format=zip`, `trading-app-log-${range.label}.zip`);
+    $("appDiagnosticsStatus").textContent = "Selected-period application and scanner audit downloaded.";
   } catch (error) {
     $("appDiagnosticsStatus").textContent = error.message;
   } finally {
@@ -4123,7 +4132,7 @@ $("pullbackStop").addEventListener("click", () => controlPullbacks("stop"));
 $("pullbackStartAll").addEventListener("click", () => controlPullbacks("start-all"));
 $("pullbackTestTelegram").addEventListener("click", () => controlPullbacks("test-telegram"));
 $("pullbackExport").addEventListener("click", async () => {
-  try { downloadBlob(new Blob([JSON.stringify(await api("/api/pullbacks/export"), null, 2)], {type: "application/json"}), "pullback-scanner-log.json"); }
+  try { const range = auditRange("pullbackExportFrom", "pullbackExportTo"); await downloadArchive(`/api/pullbacks/export?${range.query}&format=zip`, `pullback-scanner-log-${range.label}.zip`); }
   catch (error) { $("pullbackActionStatus").textContent = error.message; }
 });
 for (const id of ["pullbackSide", "pullbackState"]) $(id).addEventListener("change", () => { if (state.pullbacks.data) renderPullbacks(state.pullbacks.data); });
@@ -4213,8 +4222,10 @@ document.querySelectorAll("[data-nifty-view-target]").forEach((button) => {
 });
 activateNiftyView("live");
 $("indexDiagnosticsDate").value = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Kolkata" });
-$("indexDiagnosticsDownload").addEventListener("click", downloadIndexDiagnostics);
+$("indexDiagnosticsDownload").addEventListener("click", () => downloadIndexDiagnostics());
 $("appDiagnosticsDate").value = $("indexDiagnosticsDate").value;
+$("pullbackExportFrom").value = $("indexDiagnosticsDate").value;
+$("indexTradesDownload").addEventListener("click", () => downloadIndexDiagnostics("csv"));
 $("appDiagnosticsDownload").addEventListener("click", downloadAppDiagnostics);
 window.addEventListener("error", (event) => reportBrowserError(event.message));
 window.addEventListener("unhandledrejection", (event) => reportBrowserError(event.reason?.message || event.reason));

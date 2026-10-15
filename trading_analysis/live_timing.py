@@ -7,6 +7,9 @@ from trading_analysis.scheduler.market_hours import is_market_day
 
 IST = ZoneInfo("Asia/Kolkata")
 MAX_ENTRY_DELAY = {"intraday": 120, "swing": 300, "positional": 900}
+# Exchange clocks and second-resolution broker timestamps can lead the host slightly.
+# Never extend stale-data limits or change stored timestamps to compensate.
+CLOCK_SKEW_SECONDS = 3
 
 
 def as_ist(value):
@@ -37,7 +40,8 @@ def quote_is_fresh(quote, now, max_age=20):
     try:
         price = float(quote["price"])
         ages = [(as_ist(now) - as_ist(quote[key])).total_seconds() for key in ("quote_time", "received_at")]
-        return isfinite(price) and price > 0 and all(0 <= age <= max_age for age in ages)
+        return (isfinite(price) and price > 0 and -CLOCK_SKEW_SECONDS <= ages[0] <= max_age
+                and 0 <= ages[1] <= max_age)
     except (KeyError, ValueError, TypeError, AttributeError):
         return False
 
@@ -50,6 +54,8 @@ def prepare_live_entry(signal, quote, now, checks=None):
     closed_at = as_ist(metadata["signal_candle_closed_at"])
     delay = (now - closed_at).total_seconds()
     checks.update(signal_delay_seconds=round(delay, 3), gate="signal_expired")
+    checks["spot_quote"] = dict(quote or {})
+    checks["clock_skew_tolerance_seconds"] = CLOCK_SKEW_SECONDS
     if not 0 <= delay <= MAX_ENTRY_DELAY[signal["horizon"]]:
         return None
     checks["gate"] = "spot_quote_unavailable_or_stale"

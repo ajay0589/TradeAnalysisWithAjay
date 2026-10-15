@@ -58,7 +58,9 @@ class LiveQuoteService:
         with self._lock:
             return {"running": bool(self._owners), "stream_connected": self._connected,
                     "mode": "streaming" if self._connected else "REST fallback" if self._owners else "stopped",
-                    "error": self._error, "quotes": {key: {**row, "fresh": quote_is_fresh(row, now)}
+                    "error": self._error, "quotes": {key: {**row, "fresh": quote_is_fresh(row, now),
+                        "quote_age_seconds": round((now - as_ist(row["quote_time"])).total_seconds(), 3),
+                        "receipt_age_seconds": round((now - as_ist(row["received_at"])).total_seconds(), 3)}
                                                       for key, row in self._quotes.items()}}
 
     def _start_stream(self):

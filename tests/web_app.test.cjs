@@ -19,6 +19,7 @@ function element(attributes = {}) {
       toggle: (key, on) => { on ??= !classes.has(key); if (on) classes.add(key); else classes.delete(key); return on; } },
     setAttribute: (key, value) => { attributes[key] = value; },
     getAttribute: (key) => attributes[key],
+    removeAttribute: (key) => { delete attributes[key]; },
     addEventListener: (key, fn) => { handlers[key] = fn; },
     appendChild(child) { this.children.push(child); },
     querySelector: () => element(), querySelectorAll: () => [],
@@ -382,4 +383,33 @@ test("Lab start-all targets only the lab and Telegram is opt-in", async () => {
   request.resolve({});
   await pending;
   assert.equal(ui.requests.some(r => /index-scanners\/start|pullbacks\/start|nifty\/auto\/start/.test(r.url)), false);
+});
+
+test("audit download controls pass explicit ranges and keep format separate from click events", async () => {
+  const ui = app(true), downloads = [];
+  ui.context.downloadArchive = async (url, name) => downloads.push({url, name});
+  ui.ids.get("indexDiagnosticsDate").value = "2026-10-01";
+  ui.ids.get("indexDiagnosticsTo").value = "2026-10-15";
+  await ui.ids.get("indexDiagnosticsDownload").handlers.click({type:"click"});
+  await ui.ids.get("indexTradesDownload").handlers.click({type:"click"});
+  assert.ok(downloads[0].url.endsWith("from_date=2026-10-01&to_date=2026-10-15&format=zip"));
+  assert.ok(downloads[1].url.endsWith("format=csv"));
+  ui.ids.get("appDiagnosticsDate").value = "2026-10-01";
+  ui.ids.get("appDiagnosticsTo").value = "2026-10-15";
+  await ui.context.downloadAppDiagnostics();
+  assert.ok(downloads[2].url.includes("/api/diagnostics/export?from_date="));
+  ui.ids.get("labDate").value = "2026-10-01";
+  ui.ids.get("labExportTo").value = "2026-10-15";
+  ui.context.updateLabExport();
+  await ui.context.exportLabCsv();
+  assert.ok(ui.ids.get("labDownload").href.includes("to_date=2026-10-15"));
+  assert.ok(downloads[3].url.endsWith("format=csv"));
+  ui.ids.get("pullbackExportFrom").value = "2026-10-01";
+  ui.ids.get("pullbackExportTo").value = "2026-10-15";
+  await ui.ids.get("pullbackExport").handlers.click();
+  assert.ok(downloads[4].url.includes("/api/pullbacks/export?from_date="));
+  ui.ids.get("indexDiagnosticsTo").value = "2026-09-30";
+  await ui.context.downloadIndexDiagnostics();
+  assert.equal(downloads.length, 5);
+  assert.match(ui.ids.get("indexDiagnosticsStatus").textContent, /valid From/);
 });

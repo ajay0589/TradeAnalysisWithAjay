@@ -9,6 +9,7 @@ from trading_analysis.instrument_master_service import InstrumentMasterService
 from trading_analysis.nifty.auto_scan_service import NiftyAutoScanService
 from trading_analysis.notifications.telegram import TelegramNotifier
 from trading_analysis.live_quotes import LIVE_QUOTES
+from trading_analysis.audit_exports import date_window, days, trade_overlaps
 
 
 class AllIndexMonitor:
@@ -118,21 +119,41 @@ class AllIndexMonitor:
         return {"symbol": selected, "destination": destination, "sent": bool(result.get("sent")),
                 "error": result.get("error")}
 
-    def diagnostics(self, day: str | None = None) -> dict[str, Any]:
+    def diagnostics(self, day: str | None = None, from_date=None, to_date=None) -> dict[str, Any]:
+        first, last = date_window(day, from_date, to_date)
+        if first != last:
+            result = None
+            for selected in days(first, last):
+                part = self.diagnostics(selected)
+                if result is None:
+                    result = part
+                    continue
+                result["delivery"].extend(part["delivery"])
+                for symbol in ("NIFTY", "BANKNIFTY", "SENSEX"):
+                    result["option_observations"][symbol].extend(part["option_observations"][symbol])
+                    for key, rows in part[symbol].items():
+                        result[symbol][key].extend(rows)
+            for symbol in ("NIFTY", "BANKNIFTY", "SENSEX"):
+                result[symbol]["trades"] = list({r["trade_id"]: r for r in result[symbol]["trades"]}.values())
+            result.update(date=first, from_date=first, to_date=last)
+            return result
+        day = first
         selected = date.fromisoformat(day) if day else datetime.now(ZoneInfo("Asia/Kolkata")).date()
         stamp = selected.isoformat()
         jobs = [self._nifty_job(row) for row in self.nifty.job_repository.latest_jobs(limit=None, day=stamp)
                 if str(row.get("started_at") or "").startswith(stamp)]
         alerts = [row for row in self.nifty.alert_repository.list_recent_alerts(limit=None, day=stamp)
                   if str(row.get("created_at") or "").startswith(stamp)]
-        trades = [row for row in self.nifty.trade_repository.list_trades(status="all", limit=None, day=stamp)
-                  if str(row.get("created_at") or "").startswith(stamp)
-                  or str(row.get("updated_at") or "").startswith(stamp)]
+        trades = [row for row in self.nifty.trade_repository.list_trades(status="all", limit=None)
+                  if trade_overlaps(row, stamp, stamp)]
         from trading_analysis.option_history import OptionHistory
         from trading_analysis.notifications.outbox import AlertOutbox
         start = datetime.combine(selected, datetime.min.time(), ZoneInfo("Asia/Kolkata"))
         history = OptionHistory(self.nifty.trade_repository.db_path)
-        return {"schema_version": 2, "date": stamp, "timezone": "Asia/Kolkata", "truncated": False,
+        return {"schema_version": 3, "date": stamp, "from_date": first, "to_date": last,
+                "timezone": "Asia/Kolkata", "truncated": False,
+                "trade_date_basis": "Position overlaps selected dates; records show latest stored state, not an as-of reconstruction.",
+                "retention_note": "Only retained records can be exported; empty days do not prove a scanner was running.",
                 "live_quotes": LIVE_QUOTES.status(),
                 "delivery": AlertOutbox(self.nifty.trade_repository.db_path).history(stamp),
                 "option_observations": {symbol: history.load(symbol, start, start + timedelta(days=1) - timedelta(microseconds=1))

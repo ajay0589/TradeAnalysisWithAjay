@@ -3,7 +3,7 @@ from collections import Counter
 from datetime import timedelta
 from math import isfinite
 
-from trading_analysis.live_timing import as_ist
+from trading_analysis.live_timing import CLOCK_SKEW_SECONDS, as_ist
 
 
 def number(row, key):
@@ -32,7 +32,7 @@ def liquid(row, at):
     if (ask - bid) / price > .05:
         return False
     try:
-        return all(0 <= (at - as_ist(row[key])).total_seconds() <= 120 for key in ("exchange_timestamp", "last_trade_time"))
+        return all(-CLOCK_SKEW_SECONDS <= (at - as_ist(row[key])).total_seconds() <= 120 for key in ("exchange_timestamp", "last_trade_time"))
     except (KeyError, ValueError, TypeError, AttributeError):
         return False
 

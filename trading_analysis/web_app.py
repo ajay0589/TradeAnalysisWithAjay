@@ -21,10 +21,15 @@ from trading_analysis.scanner_dashboard import ScannerDashboard
 from trading_analysis.notifications.telegram import TelegramNotifier
 from trading_analysis.web_services import AnalysisService
 from trading_analysis import diagnostics
+from trading_analysis.audit_exports import date_window, trade_csv
 
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB_ROOT = ROOT / "web"
+
+
+def _export_dates(params):
+    return {key: params[key][0] for key in ("from_date", "to_date") if params.get(key)}
 
 
 class ReusableThreadingHTTPServer(ThreadingHTTPServer):
@@ -92,9 +97,11 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(self.nifty_lab.status(parse_qs(parsed.query).get("date", [None])[0]))
             elif parsed.path == "/api/nifty-lab/export":
                 params = parse_qs(parsed.query)
-                report = self.nifty_lab.export(params.get("date", [None])[0])
+                report = self.nifty_lab.export(params.get("date", [None])[0], **_export_dates(params))
                 if params.get("format") == ["zip"]:
                     self._send_zip(report, "nifty-setup-lab")
+                elif params.get("format") == ["csv"]:
+                    self._send_csv(report["trades"], "nifty-setup-lab-trades", report)
                 else:
                     self._send_json(report)
             elif parsed.path == "/api/health":
@@ -102,14 +109,21 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/pullbacks/status":
                 self._send_json(self.pullback_scanner.status())
             elif parsed.path == "/api/pullbacks/export":
-                self._send_json(diagnostics.clean(self.pullback_scanner.export()))
+                params = parse_qs(parsed.query)
+                first, last = date_window(params.get("date", [None])[0], **_export_dates(params))
+                report = diagnostics.clean(self.pullback_scanner.export(first, last))
+                if params.get("format") == ["zip"]:
+                    self._send_zip(report, "pullback-scanner-log")
+                else:
+                    self._send_json(report)
             elif parsed.path == "/api/diagnostics/export":
                 params = parse_qs(parsed.query)
-                report = diagnostics.export(params.get("date", [None])[0])
-                report["scanners"] = diagnostics.clean(self.all_index_monitor.diagnostics(report["date"]))
-                report["pullbacks"] = diagnostics.clean(self.pullback_scanner.export())
-                report["nifty_setup_lab"] = self.nifty_lab.export(report["date"])
-                report["mcx"] = self.mcx_scanner.export(report["date"], report["date"])
+                report = diagnostics.export(params.get("date", [None])[0], **_export_dates(params))
+                dates = {k: report[k] for k in ("from_date", "to_date")}
+                report["scanners"] = diagnostics.clean(self.all_index_monitor.diagnostics(**dates))
+                report["pullbacks"] = diagnostics.clean(self.pullback_scanner.export(**dates))
+                report["nifty_setup_lab"] = self.nifty_lab.export(**dates)
+                report["mcx"] = self.mcx_scanner.export(**dates)
                 if params.get("format") == ["zip"]:
                     self._send_zip(report, "trading-app-log")
                 else:
@@ -331,9 +345,11 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(self.all_index_monitor.status())
             elif parsed.path == "/api/index-scanners/diagnostics":
                 params = parse_qs(parsed.query)
-                report = self.all_index_monitor.diagnostics(params.get("date", [None])[0])
+                report = self.all_index_monitor.diagnostics(params.get("date", [None])[0], **_export_dates(params))
                 if params.get("format") == ["zip"]:
                     self._send_zip(diagnostics.clean(report), "index-scan-log")
+                elif params.get("format") == ["csv"]:
+                    self._send_csv([t for symbol in ("NIFTY", "BANKNIFTY", "SENSEX") for t in report[symbol]["trades"]], "index-trades", report)
                 else:
                     self._send_json(report)
             elif parsed.path == "/api/nifty/data/latest":
@@ -687,13 +703,34 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
         import io
         import zipfile
         buffer = io.BytesIO()
-        name = f"{prefix}-{report['date']}"
+        name = self._export_name(prefix, report)
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr(name + ".json", json.dumps(report, default=str, ensure_ascii=True))
+            for symbol in ("NIFTY", "BANKNIFTY", "SENSEX"):
+                if symbol in report:
+                    archive.writestr(symbol.lower() + "-trades.csv", trade_csv(report[symbol].get("trades", [])))
+            if "trades" in report:
+                archive.writestr("trades.csv", trade_csv(report["trades"]))
         body = buffer.getvalue()
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/zip")
         self.send_header("Content-Disposition", f'attachment; filename="{name}.zip"')
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    @staticmethod
+    def _export_name(prefix, report):
+        first = report.get("from_date") or report["date"]
+        last = report.get("to_date") or first
+        return f"{prefix}-{first}" + (f"-to-{last}" if first != last else "")
+
+    def _send_csv(self, rows, prefix, report):
+        body = trade_csv(diagnostics.clean(rows)).encode("utf-8-sig")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/csv; charset=utf-8")
+        self.send_header("Content-Disposition", f'attachment; filename="{self._export_name(prefix, report)}.csv"')
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()

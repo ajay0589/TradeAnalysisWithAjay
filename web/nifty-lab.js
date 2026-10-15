@@ -87,7 +87,7 @@ function renderNiftyLab() {
   $("labDecisionCount").textContent = `${decisions.length} shown / ${row.checked_candles} total`;
   $("labDecisions").innerHTML = decisions.map(r => `<tr><td>${fmtDateTime(r.checked_at)}</td><td>${fmtDateTime(r.closed_at)}</td><td>${escapeHtml(labLabel(r.direction || r.reason))}</td><td>${escapeHtml(labLabel(r.variants?.technical))}</td><td>${escapeHtml(labLabel(r.variants?.combined))}</td><td><details><summary>Values</summary><pre>${escapeHtml(JSON.stringify({indicators:r.indicators,entry:r.entry_checks,options:r.option_evidence}, null, 2))}</pre></details></td></tr>`).join("") || '<tr><td colspan="6">No decisions for this session.</td></tr>';
   $("labEvents").innerHTML = (d.events || []).filter(e => !e.setup || e.setup === niftyLab.setup).slice().reverse().map(e => `<p>${fmtDateTime(e.time)} | ${escapeHtml(labLabel(e.event))} | ${escapeHtml(labLabel(e.reason || e.error || e.phase || e.worker || "-"))}</p>`).join("") || "No monitor events.";
-  $("labDownload").href = `/api/nifty-lab/export?date=${encodeURIComponent($("labDate").value)}&format=zip`;
+  updateLabExport();
 }
 
 function labFilteredTrades() {
@@ -135,7 +135,14 @@ function drawLabCurve(metrics) {
   if (!all.some(p => p.time)) { ctx.fillStyle = "#526174"; ctx.fillText("No eligible closed trades", left + 20, top + 20); }
 }
 
-function exportLabCsv() {
+async function exportLabCsv() {
+  if ($("labExportTo").value && $("labExportTo").value !== $("labDate").value) {
+    try {
+      const range = auditRange("labDate", "labExportTo");
+      await downloadArchive(`/api/nifty-lab/export?${range.query}&format=csv`, `nifty-setup-lab-trades-${range.label}.csv`);
+    } catch (error) { $("labAction").textContent = error.message; }
+    return;
+  }
   if (niftyLab.data?.date !== $("labDate").value) { $("labAction").textContent = "Selected session is still loading."; return; }
   const columns = ["id", "setup", "variant", "direction", "status", "entry_time", "entry_price", "exit_time", "exit_price", "open_seconds", "stop_level", "target_level", "net_r", "cost_points", "performance_eligible", "exit_reason", "monitoring_interrupted", "india_vix_entry", "india_vix_exit"];
   const cell = v => `"${String(v ?? "").replace(/^[=+@]/, "'$&").replaceAll('"', '""')}"`;
@@ -144,6 +151,11 @@ function exportLabCsv() {
 }
 
 $("labDate").value = labSessionDate();
+function updateLabExport() {
+  try { $("labDownload").href = `/api/nifty-lab/export?${auditRange("labDate", "labExportTo").query}&format=zip`; }
+  catch (error) { $("labDownload").removeAttribute("href"); $("labAction").textContent = error.message; }
+}
+$("labExportTo").addEventListener("change", updateLabExport);
 $("labStartAll").addEventListener("click", () => controlNiftyLab("start"));
 $("labStopAll").addEventListener("click", () => controlNiftyLab("stop"));
 $("labTestTelegram").addEventListener("click", () => controlNiftyLab("test-telegram"));
@@ -152,7 +164,7 @@ document.querySelectorAll("[data-lab-setup]").forEach(b => b.addEventListener("c
 document.querySelectorAll("[data-tab-target]").forEach(b => b.addEventListener("click", () => { if (b.dataset.tabTarget === "nifty-lab") loadNiftyLab(); }));
 $("labDate").addEventListener("change", () => {
   if (!$("labDate").value) $("labDate").value = labSessionDate();
-  $("labDownload").href = `/api/nifty-lab/export?date=${encodeURIComponent($("labDate").value)}&format=zip`;
+  updateLabExport();
   niftyLab.page = 1; ++niftyLab.request; loadNiftyLab();
 });
 for (const id of ["labVariant", "labTradeState"]) $(id).addEventListener("change", () => { niftyLab.page = 1; renderLabTrades(); });

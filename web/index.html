@@ -21,8 +21,9 @@
 
       <div class="app-diagnostics">
         <span id="serverRuntime" class="cell-note"></span>
-        <label for="appDiagnosticsDate">Log date (IST)</label>
+        <label for="appDiagnosticsDate">Logs from (IST)</label>
         <input id="appDiagnosticsDate" type="date" />
+        <label for="appDiagnosticsTo">To (IST)</label><input id="appDiagnosticsTo" type="date" />
         <button id="appDiagnosticsDownload" type="button">Download app log</button>
         <span id="appDiagnosticsStatus" class="cell-note"></span>
       </div>
@@ -479,7 +480,8 @@
               <button id="labStartAll" type="button">Start all five</button><button id="labStopAll" type="button" disabled>Stop all five</button>
               <label class="lab-check"><input id="labTelegram" type="checkbox"> Telegram paper alerts</label>
               <button id="labTestTelegram" type="button">Send test</button><span id="labTelegramStatus" class="muted"></span>
-              <label>Session (IST)<input id="labDate" type="date"></label>
+              <label>Session / export from (IST)<input id="labDate" type="date"></label>
+              <label>Export to (IST)<input id="labExportTo" type="date"></label>
               <a id="labDownload" class="lab-download" href="/api/nifty-lab/export?format=zip" download>Download trades &amp; logs (.zip)</a>
               <button id="labCsv" type="button">Download trades (.csv)</button>
             </div>
@@ -530,8 +532,10 @@
               </div>
               <div class="wide-table"><table class="readable-table"><thead><tr><th>Scanner</th><th>Status</th><th>Progress</th><th>Current work</th><th>Started</th><th>Last completed</th><th>Next</th><th>Telegram</th><th>Latest issue</th></tr></thead><tbody id="allIndexStatusBody"></tbody></table></div>
               <div class="index-diagnostics-controls">
-                <div><label for="indexDiagnosticsDate">Scan date (IST)</label><input id="indexDiagnosticsDate" type="date" /></div>
+                <div><label for="indexDiagnosticsDate">Logs from (IST)</label><input id="indexDiagnosticsDate" type="date" /></div>
+                <div><label for="indexDiagnosticsTo">To (IST)</label><input id="indexDiagnosticsTo" type="date" /></div>
                 <button id="indexDiagnosticsDownload" type="button">Download scan log</button>
+                <button id="indexTradesDownload" type="button">Download trades CSV</button>
                 <span id="indexDiagnosticsStatus" class="cell-note"></span>
               </div>
               <div id="allIndexMessage" class="mini-status"></div>
@@ -2165,6 +2169,8 @@
               <button id="pullbackStartAll" class="full-btn">Start indices + pullbacks</button>
               <div id="pullbackTelegram" class="mini-status"></div>
               <button id="pullbackTestTelegram" class="full-btn">Test pullback Telegram</button>
+              <label for="pullbackExportFrom">Logs from (IST)</label><input id="pullbackExportFrom" type="date" />
+              <label for="pullbackExportTo">To (IST)</label><input id="pullbackExportTo" type="date" />
               <button id="pullbackExport" class="full-btn">Download scanner log</button>
               <div id="pullbackActionStatus" class="mini-status" role="status"></div>
             </div></aside>

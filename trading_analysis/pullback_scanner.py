@@ -371,6 +371,16 @@ class PullbackScanner:
                 "setups": rows[:500], "setup_total": len(rows), "events": self.repository.events()[:200],
                 "delivery": [r for r in self.outbox.history() if r["trade_id"].startswith("PB-")][:200]}
 
-    def export(self):
-        return {"status": self.status(), "setups": self.repository.rows(), "events": self.repository.events(),
-                "timezone": "Asia/Kolkata", "note": "Underlying spot signals; no orders. Review before sharing."}
+    def export(self, from_date=None, to_date=None):
+        from trading_analysis.audit_exports import date_window, in_window, trade_overlaps
+        first, last = date_window(from_date=from_date, to_date=to_date)
+        rows = [r for r in self.repository.rows() if trade_overlaps(r, first, last)
+                or any(in_window(r.get(k), first, last) for k in ("detected_at", "discarded_at", "signal_time"))]
+        events = [r for r in self.repository.events() if in_window(r.get("event_time"), first, last)]
+        status = self.status()
+        for key in ("setups", "events", "delivery"):
+            status.pop(key, None)
+        return {"date": first, "from_date": first, "to_date": last, "status": status,
+                "setups": rows, "events": events,
+                "delivery": [r for r in self.outbox.history() if r["trade_id"].startswith("PB-") and in_window(r.get("created_at"), first, last)],
+                "timezone": "Asia/Kolkata", "note": "Underlying spot signals; latest stored states, not historical fills. Review before sharing."}

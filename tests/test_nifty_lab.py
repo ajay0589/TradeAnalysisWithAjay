@@ -292,6 +292,33 @@ def test_export_status_date_and_inputs(lab):
     with pytest.raises(ValueError): lab.stop("bad")
 
 
+def test_range_export_keeps_trades_once_and_full_audit(lab):
+    lab.tick("Nifty_Setup1", NOW)
+    report = lab.export(from_date="2026-10-07", to_date="2026-10-09")
+    assert len(report["trades"]) == 2
+    assert len(report["trade_entry_decisions"]) == 1
+    assert report["to_date"] == "2026-10-09"
+    assert set(report["comparisons_by_date"]) == {"2026-10-07", "2026-10-08", "2026-10-09"}
+    with pytest.raises(ValueError): lab.export(from_date="2026-10-09", to_date="2026-10-07")
+
+
+def test_signal_can_enter_with_small_broker_clock_lead(lab):
+    quote = dict(lab.quotes.get.return_value)
+    quote["quote_time"] = (NOW + timedelta(seconds=1.64)).isoformat()
+    lab.quotes.get.return_value = quote
+    lab.tick("Nifty_Setup1", NOW)
+    assert len(lab.repo.trades()) == 2
+
+
+def test_waiting_quote_event_contains_observed_clock_evidence(lab):
+    lab.quotes.get.return_value = {"price": 105, "quote_time": (NOW+timedelta(seconds=5)).isoformat(), "received_at": NOW.isoformat()}
+    lab.tick("Nifty_Setup1", NOW)
+    assert not lab.repo.trades()
+    event = lab.repo.events("2026-10-08")[-1]
+    assert event["reason"] == "spot_quote_unavailable_or_stale"
+    assert event["entry_checks"]["spot_quote"]["quote_time"] == (NOW+timedelta(seconds=5)).isoformat()
+
+
 def test_worker_count_single_data_feeds_and_idempotence(lab, monkeypatch):
     lab._threads = []
     thread = Mock()
@@ -321,6 +348,12 @@ def test_api_routes_download_and_safe_defaults(lab, monkeypatch):
         with urlopen(base+"/api/nifty-lab/export?date=2026-10-08&format=zip") as response:
             with zipfile.ZipFile(io.BytesIO(response.read())) as archive:
                 assert len(json.loads(archive.read(archive.namelist()[0]))["trades"]) == 2
+                assert "trades.csv" in archive.namelist()
+        with urlopen(base+"/api/nifty-lab/export?from_date=2026-10-07&to_date=2026-10-09&format=csv") as response:
+            assert len(list(csv.DictReader(io.StringIO(response.read().decode("utf-8-sig"))))) == 2
+        with pytest.raises(HTTPError) as error:
+            urlopen(base+"/api/nifty-lab/export?from_date=2026-10-09&to_date=2026-10-07")
+        assert error.value.code == 400
         with urlopen(Request(base+"/api/nifty-lab/stop", data=b'{"setup":"Nifty_Setup1"}', headers={"Content-Type":"application/json"})) as response:
             assert json.load(response)["running_count"] == 4
         with pytest.raises(HTTPError) as error:
@@ -365,6 +398,36 @@ def test_one_option_refresh_persists_received_history_for_all_workers(lab, monke
     lab.analysis.refresh_option_chain_snapshot.assert_called_once_with(symbol="NIFTY", strikes_around=8, max_snapshots=8)
     assert len(lab.options.load("NIFTY", NOW-timedelta(minutes=1), NOW)) == 1
     assert lab.data_state["options"]["last_success"] == NOW.isoformat()
+
+
+@pytest.mark.parametrize("final_available", [True, False])
+def test_forming_cache_bar_requires_post_close_refresh(lab, monkeypatch, final_available):
+    import os
+    initial = NOW.replace(second=5)
+    forming = initial.replace(second=0)
+    frame = "5minute"
+    path = candle_path(lab.analysis.daily_data_dir, frame, "NIFTY_50")
+    rows = bars(frame, now=initial)
+    partial = Candle(forming, 100, 101, 99, 100, 10)
+    merge_candles_csv(path, rows + [partial])
+    os.utime(path, (initial.timestamp(), initial.timestamp()))
+    # A later wall clock does not turn the original partial download into a closed candle.
+    assert lab.candles(frame)[-1].timestamp == rows[-1].timestamp
+    later = initial + timedelta(minutes=5)
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None): return later
+    monkeypatch.setattr("trading_analysis.nifty_lab.service.datetime", Clock)
+    monkeypatch.setattr("trading_analysis.nifty_lab.service.is_scan_window", lambda: True)
+    lab.analysis._instruments_for_exchange = Mock(return_value=[{"exchange":"NSE", "tradingsymbol":"NIFTY 50", "instrument_token":"256265"}])
+    final = Candle(forming, 100, 110, 98, 109, 1000)
+    def history(token, frame, start, end):
+        if frame != "5minute": return bars(frame, now=later)
+        return rows + ([final, Candle(later.replace(second=0), 109, 109, 109, 109, 1)] if final_available else [])
+    monkeypatch.setattr("trading_analysis.web_services._zerodha_client", lambda: SimpleNamespace(historical_candles=history))
+    lab.refresh_candles()
+    assert lab.candles(frame)[-1].close == (109 if final_available else rows[-1].close)
+    assert lab.candles(frame)[-1].timestamp == (forming if final_available else rows[-1].timestamp)
 
 
 def test_atomic_trade_alert_failure_rolls_back_decision(lab, monkeypatch):

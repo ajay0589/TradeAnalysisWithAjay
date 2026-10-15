@@ -239,7 +239,7 @@ class IndexScanRepository:
         with self._connect() as conn:
             trades = [dict(row) for row in conn.execute(
                 "SELECT * FROM index_scan_trades WHERE symbol = ? AND "
-                "(substr(created_at, 1, 10) = ? OR substr(updated_at, 1, 10) = ?) ORDER BY created_at",
+                "(substr(entry_time, 1, 10) <= ? AND (exit_time IS NULL OR substr(exit_time, 1, 10) >= ?)) ORDER BY created_at",
                 (symbol, day, day),
             )]
             alerts = [dict(row) for row in conn.execute(
@@ -248,7 +248,9 @@ class IndexScanRepository:
             )]
         for row in trades:
             row["context"] = json.loads(row.pop("context_json") or "{}")
-        return {"runs": self.runs(symbol, day, limit=-1), "steps": self.steps(symbol, day, limit=-1),
+        runs = [{k: v for k, v in row.items() if k not in {"result_json", "errors_json"}}
+                for row in self.runs(symbol, day, limit=-1)]
+        return {"runs": runs, "steps": self.steps(symbol, day, limit=-1),
                 "trades": trades, "alerts": alerts}
 
 
