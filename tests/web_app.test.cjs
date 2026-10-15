@@ -22,6 +22,7 @@ function element(attributes = {}) {
     removeAttribute: (key) => { delete attributes[key]; },
     addEventListener: (key, fn) => { handlers[key] = fn; },
     appendChild(child) { this.children.push(child); },
+    replaceChildren(...children) { this.children = children; },
     querySelector: () => element(), querySelectorAll: () => [],
     parentElement: { hidden: false }, click() { this.handlers.click?.(); },
     focus() { this.focused = true; },
@@ -56,6 +57,33 @@ function app(includeLab = false) {
   if (includeLab) vm.runInContext(fs.readFileSync(path.join(root, "web/nifty-lab.js"), "utf8"), context, {filename: "web/nifty-lab.js"});
   return {context, requests, ids, events, run: (code) => vm.runInContext(code, context)};
 }
+
+test("help navigation loads read-only content once and supports retry", async () => {
+  const ui = app();
+  ui.run(fs.readFileSync(path.join(root, "web/help.js"), "utf8"));
+  ui.ids.get("helpDownload").disabled = true;
+  const before = ui.requests.length;
+  ui.context.activateTab("help");
+  assert.equal(ui.ids.get("notes").hidden, true);
+  assert.equal(ui.requests.at(-1).url, "/api/help");
+  ui.requests.at(-1).resolve({}, false);
+  await new Promise(setImmediate);
+  assert.equal(ui.ids.get("helpRetry").hidden, false);
+  assert.equal(ui.ids.get("helpDownload").disabled, true);
+  const retry = ui.ids.get("helpRetry").handlers.click();
+  ui.requests.at(-1).resolve({reviewed_on: "2026-10-15", lab_version: "v1", review_template: "Review",
+    sources: [], sections: [{id: "test", title: "Factors", items: [["EMA", "<script>not HTML</script>"]]}]});
+  await retry;
+  assert.equal(ui.ids.get("helpDownload").disabled, false);
+  assert.equal(ui.ids.get("helpRetry").hidden, true);
+  assert.equal(ui.ids.get("helpSections").children.length, 1);
+  assert.equal(ui.ids.get("helpSections").children[0].children[1].children[1].textContent, "<script>not HTML</script>");
+  ui.context.activateTab("research");
+  ui.context.activateTab("help");
+  const requests = ui.requests.slice(before);
+  assert.equal(requests.filter((r) => r.url === "/api/help").length, 2);
+  assert.ok(requests.every((r) => !r.options?.method || r.options.method === "GET"));
+});
 
 test("all initial UI controls are wired to existing elements", () => {
   const ui = app();

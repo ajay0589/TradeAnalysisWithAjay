@@ -66,8 +66,11 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_file(WEB_ROOT / "app.js", "application/javascript; charset=utf-8")
             elif parsed.path == "/nifty-lab.js":
                 self._send_file(WEB_ROOT / "nifty-lab.js", "application/javascript; charset=utf-8")
-            elif parsed.path in {"/scanner-dashboard.js", "/table-pagination.js", "/mcx.js"}:
+            elif parsed.path in {"/scanner-dashboard.js", "/table-pagination.js", "/mcx.js", "/help.js"}:
                 self._send_file(WEB_ROOT / parsed.path[1:], "application/javascript; charset=utf-8")
+            elif parsed.path == "/api/help":
+                from trading_analysis.help_guide import guide
+                self._send_json(guide())
             elif parsed.path in {"/api/mcx/status", "/api/mcx/export"}:
                 params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
                 if set(params) - {"from_date", "to_date", "format"}:

@@ -37,6 +37,7 @@
         <button class="tab-btn" data-tab-target="purple" type="button">Purple Touch</button>
         <button class="tab-btn" data-tab-target="data" type="button">Data Ops</button>
         <button class="tab-btn" data-tab-target="reports" type="button">Reports</button>
+        <button class="tab-btn" data-tab-target="help" type="button">Help &amp; About</button>
       </nav>
 
       <nav id="researchSubtabs" class="index-subtabs" aria-label="Stock research">
@@ -50,6 +51,20 @@
       <section class="notes" id="notes"></section>
 
       <section class="tab-panes">
+        <section id="tab-help" class="tab-pane" data-tab-panel="help">
+          <section class="dashboard-band help-guide">
+            <div class="section-heading"><h2>Help &amp; About</h2><span id="helpVersion"></span></div>
+            <p id="helpStatus" role="status">Not loaded</p>
+            <div class="help-actions">
+              <button id="helpRetry" type="button" hidden>Retry</button>
+              <button id="helpDownload" type="button" disabled>Download guide</button>
+              <button id="helpReviewDownload" type="button" disabled>Download review template</button>
+            </div>
+            <nav id="helpContents" aria-label="Guide contents"></nav>
+            <div id="helpSections"></div>
+            <div id="helpSources" class="help-sources"></div>
+          </section>
+        </section>
         <section id="tab-dashboard" class="tab-pane" data-tab-panel="dashboard">
           <section class="dashboard-band">
             <div class="section-heading"><h2>Scanner Overview</h2><span id="dashboardStatus" role="status">Loading...</span></div>
@@ -2313,5 +2328,6 @@
     <script src="/table-pagination.js"></script>
     <script src="/nifty-lab.js"></script>
     <script src="/mcx.js"></script>
+    <script src="/help.js"></script>
   </body>
 </html>

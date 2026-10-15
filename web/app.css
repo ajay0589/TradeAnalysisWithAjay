@@ -1425,3 +1425,16 @@ tr:last-child td {
 #tab-mcx .section-heading span { font-size: 13px; color: #526274; }
 #tab-mcx pre { max-width: 600px; white-space: pre-wrap; overflow-wrap: anywhere; }
 #mcxAction, #mcxError { overflow-wrap: anywhere; }
+.help-guide { background: #fff; }
+.help-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 20px; }
+#helpContents { display: flex; flex-wrap: wrap; gap: 10px 22px; padding: 12px 0 20px; border-bottom: 1px solid var(--line); }
+#helpContents a, .help-sources a { color: #165f78; text-underline-offset: 3px; }
+.help-topic { border-bottom: 1px solid var(--line); padding: 16px 0; scroll-margin-top: 16px; }
+.help-topic summary { font-size: 16px; font-weight: 650; cursor: pointer; }
+.help-topic dl { max-width: 1050px; line-height: 1.6; margin: 18px 0 4px; }
+.help-topic dt { font-weight: 650; margin-top: 18px; }
+.help-topic dd { margin: 4px 0 0; color: #37434a; overflow-wrap: anywhere; }
+.help-sources { padding: 12px 0; }
+.help-sources h3 { font-size: 16px; }
+.help-sources a { display: block; margin: 8px 0; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .help-actions button { max-width: 100%; } }
