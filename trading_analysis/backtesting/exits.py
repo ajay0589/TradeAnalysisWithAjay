@@ -71,6 +71,7 @@ def exit_for(
     stop_loss: float | None,
     target: float | None,
     holding_bars: int,
+    adverse_gaps: bool = False,
 ) -> dict[str, Any]:
     max_exit_index = min(len(candles) - 1, entry_index + max(1, holding_bars))
     ambiguous = False
@@ -78,11 +79,14 @@ def exit_for(
         candle = candles[index]
         stop_hit = _stop_hit(side, candle, stop_loss)
         target_hit = _target_hit(side, candle, target)
+        stop_price = stop_loss
+        if adverse_gaps and stop_hit:
+            stop_price = min(candle.open, stop_loss) if side == "long" else max(candle.open, stop_loss)
         if stop_hit and target_hit:
             ambiguous = True
-            return {"index": index, "price": stop_loss, "reason": "stop_loss", "intrabar_ambiguous": ambiguous}
+            return {"index": index, "price": stop_price, "reason": "stop_loss", "intrabar_ambiguous": ambiguous}
         if stop_hit:
-            return {"index": index, "price": stop_loss, "reason": "stop_loss", "intrabar_ambiguous": ambiguous}
+            return {"index": index, "price": stop_price, "reason": "stop_loss", "intrabar_ambiguous": ambiguous}
         if target_hit:
             return {"index": index, "price": target, "reason": "target", "intrabar_ambiguous": ambiguous}
     return {

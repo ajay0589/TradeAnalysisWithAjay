@@ -91,11 +91,8 @@ class PullbackScanner:
         return _zerodha_client()
 
     def universe(self, now):
-        nfo = self.service._instruments_for_exchange("NFO")
-        names = {row.get("name", "").upper() for row in nfo if row.get("segment") == "NFO-FUT"
-                 and str(row.get("expiry", ""))[:10] >= now.date().isoformat()}
-        return [item.symbol for item in self.service._watchlist_items_by_symbol().values()
-                if item.exchange == "NSE" and item.instrument_type == "EQ" and item.symbol.upper() in names]
+        from trading_analysis.data_sources.fno_universe import current_watchlist_symbols
+        return current_watchlist_symbols(self.service, now)
 
     def _prepare_universe(self, now):
         for exchange in ("NSE", "NFO"):

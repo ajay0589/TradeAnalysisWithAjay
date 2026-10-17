@@ -17,6 +17,7 @@ from trading_analysis.all_index_monitor import AllIndexMonitor
 from trading_analysis.pullback_scanner import PullbackScanner
 from trading_analysis.nifty_lab.service import NiftySetupLab
 from trading_analysis.scalping.service import ScalpingLab
+from trading_analysis.stock_research import StockResearch
 from trading_analysis.mcx.service import McxSwingScanner
 from trading_analysis.scanner_dashboard import ScannerDashboard
 from trading_analysis.notifications.telegram import TelegramNotifier
@@ -54,6 +55,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
     pullback_scanner = PullbackScanner(service)
     nifty_lab = NiftySetupLab(service)
     scalping_lab = ScalpingLab(service)
+    stock_research = StockResearch(service)
     mcx_scanner = McxSwingScanner()
 
     @diagnostics.audit_http
@@ -68,8 +70,22 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_file(WEB_ROOT / "app.js", "application/javascript; charset=utf-8")
             elif parsed.path == "/nifty-lab.js":
                 self._send_file(WEB_ROOT / "nifty-lab.js", "application/javascript; charset=utf-8")
-            elif parsed.path in {"/scanner-dashboard.js", "/table-pagination.js", "/mcx.js", "/help.js", "/scalping.js"}:
+            elif parsed.path in {"/scanner-dashboard.js", "/table-pagination.js", "/mcx.js", "/help.js", "/scalping.js", "/stocks.js"}:
                 self._send_file(WEB_ROOT / parsed.path[1:], "application/javascript; charset=utf-8")
+            elif parsed.path in {"/api/stocks/status", "/api/stocks/export"}:
+                params = parse_qs(parsed.query)
+                if set(params) - {"from_date", "to_date", "format"}:
+                    raise ValueError("Unknown stock research filter")
+                if parsed.path.endswith("status"):
+                    self._send_json(self.stock_research.status())
+                else:
+                    report = self.stock_research.export(**_export_dates(params))
+                    if params.get("format") == ["csv"]:
+                        self._send_csv(report["trades"], "stock-research-trades", report, redact=False)
+                    elif params.get("format") == ["zip"]:
+                        self._send_zip(report, "stock-research")
+                    else:
+                        self._send_json(report)
             elif parsed.path in {"/api/scalping/status", "/api/scalping/export"}:
                 params = parse_qs(parsed.query)
                 if set(params) - {"from_date", "to_date", "format"}:
@@ -143,6 +159,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 report["pullbacks"] = diagnostics.clean(self.pullback_scanner.export(**dates))
                 report["nifty_setup_lab"] = self.nifty_lab.export(**dates)
                 report["scalping"] = self.scalping_lab.export(**dates)
+                report["stock_research"] = self.stock_research.export(**dates)
                 report["mcx"] = self.mcx_scanner.export(**dates)
                 if params.get("format") == ["zip"]:
                     self._send_zip(report, "trading-app-log")
@@ -645,6 +662,16 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/mcx/test-telegram":
                 self._read_json()
                 self._send_json(TelegramNotifier.from_env("MCX_").send_message("MCX SWING - CONNECTION TEST ONLY. No trade or order."))
+            elif parsed.path == "/api/stocks/validate":
+                payload = self._read_json()
+                if set(payload) - {"as_of", "benchmark", "download"}:
+                    raise ValueError("Unknown stock validation setting")
+                self._send_json(self.stock_research.start(**payload))
+            elif parsed.path == "/api/stocks/cancel":
+                self._read_json()
+                self._send_json(self.stock_research.cancel())
+            elif parsed.path == "/api/stocks/start":
+                raise ValueError("Live stock strategies are blocked pending validation review")
             elif parsed.path == "/api/scalping/start":
                 payload = self._read_json()
                 self._send_json(self.scalping_lab.start(payload.get("setup"), payload.get("telegram_enabled", False)))
@@ -743,7 +770,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 if symbol in report:
                     archive.writestr(symbol.lower() + "-trades.csv", trade_csv(report[symbol].get("trades", [])))
             if "trades" in report:
-                archive.writestr("trades.csv", trade_csv(report["trades"]))
+                archive.writestr("trades.csv", trade_csv(report["trades"], report.get("csv_columns", ())))
         body = buffer.getvalue()
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/zip")
@@ -759,8 +786,9 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
         last = report.get("to_date") or first
         return f"{prefix}-{first}" + (f"-to-{last}" if first != last else "")
 
-    def _send_csv(self, rows, prefix, report):
-        body = trade_csv(diagnostics.clean(rows)).encode("utf-8-sig")
+    def _send_csv(self, rows, prefix, report, redact=True):
+        # Generated stock research rows contain only market/model fields, not broker responses.
+        body = trade_csv(diagnostics.clean(rows) if redact else rows, report.get("csv_columns", ())).encode("utf-8-sig")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/csv; charset=utf-8")
         self.send_header("Content-Disposition", f'attachment; filename="{self._export_name(prefix, report)}.csv"')

@@ -6,7 +6,7 @@ const state = {
   snapshotRequest: 0,
   optionSymbol: "",
   symbolTouched: false,
-  activeTab: "research",
+  activeTab: "stocks",
   bulkJobId: null,
   bulkPollTimer: null,
   krishnaRefreshJobId: null,
@@ -48,7 +48,7 @@ const state = {
   },
   indexScanner: { pollTimer: null },
   indexGroup: { pollTimer: null, active: "nifty" },
-  research: { active: "analyze" },
+  research: { active: "stocks" },
   instrumentMaster: { pollTimer: null },
   pullbacks: { pollTimer: null, data: null },
 };
@@ -56,12 +56,13 @@ const state = {
 const $ = (id) => document.getElementById(id);
 
 function activateTab(name) {
-  if (["analyze", "scans", "pullbacks", "krishna", "backtest"].includes(name)) {
+  if (["krishna", "purple"].includes(name)) name = "stocks";
+  if (["stocks", "analyze", "scans", "pullbacks", "backtest"].includes(name)) {
     state.research.active = name;
     name = "research";
   }
   const panelName = name === "research" ? state.research.active : name;
-  $("notes").hidden = ["backtest", "pullbacks", "nifty-lab", "dashboard", "mcx", "help", "scalping"].includes(panelName);
+  $("notes").hidden = ["stocks", "scans", "backtest", "pullbacks", "nifty-lab", "dashboard", "mcx", "help", "scalping"].includes(panelName);
   if (name === "help" && typeof loadHelpGuide === "function") loadHelpGuide();
   if (panelName === "pullbacks") {
     loadPullbacks();
@@ -71,6 +72,7 @@ function activateTab(name) {
     state.pullbacks.pollTimer = null;
   }
   state.activeTab = panelName;
+  if (["stocks", "backtest"].includes(panelName) && typeof loadStocks === "function") loadStocks();
   if (name === "scalping" && typeof loadScalping === "function") loadScalping();
   if (name === "mcx" && typeof loadMcx === "function") loadMcx();
   if (name === "dashboard" && typeof loadScannerDashboard === "function") loadScannerDashboard();
@@ -152,7 +154,7 @@ function activateNiftyView(name) {
 }
 
 function activateBacktestView(name) {
-  if (!["generic", "krishna"].includes(name)) return;
+  if (!["generic", "validation"].includes(name)) return;
   document.querySelectorAll("[data-backtest-target]").forEach((button) => {
     const active = button.dataset.backtestTarget === name;
     button.classList.toggle("active", active);
@@ -2298,7 +2300,7 @@ function downloadPurpleBacktestTrades() {
 
 async function loadStrategies() {
   const data = await api("/api/strategies");
-  state.strategies = data.strategies || [];
+  state.strategies = (data.strategies || []).filter(row => !row.strategy_id.startsWith("krishna_"));
   const select = $("genericStrategySelect");
   select.innerHTML = state.strategies
     .map((strategy) => `<option value="${escapeHtml(strategy.strategy_id)}">${escapeHtml(strategy.label)}</option>`)
@@ -4067,68 +4069,13 @@ $("bulkWeek").addEventListener("change", adjustBulkDaysForHigherFrames);
 $("sectorUploadBtn").addEventListener("click", uploadSectorCsv);
 $("refreshFiiDiiBtn").addEventListener("click", () => loadFiiDii(true));
 $("saveReportBtn").addEventListener("click", saveReport);
-$("krishnaScanBtn").addEventListener("click", runKrishnaScan);
-$("krishnaCopyBtn").addEventListener("click", copyKrishnaSymbols);
-$("krishnaDownloadBtn").addEventListener("click", downloadKrishnaCsv);
-$("purpleLiveScanBtn").addEventListener("click", () => runPurpleLiveScan());
-$("purpleCancelScanBtn").addEventListener("click", cancelPurpleCurrentScan);
-$("purpleAutoStartBtn").addEventListener("click", startPurpleAutoMonitor);
-$("purpleAutoStopBtn").addEventListener("click", stopPurpleAutoMonitor);
-$("purpleCopyBtn").addEventListener("click", copyPurpleSymbols);
-$("purpleDownloadBtn").addEventListener("click", downloadPurpleCsv);
-$("purpleStep1ProfileFilter").addEventListener("change", () => { state.purplePages.step1 = 1; renderPurpleStep1Results(); });
-$("purpleStep1EntryFilter").addEventListener("change", () => { state.purplePages.step1 = 1; renderPurpleStep1Results(); });
-$("purpleStep1StatusFilter").addEventListener("change", () => { state.purplePages.step1 = 1; renderPurpleStep1Results(); });
-$("purpleStep1DistanceFilter").addEventListener("change", () => { state.purplePages.step1 = 1; renderPurpleStep1Results(); });
-$("purpleStep1Sort").addEventListener("change", () => { state.purplePages.step1 = 1; renderPurpleStep1Results(); });
-$("purpleCandidateProfileFilter").addEventListener("change", () => { state.purplePages.candidates = 1; renderPurpleResults(); });
-$("purpleCandidateEntryFilter").addEventListener("change", () => { state.purplePages.candidates = 1; renderPurpleResults(); });
-$("purpleCandidateDistanceFilter").addEventListener("change", () => { state.purplePages.candidates = 1; renderPurpleResults(); });
-$("purpleCandidateSort").addEventListener("change", () => { state.purplePages.candidates = 1; renderPurpleResults(); });
-[
-  ["purpleExitAlertProfileFilter", "exit"],
-  ["purpleExitAlertKindFilter", "exit"],
-  ["purpleExitAlertSymbolFilter", "exit"],
-  ["purpleExitAlertFromFilter", "exit"],
-  ["purpleExitAlertToFilter", "exit"],
-  ["purpleExitAlertSort", "exit"],
-  ["purpleTradeProfileFilter", "trades"],
-  ["purpleTradeEntryFilter", "trades"],
-  ["purpleTradeStatusFilter", "trades"],
-  ["purpleTradeSymbolFilter", "trades"],
-  ["purpleTradeFromFilter", "trades"],
-  ["purpleTradeToFilter", "trades"],
-  ["purpleTradeSort", "trades"],
-].forEach(([id, pageKey]) => $(id).addEventListener("change", () => {
-  state.purplePages[pageKey] = 1;
-  loadPurpleAlerts();
-}));
-$("purpleStep1Prev").addEventListener("click", () => { state.purplePages.step1 -= 1; renderPurpleStep1Results(); });
-$("purpleStep1Next").addEventListener("click", () => { state.purplePages.step1 += 1; renderPurpleStep1Results(); });
-$("purpleCandidatePrev").addEventListener("click", () => { state.purplePages.candidates -= 1; renderPurpleResults(); });
-$("purpleCandidateNext").addEventListener("click", () => { state.purplePages.candidates += 1; renderPurpleResults(); });
-$("purpleExitPrev").addEventListener("click", () => { state.purplePages.exit -= 1; loadPurpleAlerts(); });
-$("purpleExitNext").addEventListener("click", () => { state.purplePages.exit += 1; loadPurpleAlerts(); });
-$("purpleTradePrev").addEventListener("click", () => { state.purplePages.trades -= 1; loadPurpleAlerts(); });
-$("purpleTradeNext").addEventListener("click", () => { state.purplePages.trades += 1; loadPurpleAlerts(); });
-[
-  "purpleSetupProfileFilter", "purpleSetupStatusFilter", "purpleSetupSymbolFilter",
-  "purpleSetupEarlyFilter", "purpleSetupFinalFilter", "purpleSetupSort",
-].forEach((id) => $(id).addEventListener("change", () => {
-  state.purplePages.setups = 1;
-  loadPurpleSetups();
-}));
-$("purpleSetupPrev").addEventListener("click", () => { state.purplePages.setups -= 1; loadPurpleSetups(); });
-$("purpleSetupNext").addEventListener("click", () => { state.purplePages.setups += 1; loadPurpleSetups(); });
-$("purpleBacktestRunBtn").addEventListener("click", runPurpleBacktest);
-$("purpleBacktestDownloadBtn").addEventListener("click", downloadPurpleBacktestTrades);
 $("genericStrategySelect").addEventListener("change", populateStrategyParams);
 $("genericBacktestRunBtn").addEventListener("click", runGenericBacktest);
 $("genericBacktestExport").addEventListener("click", () => {
   if (state.lastGenericBacktest) downloadBlob(new Blob([JSON.stringify(state.lastGenericBacktest, null, 2)], {type: "application/json"}), "stock-strategy-backtest.json");
 });
 document.querySelectorAll("[data-backtest-target]").forEach((button) => button.addEventListener("click", () => activateBacktestView(button.dataset.backtestTarget)));
-activateBacktestView("generic");
+activateBacktestView("validation");
 $("pullbackStart").addEventListener("click", () => controlPullbacks("start"));
 $("pullbackStop").addEventListener("click", () => controlPullbacks("stop"));
 $("pullbackStartAll").addEventListener("click", () => controlPullbacks("start-all"));
@@ -4138,9 +4085,6 @@ $("pullbackExport").addEventListener("click", async () => {
   catch (error) { $("pullbackActionStatus").textContent = error.message; }
 });
 for (const id of ["pullbackSide", "pullbackState"]) $(id).addEventListener("change", () => { if (state.pullbacks.data) renderPullbacks(state.pullbacks.data); });
-$("backtestRunBtn").addEventListener("click", runKrishnaBacktest);
-$("backtestDownloadTradesBtn").addEventListener("click", downloadBacktestTrades);
-$("backtestDownloadSignalsBtn").addEventListener("click", downloadBacktestSignals);
 $("niftyRunContextBtn").addEventListener("click", runNiftyContext);
 $("niftySuggestBtn").addEventListener("click", runNiftySuggestions);
 $("niftyAutoStartBtn").addEventListener("click", startNiftyAutoScan);
@@ -4239,15 +4183,6 @@ $("allIndexStart").addEventListener("click", () => controlAllIndexScanners("star
 $("allIndexStop").addEventListener("click", () => controlAllIndexScanners("stop"));
 $("instrumentMasterRefresh").addEventListener("click", refreshInstrumentMasters);
 enhanceCollapsibleSections();
-updatePurpleDefaults();
-setPurpleBacktestDefaults();
-updatePurpleMonitorUi();
-renderPurpleProfileProgress();
-loadPurpleAlerts();
-loadPurpleSetups();
-loadPurpleMonitorStatus();
-startPurpleMonitorPolling();
-
 Promise.all([loadZerodhaLoginUrl(), checkZerodhaStatus(), loadSymbols(), loadStrategies(), loadNiftyExpiries(), loadSectorStatus(), loadFiiDii(false)])
   .then(() => {
     const first = state.symbols.find((row) => row.has_daily);
@@ -4256,6 +4191,6 @@ Promise.all([loadZerodhaLoginUrl(), checkZerodhaStatus(), loadSymbols(), loadStr
       loadOptionExpiries();
       analyze();
     }
-    return scan("neutral");
+    return null;
   })
   .catch((error) => setNotes([error.message], true));

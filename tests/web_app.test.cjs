@@ -157,7 +157,7 @@ test("grouped navigation selects all index and stock research views", () => {
     assert.equal(ui.ids.get(name === "nifty" ? "tab-nifty" : "tab-index").classList.contains("active"), true);
     if (name !== "nifty") assert.equal(ui.ids.get("indexScannerSymbol").value, name.toUpperCase());
   }
-  for (const name of ["analyze", "scans", "krishna", "backtest", "purple", "data", "reports"]) {
+  for (const name of ["stocks", "analyze", "scans", "backtest", "data", "reports"]) {
     ui.context.activateTab(name);
     assert.equal(ui.ids.get(`tab-${name}`).classList.contains("active"), true);
   }
@@ -290,7 +290,7 @@ test("NIFTY action failures stay within their own view", async () => {
 test("stock backtest types keep their controls and results separate without running either", () => {
   const ui = app();
   const before = ui.requests.length;
-  for (const name of ["generic", "krishna", "generic"]) {
+  for (const name of ["generic", "validation", "generic"]) {
     ui.context.activateBacktestView(name);
     const panels = ui.run('[...document.querySelectorAll("[data-backtest-view]")].map(p => ({name:p.dataset.backtestView, hidden:p.hidden}))');
     assert.equal(panels.length, 4);
@@ -375,13 +375,33 @@ test("Lab filters and pagination keep setup and variant ledgers separate", () =>
   assert.equal(ui.ids.get("labPage").textContent, "Page 1 of 1 / 0 trades");
 });
 
-test("Purple Touch pagers use ten rows and clamp shrinking results", () => {
+test("retired sections are absent and no longer poll on startup", () => {
   const ui = app();
-  const rows = Array.from({length: 23}, (_, i) => ({id:i}));
-  assert.equal(ui.context.paginatePurpleRows(rows, "step1", "purpleStep1").rows.length, 10);
-  ui.run('state.purplePages.step1 = 3');
-  assert.equal(ui.context.paginatePurpleRows(rows, "step1", "purpleStep1").rows.length, 3);
-  assert.equal(ui.context.paginatePurpleRows([], "step1", "purpleStep1").page, 1);
+  assert.ok(!html.includes('id="tab-purple"'));
+  assert.ok(!html.includes('id="tab-krishna"'));
+  assert.ok(!html.includes('data-backtest-view="krishna"'));
+  assert.ok(ui.requests.every(r=>!r.url.includes("purple")));
+  ui.context.activateTab("purple");
+  assert.equal(ui.ids.get("tab-stocks").classList.contains("active"),true);
+});
+
+test("stock research navigation never starts validation or live jobs and paginates ten rows", () => {
+  const ui=app();
+  ui.run(fs.readFileSync(path.join(root,"web/stocks.js"),"utf8"));
+  assert.ok(ui.requests.some(r=>r.url==="/api/stocks/status"));
+  assert.ok(ui.requests.every(r=>r.url!=="/api/stocks/validate" && r.url!=="/api/stocks/start"));
+  ui.run('stockPage("Candidate",Array.from({length:23},(_,i)=>i),x=>`<tr>${x}</tr>`)');
+  assert.ok(ui.ids.get("stockCandidatePager").innerHTML.includes("Page 1 / 3"));
+  ui.run('stocks.pages.Candidate=3;stockPage("Candidate",[],x=>x)');
+  assert.ok(ui.ids.get("stockCandidatePager").innerHTML.includes("Page 1 / 1"));
+});
+
+test("custom research excludes the retired Krishna strategy from its selector", async () => {
+  const ui=app();
+  const pending=ui.requests.find(r=>r.url==="/api/strategies");
+  pending.resolve({strategies:[{strategy_id:"bullish_pullback",label:"Bullish Pullback",default_params:{},default_timeframe:"day"},{strategy_id:"krishna_bullish_pullback",label:"Krishna Bullish Pullback"}]});
+  await new Promise(setImmediate);
+  assert.ok(!ui.ids.get("genericStrategySelect").innerHTML.includes("Krishna"));
 });
 
 test("Lab date change rejects older responses and export uses selected session", async () => {

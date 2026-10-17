@@ -30,28 +30,41 @@
 
       <nav class="activity-tabs" aria-label="Decision desk activities">
         <button class="tab-btn" data-tab-target="dashboard" type="button">Dashboard</button>
-        <button class="tab-btn active" data-tab-target="research" type="button">Stock Research</button>
+        <button class="tab-btn active" data-tab-target="research" type="button">F&amp;O Stocks</button>
         <button class="tab-btn" data-tab-target="indices" type="button">Index Scanning</button>
         <button class="tab-btn" data-tab-target="nifty-lab" type="button">NIFTY Setup Lab</button>
         <button class="tab-btn" data-tab-target="scalping" type="button">Scalping Lab</button>
         <button class="tab-btn" data-tab-target="mcx" type="button">MCX Swing</button>
-        <button class="tab-btn" data-tab-target="purple" type="button">Purple Touch</button>
         <button class="tab-btn" data-tab-target="data" type="button">Data Ops</button>
         <button class="tab-btn" data-tab-target="reports" type="button">Reports</button>
         <button class="tab-btn" data-tab-target="help" type="button">Help &amp; About</button>
       </nav>
 
       <nav id="researchSubtabs" class="index-subtabs" aria-label="Stock research">
-        <button class="index-subtab active" data-research-target="analyze" type="button" aria-selected="true">Analyze</button>
-        <button class="index-subtab" data-research-target="scans" type="button" aria-selected="false">Scans</button>
-        <button class="index-subtab" data-research-target="pullbacks" type="button" aria-selected="false">F&amp;O Pullbacks</button>
-        <button class="index-subtab" data-research-target="krishna" type="button" aria-selected="false">Krishna Setup</button>
-        <button class="index-subtab" data-research-target="backtest" type="button" aria-selected="false">Backtest</button>
+        <button class="index-subtab active" data-research-target="stocks" type="button" aria-selected="true">Overview</button>
+        <button class="index-subtab" data-research-target="analyze" type="button" aria-selected="false">Analyze</button>
+        <button class="index-subtab" data-research-target="scans" type="button" aria-selected="false">Screener</button>
+        <button class="index-subtab" data-research-target="pullbacks" type="button" aria-selected="false">Trade Archive</button>
+        <button class="index-subtab" data-research-target="backtest" type="button" aria-selected="false">Backtests</button>
       </nav>
 
-      <section class="notes" id="notes"></section>
+      <section class="notes" id="notes" hidden></section>
 
       <section class="tab-panes">
+        <section id="tab-stocks" class="tab-pane active" data-tab-panel="stocks">
+          <section class="dashboard-band">
+            <div class="section-heading"><h2>F&amp;O Swing Research</h2><span id="stockApproval">Live approval blocked</span></div>
+            <div id="stockSummary" class="compact-metrics"></div>
+            <div class="wide-table"><table class="readable-table"><thead><tr><th>Strategy</th><th>Direction</th><th>Frames</th><th>Status</th></tr></thead><tbody><tr><td>Trend Pullback</td><td>Long / short</td><td>Daily / 1 hour</td><td>Research only</td></tr><tr><td>Compression Breakout</td><td>Long / short</td><td>Daily / 1 hour</td><td>Research only</td></tr></tbody></table></div>
+            <button id="stockOpenValidation" type="button">Review validation</button>
+          </section>
+          <section class="dashboard-band">
+            <div class="section-heading"><h2>Latest Research Candidates</h2><span id="stockCandidateDate"></span></div>
+            <div class="ledger-filters"><label>Symbol<input id="stockSymbol" type="search" placeholder="All stocks"></label><label>Result<select id="stockCandidateFilter"><option value="all">All decisions</option><option value="candidate">Candidates</option></select></label></div>
+            <div class="wide-table"><table class="readable-table" data-no-pagination="true"><thead><tr><th>Stock / frame</th><th>Candle close (IST)</th><th>Technical result</th><th>Direction</th><th>Close / EMA20 / EMA50</th><th>ATR</th></tr></thead><tbody id="stockCandidates"></tbody></table></div><div id="stockCandidatePager" class="table-pagination"></div>
+          </section>
+          <section class="dashboard-band"><details><summary>Rules &amp; validation policy</summary><div id="stockRules"></div></details></section>
+        </section>
         <section id="tab-help" class="tab-pane" data-tab-panel="help">
           <section class="dashboard-band help-guide">
             <div class="section-heading"><h2>Help &amp; About</h2><span id="helpVersion"></span></div>
@@ -118,7 +131,7 @@
             <div class="wide-table"><table class="readable-table"><thead><tr><th>Trade</th><th>Event</th><th>Created (IST)</th><th>Telegram delivery</th><th>Issue</th></tr></thead><tbody id="mcxDelivery"></tbody></table></div>
           </section>
         </section>
-        <section id="tab-analyze" class="tab-pane active" data-tab-panel="analyze">
+        <section id="tab-analyze" class="tab-pane" data-tab-panel="analyze">
           <section class="workspace">
             <aside class="sidebar">
               <div class="panel">
@@ -980,32 +993,17 @@
                 </div>
                 <label for="scanExpiry">Option expiry</label>
                 <input id="scanExpiry" type="date" />
-                <label>Classic bias scan</label>
-                <div class="segmented">
-                  <button data-scan="bullish">Bullish</button>
-                  <button data-scan="bearish">Bearish</button>
-                  <button data-scan="neutral">Neutral</button>
-                </div>
-                <label>Opportunity setup scan</label>
-                <div class="setup-grid">
-                  <button data-opportunity="bullish_breakout">Bullish Breakout</button>
-                  <button data-opportunity="bullish_pullback">Bullish Pullback</button>
-                  <button data-opportunity="bullish_trend">Bullish Trend</button>
-                  <button data-opportunity="bearish_breakdown">Bearish Breakdown</button>
-                  <button data-opportunity="bearish_pullback">Bearish Pullback</button>
-                  <button data-opportunity="bearish_trend">Bearish Trend</button>
-                  <button data-opportunity="neutral_range">Neutral Range</button>
-                  <button data-opportunity="compression_watch">Compression Watch</button>
-                  <button data-opportunity="avoid_choppy">Avoid / Choppy</button>
-                </div>
+                <label for="stockScreenPattern">Research pattern</label>
+                <select id="stockScreenPattern"><option value="bullish_pullback">Bullish pullback</option><option value="bearish_pullback">Bearish pullback</option><option value="bullish_breakout">Bullish breakout</option><option value="bearish_breakdown">Bearish breakdown</option><option value="bullish_trend">Bullish trend</option><option value="bearish_trend">Bearish trend</option><option value="compression_watch">Compression</option><option value="neutral_range">Range</option><option value="avoid_choppy">Choppy</option></select>
+                <button id="stockScreenRun" type="button">Find candidates</button>
               </div>
             </aside>
 
             <section class="content">
               <section class="activity-hero">
                 <div>
-                  <h2>Opportunity Scans</h2>
-                  <p>Review bullish, bearish, and neutral candidates from the F&O universe.</p>
+                  <h2>Stock Screener</h2>
+                  <p>Legacy pattern candidates / Not entry alerts</p>
                 </div>
                 <span id="scanMeta"></span>
               </section>
@@ -1019,7 +1017,7 @@
                   <div class="progress-shell">
                     <div id="scanProgressBar" class="progress-bar"></div>
                   </div>
-                  <div id="scanProgressStatus" class="mini-status">Choose Bullish, Bearish, or Neutral to scan cached F&O candle data.</div>
+                    <div id="scanProgressStatus" class="mini-status">Not run</div>
                   <div id="scanSummaryCards" class="compact-metrics"></div>
                   <div id="scanSummaryPoints" class="mini-list"></div>
                 </div>
@@ -1054,810 +1052,27 @@
           </section>
         </section>
 
-        <section id="tab-krishna" class="tab-pane" data-tab-panel="krishna">
-          <section class="workspace">
-            <aside class="sidebar">
-              <div class="panel">
-                <label>Krishna Bullish Setup</label>
-                <div class="field-hint">Daily timeframe only. Pulls latest daily candles first, then filters F&O stocks.</div>
-                <div class="date-grid">
-                  <div>
-                    <label for="krishnaDays">Days</label>
-                    <input id="krishnaDays" type="number" min="60" step="1" value="365" />
-                  </div>
-                  <div>
-                    <label for="krishnaLimit">Show</label>
-                    <input id="krishnaLimit" placeholder="50" value="50" />
-                  </div>
-                </div>
-                <label class="check-row">
-                  <input id="krishnaRefreshToggle" type="checkbox" checked />
-                  Pull latest daily candles before scan
-                </label>
-                <button id="krishnaScanBtn" class="full-btn">Scan bullish pullback watch</button>
-              </div>
-            </aside>
 
-            <section class="content">
-              <section class="activity-hero">
-                <div>
-                  <h2>Krishna Setup Filter</h2>
-                  <p>Daily uptrend stocks where the yellow Chande Kroll line is above recent candles and the selected indicator stack.</p>
-                </div>
-                <span id="krishnaMeta"></span>
-              </section>
 
-              <section class="table-panel">
-                <div class="panel-head">
-                  <h2>Scan Progress & Data Used</h2>
-                  <span id="krishnaProgressMeta">Idle</span>
-                </div>
-                <div class="ops-body">
-                  <div class="progress-shell">
-                    <div id="krishnaProgressBar" class="progress-bar"></div>
-                  </div>
-                  <div id="krishnaProgressStatus" class="mini-status">Run the scan to refresh daily candles and filter F&O stocks.</div>
-                  <div id="krishnaSummaryCards" class="compact-metrics"></div>
-                  <div id="krishnaSummaryPoints" class="mini-list"></div>
-                </div>
-              </section>
 
-              <section class="table-panel">
-                <div class="panel-head">
-                  <h2>Filtered Stocks</h2>
-                  <span id="krishnaResultMeta"></span>
-                </div>
-                <div class="table-actions">
-                  <button id="krishnaCopyBtn" type="button">Copy symbols</button>
-                  <button id="krishnaDownloadBtn" type="button">Download CSV</button>
-                </div>
-                <div class="wide-table">
-                  <table class="krishna-table">
-                    <thead>
-                      <tr>
-                        <th>Symbol</th>
-                        <th>Score</th>
-                        <th>Confidence</th>
-                        <th>Close</th>
-                        <th>Yellow CK</th>
-                        <th>Gap</th>
-                        <th>EMA 9/26</th>
-                        <th>VWMA / VWAP</th>
-                        <th>DC20</th>
-                        <th>Vol x20</th>
-                        <th>Structure</th>
-                        <th>2H Entry</th>
-                        <th>Why</th>
-                      </tr>
-                    </thead>
-                    <tbody id="krishnaBody"></tbody>
-                  </table>
-                </div>
-              </section>
-            </section>
-          </section>
-        </section>
-
-        <section id="tab-purple" class="tab-pane" data-tab-panel="purple">
-          <section class="workspace">
-            <aside class="sidebar">
-              <div class="panel">
-                <label>Purple Touch Scanner</label>
-                <div class="field-hint">Scans Monthly, Weekly, and Daily purple-touch setups independently during NSE market hours and sends new entry/exit alerts.</div>
-                <div id="purpleMonitorStatus" class="monitor-status stopped">
-                  <strong>Scanner stopped</strong>
-                  <span>No recurring scan is running.</span>
-                </div>
-                <select id="purpleTimeframe" hidden>
-                  <option value="all" selected>All profiles</option>
-                  <option value="month">Monthly</option>
-                  <option value="week">Weekly</option>
-                  <option value="day">Daily</option>
-                </select>
-                <input id="purpleDays" type="hidden" value="3000" />
-                <input id="purpleLimit" type="hidden" value="all" />
-                <label class="check-row">
-                  <input id="purpleRefreshToggle" type="checkbox" checked disabled />
-                  Run continuous candle data service
-                </label>
-                <label class="check-row">
-                  <input id="purpleTelegramToggle" type="checkbox" checked />
-                  Send new entry/exit alerts to Telegram
-                </label>
-                <label>Monitor intervals</label>
-                <div class="monitor-interval-grid">
-                  <label for="purpleMonthIntervalSeconds">
-                    <span>Monthly scan</span>
-                    <select id="purpleMonthIntervalSeconds">
-                      <option value="900">Every 15 min</option>
-                      <option value="1800">Every 30 min</option>
-                      <option value="3600">Every 1 hour</option>
-                      <option value="7200" selected>Every 2 hours</option>
-                    </select>
-                  </label>
-                  <label for="purpleWeekIntervalSeconds">
-                    <span>Weekly scan</span>
-                    <select id="purpleWeekIntervalSeconds">
-                      <option value="300">Every 5 min</option>
-                      <option value="600">Every 10 min</option>
-                      <option value="900">Every 15 min</option>
-                      <option value="1800" selected>Every 30 min</option>
-                    </select>
-                  </label>
-                  <label for="purpleDayIntervalSeconds">
-                    <span>Daily scan</span>
-                    <select id="purpleDayIntervalSeconds">
-                      <option value="180" selected>Every 3 min</option>
-                      <option value="300">Every 5 min</option>
-                      <option value="600">Every 10 min</option>
-                    </select>
-                  </label>
-                </div>
-                <div class="field-hint">Each profile becomes due independently. A server-side, rate-limited queue continuously refreshes candles; scanners use the latest complete cache without waiting for a full-universe download.</div>
-                <label class="check-row">
-                  <input id="purpleForceToggle" type="checkbox" />
-                  Force cached-data run outside market hours
-                </label>
-                <div class="field-hint warning-hint">Normally leave this off. Manual scans still show candidates after market close. Enable it only to test creation of trade IDs, entry/exit alerts, and optional Telegram delivery from cached candles outside NSE hours.</div>
-                <div class="button-row">
-                  <button id="purpleLiveScanBtn" type="button">Analyze fresh cache now</button>
-                  <button id="purpleCancelScanBtn" type="button" disabled>Cancel scan</button>
-                </div>
-                <div id="purpleRunHint" class="field-hint">Start the market monitor first so the candle service can prepare fresh data. Manual runs analyze the latest completed cache.</div>
-                <div class="button-row">
-                  <button id="purpleAutoStartBtn" type="button">Start candle service &amp; monitor</button>
-                  <button id="purpleAutoStopBtn" type="button">Stop</button>
-                </div>
-                <div class="field-hint">On an NSE trading day, start at 9:15-9:20 AM IST and leave it running through the session. Keep this tab open and the laptop awake. Stop after 3:30 PM IST once any active scan finishes. Exchange holidays are not detected automatically.</div>
-              </div>
-            </aside>
-
-            <section class="content">
-              <section class="activity-hero">
-                <div>
-                  <h2>Purple Touch Scanner</h2>
-                  <p>Monthly, Weekly, and Daily setup profiles with independent schedules, supporting-timeframe entry checks, and open-trade exit monitoring.</p>
-                </div>
-                <span id="purpleMeta"></span>
-              </section>
-
-              <section class="table-panel">
-                <div class="panel-head">
-                  <h2>Candle Data Service</h2>
-                  <span id="purpleDataServiceMeta">Stopped</span>
-                </div>
-                <div class="ops-body">
-                  <div id="purpleDataServiceCards" class="compact-metrics"></div>
-                  <div id="purpleDataServiceStatus" class="mini-status">Start the market monitor to run the continuous, prioritized candle refresh queue.</div>
-                  <div class="wide-table">
-                    <table class="krishna-table">
-                      <thead><tr><th>Source timeframe</th><th>Fresh</th><th>Updating</th><th>Stale</th><th>Missing</th><th>Latest candle</th><th>Last refresh</th><th>Expected closed candle</th></tr></thead>
-                      <tbody id="purpleFreshnessBody"></tbody>
-                    </table>
-                  </div>
-                </div>
-              </section>
-
-              <section class="table-panel">
-                <div class="panel-head">
-                  <h2>What I Understand</h2>
-                  <span id="purpleRulesMeta">Confirmed setup rules</span>
-                </div>
-                <div class="ops-body">
-                  <div id="purpleRuleCards" class="compact-metrics"></div>
-                  <div id="purpleRulePoints" class="mini-list"></div>
-                </div>
-              </section>
-
-              <section class="table-panel">
-                <div class="panel-head">
-                  <h2>Stocks Waiting for Entry</h2>
-                  <span id="purpleSetupMeta">0 setup(s)</span>
-                </div>
-                <div class="ops-body">
-                  <p class="helper-text">Persistent Purple Touch setups remain here across scanner cycles. Early entry keeps Final monitoring active; Final entry or a fixed 3%/C3+ invalidation ends new entry checking without closing an existing trade.</p>
-                </div>
-                <div class="table-actions">
-                  <label class="table-filter"><span>Scan</span><select id="purpleSetupProfileFilter"><option value="all">All scans</option><option value="month">Monthly</option><option value="week">Weekly</option><option value="day">Daily</option></select></label>
-                  <label class="table-filter"><span>Lifecycle</span><select id="purpleSetupStatusFilter"><option value="all">All states</option><option value="active_waiting">Waiting</option><option value="early_entry_triggered">Early triggered</option><option value="final_entry_triggered">Final triggered</option><option value="discarded_above_3_percent">Discarded above 3%</option><option value="discarded_c1_c2_low_break">Discarded C1/C2 low</option><option value="completed">Completed</option></select></label>
-                  <label class="table-filter"><span>Symbol</span><input id="purpleSetupSymbolFilter" placeholder="All symbols" /></label>
-                  <label class="table-filter"><span>Early</span><select id="purpleSetupEarlyFilter"><option value="all">All</option><option value="waiting">Waiting</option><option value="triggered">Triggered</option><option value="discarded">Discarded</option></select></label>
-                  <label class="table-filter"><span>Final</span><select id="purpleSetupFinalFilter"><option value="all">All</option><option value="waiting">Waiting</option><option value="triggered">Triggered</option><option value="discarded">Discarded</option></select></label>
-                  <label class="table-filter"><span>Sort by</span><select id="purpleSetupSort"><option value="updated_at:desc">Recently updated</option><option value="created_at:desc">Newest touch</option><option value="distance:asc">Distance: nearest</option><option value="distance:desc">Distance: farthest</option><option value="symbol:asc">Symbol</option><option value="profile:asc">Profile</option><option value="status:asc">Lifecycle</option></select></label>
-                </div>
-                <div class="wide-table">
-                  <table class="krishna-table">
-                    <thead><tr><th>Setup ID</th><th>Symbol / Scan</th><th>Touch Time / Captured Purple</th><th>Current / Distance</th><th>Fixed 3% Limit</th><th>Early</th><th>Final</th><th>C1 / C2 Lows</th><th>Invalidation</th><th>Last Checked</th><th>Lifecycle / Reason</th></tr></thead>
-                    <tbody id="purpleSetupBody"></tbody>
-                  </table>
-                </div>
-                <div class="table-pagination"><button id="purpleSetupPrev" type="button">Previous</button><span id="purpleSetupPageLabel">Page 1 of 1</span><button id="purpleSetupNext" type="button">Next</button></div>
-              </section>
-
-              <section class="table-panel collapsed">
-                <div class="panel-head">
-                  <h2>How to Read Purple Touch Results</h2>
-                  <span>Expand for column values and meanings</span>
-                </div>
-                <div class="ops-body">
-                  <p class="helper-text">A row represents one stock under its Monthly, Weekly, or Daily purple-touch profile. Use the Scan filter to review one profile.</p>
-                </div>
-                <div class="wide-table">
-                  <table class="krishna-table meaning-table">
-                    <thead>
-                      <tr>
-                        <th>UI item</th>
-                        <th>Applicable values</th>
-                        <th>Meaning</th>
-                        <th>Effect</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr><td>Force cached-data run</td><td>Off / On</td><td>Off still analyzes cached candles after hours. On also permits creating test alerts and trade IDs outside market hours.</td><td>Keep Off for normal use.</td></tr>
-                      <tr><td>Step 1 touch rows</td><td>Count of Weekly stock rows; close distance 0.00% to 3.00%</td><td>The latest Weekly wick/range physically touches purple EMA9 and the candle closes on or no more than 3.00% above purple. Rows are ordered by close distance.</td><td>First filter only; not an entry signal.</td></tr>
-                      <tr><td>Higher-TF filters passed</td><td>Count within Step 1</td><td>Touch rows that also pass Weekly EMA89/EMA26, Weekly blue/purple direction and approach, Monthly confirmation, and structure checks.</td><td>Still requires an early or final entry-timeframe close.</td></tr>
-                      <tr><td>Setups Passing All Filters</td><td>Physical touch plus all mandatory setup filters</td><td>Applies EMA89, EMA26, profile blue/purple direction, price approach, higher-timeframe confirmation, and structure checks.</td><td>"No all-filter setup" means at least one required check failed or lacked data. The stock may remain visible in Step 1 with its blocker, but it cannot create an entry signal in that scan.</td></tr>
-                      <tr><td>Scan</td><td>Monthly / Weekly / Daily</td><td>The purple EMA9 touch is detected on the latest candle of the selected profile.</td><td>Each profile uses its configured higher confirmation, Early, Final, and Exit timeframes.</td></tr>
-                      <tr><td>Close / Range</td><td>Close; candle high and low</td><td>The latest higher-timeframe candle used for the touch check.</td><td>Its range is compared with purple EMA9.</td></tr>
-                      <tr><td>Purple Touch Price / Time</td><td>EMA9 price, Weekly candle timestamp, and close distance</td><td>The wick/range must physically contain EMA9. The timestamp identifies the Weekly candle in which the touch occurred; all displayed times use IST.</td><td>Close must be from 0.00% to 3.00% above purple. Entirely-above near touches and all below-purple closes are invalid.</td></tr>
-                      <tr><td>Black EMA89</td><td>Pass / Block / Unknown</td><td>Pass means close is above EMA89. Block means close is below it. Unknown means fewer than 89 candles are available.</td><td>Mandatory higher-timeframe trend filter.</td></tr>
-                      <tr><td>EMA26</td><td>Pass / Block / Unknown</td><td>Light-green EMA26 relationship for close and purple EMA9.</td><td>Close below EMA26 blocks strict qualification.</td></tr>
-                      <tr><td>Blue / Purple Direction</td><td>Pass / Block plus approach</td><td>On the Weekly setup timeframe, blue Chande Kroll must be above purple EMA9 and price must move from the blue area toward purple across the latest 2-3 Weekly candles.</td><td>Mandatory for the all-filter Weekly setup. Ignored on the 30-minute and 2-hour entry timeframes.</td></tr>
-                      <tr><td>Higher Confirmation</td><td>Monthly</td><td>For a Weekly touch, the latest Monthly candle open or close must be strictly above its blue Chande Kroll line.</td><td>Mandatory higher-timeframe confirmation.</td></tr>
-                      <tr><td>Yellow / Brown</td><td>Chande Kroll / VWMA20 values</td><td>Shows the yellow Chande Kroll line and brown VWMA20.</td><td>Final entry requires yellow above brown.</td></tr>
-                      <tr><td>Early Entry</td><td>entry_candidate / wait / discarded / missing</td><td>The 30-minute close must be strictly above yellow. Blue/purple and yellow/brown are ignored for Early. Candle 1 and Candle 2 can each qualify immediately.</td><td>From Candle 3 onward, the touch expires only when price breaks the lower of Candle 1 and Candle 2 lows. No fixed time expiry.</td></tr>
-                      <tr><td>Final Entry</td><td>entry_candidate / wait / discarded / missing</td><td>The 2-hour close must be strictly above yellow and yellow must be strictly above brown VWMA20. Blue/purple is ignored. Candle 1 and Candle 2 can each qualify immediately.</td><td>From Candle 3 onward, the touch expires only when price breaks the lower of Candle 1 and Candle 2 lows. No fixed time expiry.</td></tr>
-                      <tr><td>Status / Blockers</td><td>qualified / step1_only</td><td>Qualified passed higher-timeframe filters. Step1-only shows the exact blocker.</td><td>Alerts require a strict setup plus entry confirmation.</td></tr>
-                      <tr><td>Exit Alerts</td><td>Closed trade events</td><td>Created when the configured exit-timeframe candle closes below yellow.</td><td>Closes the matching trade ID.</td></tr>
-                      <tr><td>Trades Triggered: Open &amp; Closed</td><td>Open / Closed / All</td><td>One row is created for every entry signal. Open means no exit has fired; Closed links the later exit timestamp and holding duration.</td><td>This single section replaces the redundant Entry Signals table. The immutable signal event remains stored internally for duplicate prevention, Telegram audit, and troubleshooting.</td></tr>
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-
-              <section class="table-panel">
-                <div class="panel-head">
-                  <h2>Scan Progress & Data Used</h2>
-                  <span id="purpleProgressMeta">Idle</span>
-                </div>
-                <div class="ops-body">
-                  <div id="purpleProgressStatus" class="mini-status">Run the scanner or start the market monitor to refresh candles, scan F&O stocks, and create alerts.</div>
-                  <div class="profile-progress-grid">
-                    <article class="profile-progress-card">
-                      <div class="profile-progress-head"><strong>Monthly</strong><span id="purpleMonthProgressMeta">Idle</span></div>
-                      <div class="progress-shell"><div id="purpleMonthProgressBar" class="progress-bar"></div></div>
-                      <div id="purpleMonthProgressStatus" class="profile-progress-detail">Waiting for a scan.</div>
-                      <dl class="profile-progress-times">
-                        <div><dt>Last started</dt><dd id="purpleMonthLastStarted">-</dd></div>
-                        <div><dt>Last ended</dt><dd id="purpleMonthLastEnded">-</dd></div>
-                        <div><dt>Next trigger</dt><dd id="purpleMonthNextRun">Not scheduled</dd></div>
-                        <div><dt>Queued</dt><dd id="purpleMonthQueued">-</dd></div>
-                        <div><dt>Duration</dt><dd id="purpleMonthDuration">-</dd></div>
-                      </dl>
-                    </article>
-                    <article class="profile-progress-card">
-                      <div class="profile-progress-head"><strong>Weekly</strong><span id="purpleWeekProgressMeta">Idle</span></div>
-                      <div class="progress-shell"><div id="purpleWeekProgressBar" class="progress-bar"></div></div>
-                      <div id="purpleWeekProgressStatus" class="profile-progress-detail">Waiting for a scan.</div>
-                      <dl class="profile-progress-times">
-                        <div><dt>Last started</dt><dd id="purpleWeekLastStarted">-</dd></div>
-                        <div><dt>Last ended</dt><dd id="purpleWeekLastEnded">-</dd></div>
-                        <div><dt>Next trigger</dt><dd id="purpleWeekNextRun">Not scheduled</dd></div>
-                        <div><dt>Queued</dt><dd id="purpleWeekQueued">-</dd></div>
-                        <div><dt>Duration</dt><dd id="purpleWeekDuration">-</dd></div>
-                      </dl>
-                    </article>
-                    <article class="profile-progress-card">
-                      <div class="profile-progress-head"><strong>Daily</strong><span id="purpleDayProgressMeta">Idle</span></div>
-                      <div class="progress-shell"><div id="purpleDayProgressBar" class="progress-bar"></div></div>
-                      <div id="purpleDayProgressStatus" class="profile-progress-detail">Waiting for a scan.</div>
-                      <dl class="profile-progress-times">
-                        <div><dt>Last started</dt><dd id="purpleDayLastStarted">-</dd></div>
-                        <div><dt>Last ended</dt><dd id="purpleDayLastEnded">-</dd></div>
-                        <div><dt>Next trigger</dt><dd id="purpleDayNextRun">Not scheduled</dd></div>
-                        <div><dt>Queued</dt><dd id="purpleDayQueued">-</dd></div>
-                        <div><dt>Duration</dt><dd id="purpleDayDuration">-</dd></div>
-                      </dl>
-                    </article>
-                  </div>
-                  <div id="purpleSummaryCards" class="compact-metrics"></div>
-                  <div id="purpleSummaryPoints" class="mini-list"></div>
-                </div>
-              </section>
-
-              <section class="table-panel">
-                <div class="panel-head">
-                  <h2>Step 1: Purple EMA9 Touch</h2>
-                  <span id="purpleStep1Meta"></span>
-                </div>
-                <div class="ops-body">
-                  <p class="helper-text">First filter only: the latest profile candle wick/range must physically touch purple EMA9 and close from 0.00% to 3.00% above it. Entirely-above near touches and below-purple closes are excluded.</p>
-                </div>
-                <div class="table-actions">
-                  <label class="table-filter" for="purpleStep1ProfileFilter">
-                    <span>Scan</span>
-                    <select id="purpleStep1ProfileFilter">
-                      <option value="all" selected>All scans</option>
-                      <option value="month">Monthly</option>
-                      <option value="week">Weekly</option>
-                      <option value="day">Daily</option>
-                    </select>
-                  </label>
-                  <label class="table-filter" for="purpleStep1EntryFilter">
-                    <span>Entry status</span>
-                    <select id="purpleStep1EntryFilter">
-                      <option value="all">All entry states</option>
-                      <option value="early">Early entry ready</option>
-                      <option value="final">Final entry ready</option>
-                      <option value="waiting">Waiting</option>
-                      <option value="discarded">Discarded</option>
-                    </select>
-                  </label>
-                  <label class="table-filter" for="purpleStep1StatusFilter">
-                    <span>Setup status</span>
-                    <select id="purpleStep1StatusFilter">
-                      <option value="all">All setup states</option>
-                      <option value="qualified">Qualified</option>
-                      <option value="step1_only">Step 1 only</option>
-                    </select>
-                  </label>
-                  <label class="table-filter" for="purpleStep1DistanceFilter">
-                    <span>Close above purple</span>
-                    <select id="purpleStep1DistanceFilter">
-                      <option value="0">Exact 0.00%</option>
-                      <option value="0.2">Within 0.20%</option>
-                      <option value="0.5">Within 0.50%</option>
-                      <option value="1">Within 1.00%</option>
-                      <option value="1.5">Within 1.50%</option>
-                      <option value="2">Within 2.00%</option>
-                      <option value="3" selected>Within 3.00%</option>
-                    </select>
-                  </label>
-                  <label class="table-filter" for="purpleStep1Sort">
-                    <span>Sort by</span>
-                    <select id="purpleStep1Sort">
-                      <option value="distance_asc">Distance: nearest first</option>
-                      <option value="distance_desc">Distance: farthest first</option>
-                      <option value="profile_asc">Profile: Weekly</option>
-                      <option value="symbol_asc">Symbol: A to Z</option>
-                      <option value="status_asc">Setup status</option>
-                    </select>
-                  </label>
-                </div>
-                <div class="wide-table">
-                  <table class="krishna-table">
-                    <thead>
-                      <tr>
-                        <th>Symbol</th>
-                        <th>Scan</th>
-                        <th>Close / Range</th>
-                        <th>Purple Touch Price / Time</th>
-                        <th>Black EMA89</th>
-                        <th>EMA26</th>
-                        <th>Blue / Purple Direction</th>
-                        <th>Higher Confirmation</th>
-                        <th>Yellow / Brown</th>
-                        <th>Early Entry</th>
-                        <th>Final Entry</th>
-                        <th>Status / Blockers</th>
-                      </tr>
-                    </thead>
-                    <tbody id="purpleStep1Body"></tbody>
-                  </table>
-                </div>
-                <div class="table-pagination" id="purpleStep1Pager">
-                  <button id="purpleStep1Prev" type="button">Previous</button>
-                  <span id="purpleStep1PageLabel">Page 1 of 1</span>
-                  <button id="purpleStep1Next" type="button">Next</button>
-                </div>
-              </section>
-
-              <section class="table-panel">
-                <div class="panel-head">
-                  <h2>Setups Passing All Filters</h2>
-                  <span id="purpleResultMeta"></span>
-                </div>
-                <div class="ops-body">
-                  <p class="helper-text">These rows passed every mandatory setup and higher-timeframe confirmation filter for their profile. Early or Final may still be waiting. Review Step 1 for blockers.</p>
-                </div>
-                <div class="table-actions">
-                  <label class="table-filter" for="purpleCandidateProfileFilter">
-                    <span>Scan</span>
-                    <select id="purpleCandidateProfileFilter">
-                      <option value="all" selected>All scans</option>
-                      <option value="month">Monthly</option>
-                      <option value="week">Weekly</option>
-                      <option value="day">Daily</option>
-                    </select>
-                  </label>
-                  <label class="table-filter" for="purpleCandidateEntryFilter">
-                    <span>Entry status</span>
-                    <select id="purpleCandidateEntryFilter">
-                      <option value="all">All entry states</option>
-                      <option value="early">Early entry ready</option>
-                      <option value="final">Final entry ready</option>
-                      <option value="waiting">Waiting</option>
-                      <option value="discarded">Discarded</option>
-                    </select>
-                  </label>
-                  <label class="table-filter" for="purpleCandidateDistanceFilter">
-                    <span>Close above purple</span>
-                    <select id="purpleCandidateDistanceFilter">
-                      <option value="0">Exact 0.00%</option>
-                      <option value="0.2">Within 0.20%</option>
-                      <option value="0.5">Within 0.50%</option>
-                      <option value="1">Within 1.00%</option>
-                      <option value="1.5">Within 1.50%</option>
-                      <option value="2">Within 2.00%</option>
-                      <option value="3" selected>Within 3.00%</option>
-                    </select>
-                  </label>
-                  <label class="table-filter" for="purpleCandidateSort">
-                    <span>Sort by</span>
-                    <select id="purpleCandidateSort">
-                      <option value="score_desc">Score: highest first</option>
-                      <option value="distance_asc">Distance: nearest first</option>
-                      <option value="distance_desc">Distance: farthest first</option>
-                      <option value="profile_asc">Profile: Weekly</option>
-                      <option value="symbol_asc">Symbol: A to Z</option>
-                    </select>
-                  </label>
-                  <button id="purpleCopyBtn" type="button">Copy symbols</button>
-                  <button id="purpleDownloadBtn" type="button">Download CSV</button>
-                </div>
-                <div class="wide-table">
-                  <table class="krishna-table">
-                    <thead>
-                      <tr>
-                        <th>Symbol</th>
-                        <th>Score</th>
-                        <th>Touch TF</th>
-                        <th>Close / Purple</th>
-                        <th>Blue / Purple Direction</th>
-                        <th>Higher Confirmation</th>
-                        <th>Yellow / Brown</th>
-                        <th>Light Green</th>
-                        <th>Trend Checks</th>
-                        <th>Early Entry</th>
-                        <th>Final Entry</th>
-                        <th>Exit Rule</th>
-                        <th>Why</th>
-                      </tr>
-                    </thead>
-                    <tbody id="purpleBody"></tbody>
-                  </table>
-                </div>
-                <div class="table-pagination" id="purpleCandidatePager">
-                  <button id="purpleCandidatePrev" type="button">Previous</button>
-                  <span id="purpleCandidatePageLabel">Page 1 of 1</span>
-                  <button id="purpleCandidateNext" type="button">Next</button>
-                </div>
-              </section>
-
-              <section class="table-panel alert-delivery-panel">
-                <div class="panel-head">
-                  <h2>Live Scan Alert Summary</h2>
-                  <span id="purpleAlertMeta">Idle</span>
-                </div>
-                <div class="ops-body">
-                  <p class="helper-text">While the market monitor is running, track new entry and exit counts, Telegram delivery, the newest trade under Trades Triggered, and the later 30-minute exit that closes the same ID.</p>
-                  <div id="purpleAlertTallyCards" class="compact-metrics"></div>
-                  <div id="purpleAlertSummary" class="mini-list"></div>
-                  <div id="purpleAlertTallyPoints" class="mini-list"></div>
-                </div>
-              </section>
-
-              <section class="table-panel">
-                <div class="panel-head">
-                  <h2>Exit Alerts</h2>
-                  <span id="purpleExitAlertMeta">0 alert(s)</span>
-                </div>
-                <div class="ops-body">
-                  <p class="helper-text">An exit alert closes the matching trade ID when its configured exit-timeframe candle closes below the yellow Chande Kroll line.</p>
-                </div>
-                <div class="table-actions">
-                  <label class="table-filter" for="purpleExitAlertProfileFilter">
-                    <span>Scan</span>
-                    <select id="purpleExitAlertProfileFilter">
-                      <option value="all" selected>All scans</option>
-                      <option value="month">Monthly</option>
-                      <option value="week">Weekly</option>
-                      <option value="day">Daily</option>
-                    </select>
-                  </label>
-                  <label class="table-filter" for="purpleExitAlertKindFilter">
-                    <span>Original entry</span>
-                    <select id="purpleExitAlertKindFilter">
-                      <option value="all">Early and final</option>
-                      <option value="early">Early entry</option>
-                      <option value="final">Final entry</option>
-                    </select>
-                  </label>
-                  <label class="table-filter" for="purpleExitAlertSymbolFilter">
-                    <span>Symbol</span>
-                    <input id="purpleExitAlertSymbolFilter" placeholder="All symbols" />
-                  </label>
-                  <label class="table-filter" for="purpleExitAlertFromFilter">
-                    <span>From</span>
-                    <input id="purpleExitAlertFromFilter" type="date" />
-                  </label>
-                  <label class="table-filter" for="purpleExitAlertToFilter">
-                    <span>To</span>
-                    <input id="purpleExitAlertToFilter" type="date" />
-                  </label>
-                  <label class="table-filter" for="purpleExitAlertSort">
-                    <span>Sort by</span>
-                    <select id="purpleExitAlertSort">
-                      <option value="created_at:desc">Newest first</option>
-                      <option value="created_at:asc">Oldest first</option>
-                      <option value="symbol:asc">Symbol: A to Z</option>
-                      <option value="profile:asc">Profile</option>
-                    </select>
-                  </label>
-                </div>
-                <div class="wide-table">
-                  <table class="krishna-table">
-                    <thead>
-                      <tr>
-                        <th>Trade ID</th>
-                        <th>Time</th>
-                        <th>Symbol</th>
-                        <th>Scan</th>
-                        <th>Original Entry</th>
-                        <th>Status</th>
-                        <th>Price / Yellow</th>
-                        <th>Message</th>
-                      </tr>
-                    </thead>
-                    <tbody id="purpleExitAlertsBody"></tbody>
-                  </table>
-                </div>
-                <div class="table-pagination">
-                  <button id="purpleExitPrev" type="button">Previous</button>
-                  <span id="purpleExitPageLabel">Page 1 of 1</span>
-                  <button id="purpleExitNext" type="button">Next</button>
-                </div>
-              </section>
-
-              <section class="table-panel">
-                <div class="panel-head">
-                  <h2>Trades Triggered: Open &amp; Closed</h2>
-                  <span id="purpleOpenTradeMeta">0 trade(s)</span>
-                </div>
-                <div class="ops-body">
-                  <p class="helper-text">Every created entry signal appears once here. Open rows are still being checked for a 30-minute close below yellow; Closed rows show the matching exit time, exit price, and total holding duration. Signal events remain stored internally for duplicate prevention and Telegram audit.</p>
-                </div>
-                <div class="table-actions">
-                  <label class="table-filter" for="purpleTradeProfileFilter">
-                    <span>Scan</span>
-                    <select id="purpleTradeProfileFilter">
-                      <option value="all" selected>All scans</option>
-                      <option value="month">Monthly</option>
-                      <option value="week">Weekly</option>
-                      <option value="day">Daily</option>
-                    </select>
-                  </label>
-                  <label class="table-filter" for="purpleTradeEntryFilter">
-                    <span>Entry</span>
-                    <select id="purpleTradeEntryFilter">
-                      <option value="all">Early and final</option>
-                      <option value="early">Early entry</option>
-                      <option value="final">Final entry</option>
-                    </select>
-                  </label>
-                  <label class="table-filter" for="purpleTradeStatusFilter">
-                    <span>Status</span>
-                    <select id="purpleTradeStatusFilter">
-                      <option value="all">Open and closed</option>
-                      <option value="open">Open</option>
-                      <option value="closed">Closed</option>
-                    </select>
-                  </label>
-                  <label class="table-filter" for="purpleTradeSymbolFilter">
-                    <span>Symbol</span>
-                    <input id="purpleTradeSymbolFilter" placeholder="All symbols" />
-                  </label>
-                  <label class="table-filter" for="purpleTradeFromFilter">
-                    <span>Entry from</span>
-                    <input id="purpleTradeFromFilter" type="date" />
-                  </label>
-                  <label class="table-filter" for="purpleTradeToFilter">
-                    <span>Entry to</span>
-                    <input id="purpleTradeToFilter" type="date" />
-                  </label>
-                  <label class="table-filter" for="purpleTradeSort">
-                    <span>Sort by</span>
-                    <select id="purpleTradeSort">
-                      <option value="opened_at:desc">Newest entry first</option>
-                      <option value="opened_at:asc">Oldest entry first</option>
-                      <option value="holding_duration:desc">Longest duration first</option>
-                      <option value="symbol:asc">Symbol: A to Z</option>
-                      <option value="status:asc">Status</option>
-                    </select>
-                  </label>
-                </div>
-                <div class="wide-table">
-                  <table class="krishna-table">
-                    <thead>
-                      <tr>
-                        <th>Trade ID</th>
-                        <th>Symbol</th>
-                        <th>Scan</th>
-                        <th>Entry</th>
-                        <th>Status</th>
-                        <th>Entry Time</th>
-                        <th>Exit Time</th>
-                        <th>Holding Duration</th>
-                        <th>Entry Price</th>
-                        <th>Exit Price</th>
-                        <th>Exit TF</th><th>India VIX at entry</th><th>India VIX at exit</th>
-                      </tr>
-                    </thead>
-                    <tbody id="purpleTradesBody"></tbody>
-                  </table>
-                </div>
-                <div class="table-pagination">
-                  <button id="purpleTradePrev" type="button">Previous</button>
-                  <span id="purpleTradePageLabel">Page 1 of 1</span>
-                  <button id="purpleTradeNext" type="button">Next</button>
-                </div>
-              </section>
-
-              <section class="table-panel purple-backtest-panel">
-                <div class="panel-head">
-                  <h2>Purple Touch Historical Simulation</h2>
-                  <span id="purpleBacktestMeta">Not run</span>
-                </div>
-                <div class="ops-body">
-                  <div class="purple-backtest-controls">
-                    <div class="control-group profile-picker" title="Backtesting is temporarily restricted to the Weekly profile during validation.">
-                      <span class="control-label">Profile</span>
-                      <label><input id="purpleBtWeek" type="checkbox" checked disabled /> Weekly only</label>
-                    </div>
-                    <label class="control-group" for="purpleBtFrom" title="First date on which a new historical signal may be generated. Earlier candles are retained only as indicator warm-up data.">
-                      <span class="control-label">From</span>
-                      <input id="purpleBtFrom" type="date" />
-                    </label>
-                    <label class="control-group" for="purpleBtTo" title="Last date included in the historical simulation.">
-                      <span class="control-label">To</span>
-                      <input id="purpleBtTo" type="date" />
-                    </label>
-                    <label class="control-group" for="purpleBtSymbols" title="Optional comma-separated F&O symbols. Leave blank to use the watchlist up to the symbol limit.">
-                      <span class="control-label">Symbols</span>
-                      <input id="purpleBtSymbols" placeholder="e.g. VEDL, CIPLA" />
-                    </label>
-                    <label class="control-group" for="purpleBtLimit" title="Maximum watchlist symbols loaded when Symbols is blank. Larger runs can take several minutes.">
-                      <span class="control-label">Symbol limit</span>
-                      <input id="purpleBtLimit" type="number" min="1" max="250" value="5" />
-                    </label>
-                    <label class="control-group" for="purpleBtEntryMode" title="Both applies lifecycle precedence: early may be followed by final; final suppresses a later early for the same stock/profile setup.">
-                      <span class="control-label">Entry mode</span>
-                      <select id="purpleBtEntryMode">
-                        <option value="both">Early then final</option>
-                        <option value="early">Early only</option>
-                        <option value="final">Final only</option>
-                      </select>
-                    </label>
-                    <label class="control-group" for="purpleBtDistance" title="Maximum close above purple after the candle physically touches purple EMA9. Smaller values test stricter bullish closes.">
-                      <span class="control-label">Touch distance</span>
-                      <select id="purpleBtDistance">
-                        <option value="0">Exact 0.00%</option>
-                        <option value="0.2">Within 0.20%</option>
-                        <option value="0.5">Within 0.50%</option>
-                        <option value="1">Within 1.00%</option>
-                        <option value="1.5">Within 1.50%</option>
-                        <option value="2">Within 2.00%</option>
-                        <option value="3" selected>Within 3.00%</option>
-                      </select>
-                    </label>
-                    <label class="control-group" for="purpleBtMinScore" title="Rejects historical candidates below this scanner score.">
-                      <span class="control-label">Minimum score</span>
-                      <input id="purpleBtMinScore" type="number" min="0" max="100" value="60" />
-                    </label>
-                    <label class="control-group" for="purpleBtStopMode" title="Setup invalidation uses the lower of Candle 1 and Candle 2 lows. Percentage uses a fixed distance below entry.">
-                      <span class="control-label">Stop model</span>
-                      <select id="purpleBtStopMode">
-                        <option value="setup_invalidation">C1/C2 invalidation</option>
-                        <option value="percent">Fixed percentage</option>
-                        <option value="none">Yellow exit only</option>
-                      </select>
-                    </label>
-                    <label class="control-group" for="purpleBtStopPercent" title="Used for fixed percentage stop and as fallback when C1/C2 invalidation is unavailable.">
-                      <span class="control-label">Stop % / fallback</span>
-                      <input id="purpleBtStopPercent" type="number" min="0.1" step="0.1" value="3" />
-                    </label>
-                    <label class="control-group" for="purpleBtTargetR" title="Target distance in multiples of initial risk. At 2R, reward is twice the entry-to-stop risk.">
-                      <span class="control-label">Target R</span>
-                      <input id="purpleBtTargetR" type="number" min="0" step="0.25" value="2" />
-                    </label>
-                    <label class="control-group" for="purpleBtMaxHold" title="Optional safety exit after this many exit-timeframe bars. Zero keeps the yellow exit or end-of-data behavior.">
-                      <span class="control-label">Max holding bars</span>
-                      <input id="purpleBtMaxHold" type="number" min="0" value="0" />
-                    </label>
-                    <label class="control-group" for="purpleBtCapital" title="Reference capital used only for risk-sized quantity and simulated currency P&L.">
-                      <span class="control-label">Capital</span>
-                      <input id="purpleBtCapital" type="number" min="1000" step="10000" value="1000000" />
-                    </label>
-                    <label class="control-group" for="purpleBtRiskPercent" title="Capital risk allocated per entry when an initial stop is available.">
-                      <span class="control-label">Risk per trade %</span>
-                      <input id="purpleBtRiskPercent" type="number" min="0.1" step="0.1" value="1" />
-                    </label>
-                    <label class="control-group" for="purpleBtSlippage" title="Entry and exit price allowance in basis points. 10 bps equals 0.10%.">
-                      <span class="control-label">Slippage bps</span>
-                      <input id="purpleBtSlippage" type="number" min="0" step="1" value="5" />
-                    </label>
-                    <label class="control-group" for="purpleBtCosts" title="Round-trip brokerage, taxes, and other cost allowance in basis points.">
-                      <span class="control-label">Costs bps</span>
-                      <input id="purpleBtCosts" type="number" min="0" step="1" value="10" />
-                    </label>
-                  </div>
-                  <div class="button-row">
-                    <button id="purpleBacktestRunBtn" type="button">Run Purple Touch backtest</button>
-                    <button id="purpleBacktestDownloadBtn" type="button" disabled>Download trade CSV</button>
-                  </div>
-                  <details class="backtest-explainer">
-                    <summary>How risk/reward and result quality are measured</summary>
-                    <div class="backtest-explainer-grid">
-                      <div><strong>1R risk</strong><span>Entry minus the initial stop. The default stop is the lower of Candle 1 and Candle 2 lows.</span></div>
-                      <div><strong>Target R</strong><span>At 2R, the target distance is twice the initial risk. Yellow-line exit can close the simulation earlier.</span></div>
-                      <div><strong>Average R</strong><span>Average result measured in units of initial risk. Above 0 means positive historical expectancy after configured costs.</span></div>
-                      <div><strong>Profit factor</strong><span>Gross historical gains divided by gross historical losses. Above 1 means gains exceeded losses in the selected sample.</span></div>
-                      <div><strong>Break-even win rate</strong><span>For a pure 2R target and 1R loss it is 33.33%; actual break-even differs when yellow or time exits occur.</span></div>
-                      <div><strong>Evidence check</strong><span>Review expectancy, drawdown, at least 30 trades, profile consistency, costs, and out-of-sample dates together.</span></div>
-                    </div>
-                  </details>
-                  <div id="purpleBacktestStatus" class="mini-status">Select a date range and run the historical simulation.</div>
-                  <div id="purpleBacktestCards" class="compact-metrics"></div>
-                  <div id="purpleBacktestNotes" class="mini-list"></div>
-                </div>
-
-                <div class="panel-subsection">
-                  <h3>Profile Performance</h3>
-                  <div class="wide-table">
-                    <table class="krishna-table">
-                      <thead><tr><th>Profile</th><th>Trades</th><th>Win Rate</th><th>Avg Return</th><th>Avg R</th><th>Profit Factor</th></tr></thead>
-                      <tbody id="purpleBacktestProfileBody"></tbody>
-                    </table>
-                  </div>
-                </div>
-                <div class="panel-subsection">
-                  <h3>Entry-Type Performance</h3>
-                  <div class="wide-table">
-                    <table class="krishna-table">
-                      <thead><tr><th>Entry</th><th>Trades</th><th>Win Rate</th><th>Avg Return</th><th>Avg R</th><th>Profit Factor</th></tr></thead>
-                      <tbody id="purpleBacktestEntryBody"></tbody>
-                    </table>
-                  </div>
-                </div>
-                <div class="panel-subsection">
-                  <h3>Data Coverage</h3>
-                  <div class="wide-table">
-                    <table class="krishna-table">
-                      <thead><tr><th>Symbol</th><th>Profile</th><th>Status</th><th>Usable From</th><th>Usable To</th><th>Missing</th></tr></thead>
-                      <tbody id="purpleBacktestCoverageBody"></tbody>
-                    </table>
-                  </div>
-                </div>
-                <div class="panel-subsection">
-                  <h3>Historical Trades</h3>
-                  <div class="wide-table">
-                    <table class="krishna-table">
-                      <thead><tr><th>Symbol</th><th>Profile</th><th>Entry</th><th>Entry Time</th><th>Exit Time</th><th>Entry / Stop / Target</th><th>Exit</th><th>Return</th><th>R</th><th>Reason</th></tr></thead>
-                      <tbody id="purpleBacktestTradesBody"></tbody>
-                    </table>
-                  </div>
-                </div>
-              </section>
-            </section>
-          </section>
-        </section>
 
         <section id="tab-backtest" class="tab-pane" data-tab-panel="backtest">
           <nav class="index-subtabs" aria-label="Stock backtest type">
-            <button class="index-subtab active" data-backtest-target="generic" type="button" aria-selected="true">Generic Strategy Backtest</button>
-            <button class="index-subtab" data-backtest-target="krishna" type="button" aria-selected="false">Krishna Setup Backtest</button>
+            <button class="index-subtab active" data-backtest-target="validation" type="button" aria-selected="true">Swing Validation</button>
+            <button class="index-subtab" data-backtest-target="generic" type="button" aria-selected="false">Custom Research</button>
           </nav>
-          <section class="workspace">
+          <section data-backtest-view="validation">
+            <section class="dashboard-band">
+              <div class="section-heading"><h2>Swing Validation Matrix</h2><span id="stockRunState">Not run</span></div>
+              <div class="ledger-filters"><label>Historical end date (IST)<input id="stockAsOf" type="date"></label><label>Market benchmark<select id="stockBenchmark"><option>NIFTY 50</option><option>NIFTY 500</option></select></label><button id="stockValidate" type="button">Validate cached history</button><button id="stockDownload" type="button">Download history &amp; validate</button><button id="stockCancel" type="button" disabled>Cancel</button></div>
+              <progress id="stockProgress" max="1" value="0"></progress><div id="stockAction" role="status"></div><div id="stockProgressText" role="status"></div>
+              <div class="ledger-filters"><label>Strategy<select id="stockSetup"><option value="all">Both families</option><option value="trend_pullback">Trend Pullback</option><option value="compression_breakout">Compression Breakout</option></select></label><label>Direction<select id="stockSide"><option value="all">Both</option><option value="long">Long</option><option value="short">Short</option></select></label><label>Frame<select id="stockFrame"><option value="all">Both frames</option><option value="day">Daily</option><option value="60minute">1 hour</option></select></label><label>Variant<select id="stockVariant"><option value="all">All variants</option><option value="technical">Technical control</option><option value="aligned">Market + sector</option><option value="relative">Aligned + relative strength</option></select></label></div>
+              <div class="wide-table"><table class="readable-table" data-no-pagination="true"><thead><tr><th>Setup / side</th><th>Frame / variant</th><th>Window / target R</th><th>Coverage</th><th>Trades / wins</th><th>Net expectancy / PF</th><th>Stress expectancy</th><th>Trade-series DD (R)</th><th>Later trades / wins</th><th>Screen</th></tr></thead><tbody id="stockResults"></tbody></table></div><div id="stockResultPager" class="table-pagination"></div>
+            </section>
+            <section class="dashboard-band"><div class="section-heading"><h2>Data Coverage</h2><span id="stockCoverageSummary"></span></div><div class="wide-table"><table class="readable-table" data-no-pagination="true"><thead><tr><th>Symbol</th><th>Frame</th><th>Bars</th><th>First candle (IST)</th><th>Last candle (IST)</th></tr></thead><tbody id="stockCoverage"></tbody></table></div><div id="stockCoveragePager" class="table-pagination"></div><div id="stockErrors" role="status"></div></section>
+            <section class="dashboard-band"><div class="section-heading"><h2>Research Export</h2><span>Latest completed run</span></div><div class="ledger-filters"><label>Trades from (IST)<input id="stockFrom" type="date"></label><label>To (IST)<input id="stockTo" type="date"></label><button id="stockZip" type="button">Download trades &amp; logs</button><button id="stockCsv" type="button">Download trade CSV</button></div><div id="stockExportStatus" role="status"></div></section>
+          </section>
+          <section class="workspace" data-backtest-view="generic" hidden>
             <aside class="sidebar">
               <div class="panel" data-backtest-view="generic">
                 <label>Generic Strategy Backtest</label>
@@ -1909,49 +1124,7 @@
                 <button id="genericBacktestExport" class="full-btn" disabled>Download full result</button>
               </div>
 
-              <div class="panel" data-backtest-view="krishna" hidden>
-                <label>Krishna Setup Backtest</label>
-                <div class="field-hint">Daily futures-style validation. Blank symbol tests the F&O watchlist; use cached daily candles.</div>
-                <label for="backtestSymbol">Symbol</label>
-                <input id="backtestSymbol" placeholder="Optional, e.g. NIFTY or RELIANCE" />
-                <div class="date-grid">
-                  <div>
-                    <label for="backtestDays">Days</label>
-                    <input id="backtestDays" type="number" min="90" step="1" value="730" />
-                  </div>
-                  <div>
-                    <label for="backtestHoldingDays">Hold</label>
-                    <input id="backtestHoldingDays" type="number" min="1" step="1" value="10" />
-                  </div>
-                </div>
-                <div class="date-grid">
-                  <div>
-                    <label for="backtestFromDate">From</label>
-                    <input id="backtestFromDate" type="date" />
-                  </div>
-                  <div>
-                    <label for="backtestToDate">To</label>
-                    <input id="backtestToDate" type="date" />
-                  </div>
-                </div>
-                <label class="checkbox-row">
-                  <input id="backtestEntryTrigger" type="checkbox" checked />
-                  <span>Use 2-hour entry trigger</span>
-                </label>
-                <div class="date-grid">
-                  <div>
-                    <label for="backtestTriggerHoldingBars">2H Hold Bars</label>
-                    <input id="backtestTriggerHoldingBars" type="number" min="1" step="1" value="6" />
-                  </div>
-                  <div>
-                    <label for="backtestTargetR">Target R</label>
-                    <input id="backtestTargetR" type="number" min="0.5" step="0.5" value="2" />
-                  </div>
-                </div>
-                <label for="backtestLimitSymbols">Symbols</label>
-                <input id="backtestLimitSymbols" placeholder="50 or all" value="50" />
-                <button id="backtestRunBtn" class="full-btn">Run backtest</button>
-              </div>
+
             </aside>
 
             <section class="content">
@@ -2063,138 +1236,7 @@
               </section>
 
               </section>
-              <section class="content" data-backtest-view="krishna" hidden>
-              <section class="activity-hero">
-                <div>
-                  <h2>Krishna Setup Backtest</h2>
-                  <p>Checks whether the Krishna daily setup had directional edge before option-selling rules are added.</p>
-                </div>
-                <span id="backtestMeta"></span>
-              </section>
 
-              <section class="table-panel">
-                <div class="panel-head">
-                  <h2>Backtest Summary</h2>
-                  <span id="backtestStatus">Idle</span>
-                </div>
-                <div class="ops-body">
-                  <div id="backtestSummaryCards" class="compact-metrics"></div>
-                  <div id="backtestSummaryPoints" class="mini-list"></div>
-                </div>
-              </section>
-
-              <section class="table-panel">
-                <div class="panel-head">
-                  <h2>Forward Accuracy</h2>
-                  <span>Every historical signal</span>
-                </div>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Horizon</th>
-                      <th>Signals</th>
-                      <th>Successes</th>
-                      <th>Accuracy</th>
-                      <th>Avg Forward Return</th>
-                    </tr>
-                  </thead>
-                  <tbody id="backtestForwardBody"></tbody>
-                </table>
-              </section>
-
-              <section class="table-panel">
-                <div class="panel-head">
-                  <h2>Score Buckets</h2>
-                  <span>Non-overlapping trades</span>
-                </div>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Score</th>
-                      <th>Trades</th>
-                      <th>Win Rate</th>
-                      <th>Avg Return</th>
-                      <th>Expectancy</th>
-                    </tr>
-                  </thead>
-                  <tbody id="backtestBucketBody"></tbody>
-                </table>
-              </section>
-
-              <section class="table-panel">
-                <div class="panel-head">
-                  <h2>Symbol Summary</h2>
-                  <span id="backtestSymbolMeta"></span>
-                </div>
-                <div class="wide-table">
-                  <table class="readable-table">
-                    <thead>
-                      <tr>
-                        <th>Symbol</th>
-                        <th>Status</th>
-                        <th>Signals</th>
-                        <th>Trades</th>
-                        <th>Win Rate</th>
-                        <th>Avg Return</th>
-                        <th>Profit Factor</th>
-                        <th>Max DD</th>
-                        <th>Buy/Hold</th>
-                      </tr>
-                    </thead>
-                    <tbody id="backtestSymbolBody"></tbody>
-                  </table>
-                </div>
-              </section>
-
-              <section class="table-panel">
-                <div class="panel-head">
-                  <h2>Monthly Performance</h2>
-                  <span>Trade exit month</span>
-                </div>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Month</th>
-                      <th>Trades</th>
-                      <th>Win Rate</th>
-                      <th>Total Return</th>
-                      <th>Avg Return</th>
-                    </tr>
-                  </thead>
-                  <tbody id="backtestMonthlyBody"></tbody>
-                </table>
-              </section>
-
-              <section class="table-panel">
-                <div class="panel-head">
-                  <h2>Trade Log</h2>
-                  <span id="backtestTradeMeta"></span>
-                </div>
-                <div class="table-actions">
-                  <button id="backtestDownloadTradesBtn" type="button">Download trade CSV</button>
-                  <button id="backtestDownloadSignalsBtn" type="button">Download signal features CSV</button>
-                </div>
-                <div class="wide-table">
-                  <table class="readable-table">
-                    <thead>
-                      <tr>
-                        <th>Symbol</th>
-                        <th>Signal</th>
-                        <th>Entry Date</th>
-                        <th>Exit Date</th>
-                        <th>Score</th>
-                        <th>Confidence</th>
-                        <th>Entry</th>
-                        <th>Exit</th>
-                        <th>Return</th>
-                        <th>Why</th>
-                      </tr>
-                    </thead>
-                    <tbody id="backtestTradeBody"></tbody>
-                  </table>
-                </div>
-              </section>
-              </section>
             </section>
           </section>
         </section>
@@ -2202,16 +1244,18 @@
         <section id="tab-pullbacks" class="tab-pane" data-tab-panel="pullbacks">
           <section class="workspace">
             <aside class="sidebar"><div class="panel">
-              <h2 class="nifty-settings-title">F&amp;O Pullback Scanners</h2>
+              <h2 class="nifty-settings-title">Legacy Pullback Monitor</h2>
+              <details><summary>Legacy controls (unvalidated)</summary>
               <label for="pullbackFrame">Setup candles</label>
               <select id="pullbackFrame"><option value="day">Daily</option><option value="60minute">1 hour</option><option value="15minute">15 min</option></select>
               <label for="pullbackBenchmark">Market benchmark</label>
               <select id="pullbackBenchmark"><option>NIFTY 50</option><option>NIFTY 100</option><option>NIFTY 200</option><option>NIFTY 500</option></select>
               <label class="check-row"><input id="pullbackStructure" type="checkbox" checked />Confirmed index swing structure</label>
-              <div class="button-row"><button id="pullbackStart">Start paper alerts</button><button id="pullbackStop" disabled>Stop pullbacks</button></div>
+              <div class="button-row"><button id="pullbackStart">Start legacy paper monitor</button><button id="pullbackStop" disabled>Stop legacy monitor &amp; exits</button></div>
               <button id="pullbackStartAll" class="full-btn">Start indices + pullbacks</button>
               <div id="pullbackTelegram" class="mini-status"></div>
               <button id="pullbackTestTelegram" class="full-btn">Test pullback Telegram</button>
+              </details>
               <label for="pullbackExportFrom">Logs from (IST)</label><input id="pullbackExportFrom" type="date" />
               <label for="pullbackExportTo">To (IST)</label><input id="pullbackExportTo" type="date" />
               <button id="pullbackExport" class="full-btn">Download scanner log</button>
@@ -2219,7 +1263,7 @@
             </div></aside>
             <section class="content">
               <section class="table-panel">
-                <div class="panel-head"><h2>Pullback Paper Scanner</h2><span id="pullbackStatus">Stopped</span></div>
+                <div class="panel-head"><h2>Legacy Paper Trades</h2><span id="pullbackStatus">Stopped</span></div>
                 <div class="ops-body"><div id="pullbackMetrics" class="compact-metrics"></div><div id="pullbackRefresh" class="mini-status"></div><div id="pullbackErrors" class="mini-list"></div></div>
               </section>
               <section class="table-panel">
@@ -2352,6 +1396,7 @@
 
     </main>
     <script src="/app.js"></script>
+    <script src="/stocks.js"></script>
     <script src="/scanner-dashboard.js"></script>
     <script src="/table-pagination.js"></script>
     <script src="/nifty-lab.js"></script>

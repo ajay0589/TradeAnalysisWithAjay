@@ -190,7 +190,8 @@ def test_catalog_is_read_only_and_has_all_scanners(dashboard, monkeypatch):
     monkeypatch.setattr(LIVE_QUOTES, "acquire", lambda *_: pytest.fail("Dashboard must not start quotes"))
     d = dashboard.status()
     assert d["running_count"] == 2 and d["open_trade_count"] == 120
-    assert len(d["scanners"]) == 16
+    assert len(d["scanners"]) == 11
+    assert not any(s["id"].startswith("purple") or s["id"]=="krishna" for s in d["scanners"])
     assert all("Intraday" in s["detail"] for s in d["scanners"] if s["id"].startswith("Nifty_Setup"))
 
 

@@ -2721,6 +2721,8 @@ class AnalysisService:
             path = self.nse_instruments_path
         elif exchange == "BSE":
             path = self.bse_instruments_path
+        elif exchange == "NFO":
+            path = self.nfo_instruments_path
         else:
             raise ValueError(f"Unsupported candle exchange: {exchange}")
         if not path.exists():

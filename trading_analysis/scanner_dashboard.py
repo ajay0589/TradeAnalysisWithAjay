@@ -162,13 +162,10 @@ class ScannerDashboard:
                 for root in ("SILVERM", "GOLDM", "NATURALGAS", "CRUDEOIL"):
                     add(f"mcx_{root}", f"MCX {root}", dict(h.mcx_scanner.state), "mcx", "Swing futures / Daily trend + hourly breakout")
         with h.pullback_scanner._lock:
-            for side in ("bullish", "bearish"):
-                add(f"pullback_{side}", f"F&O {side} pullback", h.pullback_scanner.state, "pullbacks", "Shared pullback monitor")
-        with h.service._purple_monitor_lock:
-            state = dict(h.service._purple_monitor_state)
-            for profile, label in (("month", "Monthly"), ("week", "Weekly"), ("day", "Daily")):
-                add(f"purple_{profile}", f"Purple Touch {label}", state, "purple", "Setup discovery + independent entry/exit checks")
-        for key, label in (("scans", "Stock strategy scans"), ("krishna", "Krishna Setup scan"), ("analyze", "Stock / index research")):
+            add("pullback_legacy", "Legacy pullback paper monitor", h.pullback_scanner.state, "pullbacks", "Unvalidated legacy long/short monitor")
+        if hasattr(h, "stock_research"):
+            add("stock_research", "F&O swing validation", {"phase": h.stock_research.state["phase"]}, "stocks", "Research only; live approval blocked")
+        for key, label in (("scans", "Stock screener"), ("analyze", "Stock / index research")):
             add(key, label, {"phase": "on_demand"}, key, "Manual analysis; no recurring monitor")
         open_rows = self.all_trades(status="open")
         return {"scanners": rows, "running_count": sum(r["running"] for r in rows), "open_trade_count": len(open_rows),

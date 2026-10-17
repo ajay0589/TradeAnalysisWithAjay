@@ -34,10 +34,11 @@ def trade_overlaps(row, first, last):
         not exit_at or as_ist(exit_at).date().isoformat() >= first)
 
 
-def trade_csv(rows):
+def trade_csv(rows, extra_columns=()):
     columns = ["symbol", "trade_id", "setup", "variant", "horizon", "direction", "status",
                "entry_time", "entry_price", "exit_time", "exit_price", "stop_level", "target_level",
                "gross_points", "gross_r", "net_r", "exit_reason", "price_basis", "india_vix_entry", "india_vix_exit"]
+    columns += [name for name in extra_columns if name not in columns]
     buffer = io.StringIO(newline="")
     writer = csv.DictWriter(buffer, fieldnames=columns)
     writer.writeheader()

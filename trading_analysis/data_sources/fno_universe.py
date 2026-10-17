@@ -6,6 +6,13 @@ from pathlib import Path
 from typing import Any
 
 
+def current_watchlist_symbols(service, now):
+    names = {row.get("name", "").upper() for row in service._instruments_for_exchange("NFO")
+             if row.get("segment") == "NFO-FUT" and str(row.get("expiry", ""))[:10] >= now.date().isoformat()}
+    return [item.symbol for item in service._watchlist_items_by_symbol().values()
+            if item.exchange == "NSE" and item.instrument_type == "EQ" and item.symbol.upper() in names]
+
+
 def fno_stock_symbols(
     nfo_instruments: list[dict[str, str]],
     nse_instruments: list[dict[str, str]],

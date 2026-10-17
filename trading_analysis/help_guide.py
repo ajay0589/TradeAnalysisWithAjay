@@ -36,7 +36,9 @@ Keep all trades and sessions, not only winners or losers.
 
 
 def guide():
+    from trading_analysis.stock_research import RULES
     sections = [
+        {"id": "fno-stocks", "title": "F&O Stock Research", "items": [(f"Rule {i+1}", rule) for i, rule in enumerate(RULES)]},
         {"id": "scalping", "title": "Index Scalping Lab", "items": [
             ("Unvalidated experiments", "NIFTY, Bank Nifty and Sensex each have trend-pullback, opening-range-retest and failed-breakout setups. Three variants per setup: A technical, B technical plus fixed-contract ATM call/put premiums, C B plus OI activity. All 27 ledgers are paper-only; no orders are placed."),
             ("Timing and execution", "Live entries use completed 1m candles and closed 5m context. Signal age <=10s; spot/options <=3s old; option spread <=1.5%. Entry cutoff 14:45 IST, maximum holding 20m, session exit 15:20. Targets remain fixed at 1.5R from signal close. Stop new entries keeps exits running."),
@@ -49,7 +51,7 @@ def guide():
             ("Index signals", "NIFTY, Bank Nifty and Sensex entries/results track the underlying spot index, not futures, option premiums, strikes or spread P&L. Option strategy names are context, not executed option legs. A correct spot direction can still lose on options because of time decay, IV changes, spreads and costs."),
             ("Scanner horizons", "; ".join(f"{name}: {row['timeframe']} closed candles" for name, row in HORIZON_CONFIG.items()) + ". The monitor interval is a scheduling interval, not the candle timeframe."),
             ("NIFTY Setup Lab", f"{VERSION}: five intraday-only setups, each with technical-only and technical-plus-options ledgers. These are ten paper variants sharing data, not ten independent broker downloaders. No swing or positional Lab signals."),
-            ("Other modules", "Stock Research is manual context; F&O Pullbacks and Purple Touch have their own stock rules and lifecycle. MCX Swing tracks specific futures contracts and expiry, not index spot. Their results must not be pooled with index or Lab results. Their module-specific rules remain separate."),
+            ("Other modules", "F&O Stocks separates research candidates, historical validation and the legacy pullback trade archive. New swing setups have no live-start control pending review. Krishna and Purple Touch sections are retired; their stored records are retained. MCX Swing tracks specific futures contracts and expiry, not index spot. Do not pool results across engines."),
             ("Validation status", "No setup is certified profitable. The 15 October review screened 342 comparisons ending 7 October; none passed all coverage, sample-size, win-rate and expectancy checks. Five-minute history was incomplete. Existing scanners remain experiments, not validated strategies."),
         ]},
         {"id": "evidence", "title": "Data To Share After Market Hours", "items": [
