@@ -58,6 +58,46 @@ function app(includeLab = false) {
   return {context, requests, ids, events, run: (code) => vm.runInContext(code, context)};
 }
 
+test("scalping dates use the API range contract and tabs work before data loads", () => {
+  const ui = app(true);
+  ui.run(fs.readFileSync(path.join(root, "web/scalping.js"), "utf8"));
+  ui.ids.get("scalpFrom").value = "2026-10-16";
+  for (const to of ["", "2026-10-16", "2026-10-17"]) {
+    ui.ids.get("scalpTo").value = to;
+    const query = new URLSearchParams(ui.run("scalpRange()"));
+    assert.equal(query.get("from_date"), "2026-10-16");
+    assert.equal(query.get("to_date"), to || "2026-10-16");
+    assert.equal(query.has("date"), false);
+  }
+  for (const symbol of ["BANKNIFTY", "SENSEX", "NIFTY"]) {
+    ui.ids.get("tab-scalping").handlers.click({target: {closest: () => ({dataset: {scalpIndex: symbol}})}});
+    assert.equal(ui.run("scalp.symbol"), symbol);
+    const tabs = ui.context.document.querySelectorAll("[data-scalp-index]");
+    assert.equal(tabs.find(b => b.dataset.scalpIndex === symbol).getAttribute("aria-selected"), "true");
+  }
+  ui.ids.get("scalpTo").value = "2026-10-15";
+  assert.throws(() => ui.run("scalpRange()"), /valid From/);
+});
+
+test("scalping successful retry clears only the previous load error", async () => {
+  const ui = app(true);
+  ui.run(fs.readFileSync(path.join(root, "web/scalping.js"), "utf8"));
+  ui.run('state.activeTab = "scalping"; renderScalping = () => {};');
+  const failed = ui.run("loadScalping()");
+  ui.requests.at(-1).resolve({error: "Unknown scalping filter"}, false);
+  await failed;
+  assert.equal(ui.ids.get("scalpAction").textContent, "Unknown scalping filter");
+  const retried = ui.run("loadScalping()");
+  ui.requests.at(-1).resolve({});
+  await retried;
+  assert.equal(ui.ids.get("scalpAction").textContent, "");
+  ui.ids.get("scalpAction").textContent = "New entries stopped";
+  const next = ui.run("loadScalping()");
+  ui.requests.at(-1).resolve({});
+  await next;
+  assert.equal(ui.ids.get("scalpAction").textContent, "New entries stopped");
+});
+
 test("help navigation loads read-only content once and supports retry", async () => {
   const ui = app();
   ui.run(fs.readFileSync(path.join(root, "web/help.js"), "utf8"));

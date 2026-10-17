@@ -1,7 +1,11 @@
 /* Paper scalping has no implicit start/download on navigation. */
 const scalp = {data: null, symbol: "NIFTY", busy: false, loading: false, request: 0, pages: {Trade:1, Decision:1, Research:1, Event:1}};
 const scalpText = v => escapeHtml(String(v ?? "-").replaceAll("_", " "));
-function scalpRange() { return auditRange("scalpFrom", "scalpTo").query; }
+function scalpRange() {
+  auditRange("scalpFrom", "scalpTo");
+  const from = $("scalpFrom").value, to = $("scalpTo").value || from;
+  return new URLSearchParams({from_date: from, to_date: to}).toString();
+}
 function scalpKey() { return `${scalp.symbol}:${$("scalpSetup").value}`; }
 function scalpPage(name, rows, render) {
   const pages = Math.max(1, Math.ceil(rows.length / 10));
@@ -15,8 +19,13 @@ async function loadScalping() {
   const request = ++scalp.request;
   try {
     const query = scalpRange(), data = await api(`/api/scalping/status?${query}`);
-    if (request === scalp.request && query === scalpRange()) { scalp.data = data; renderScalping(); }
-  } catch(error) { $("scalpAction").textContent = error.message; }
+    if (request === scalp.request && query === scalpRange()) {
+      scalp.data = data;
+      if ($("scalpAction").textContent === scalp.loadError) $("scalpAction").textContent = "";
+      scalp.loadError = null;
+      renderScalping();
+    }
+  } catch(error) { scalp.loadError = error.message; $("scalpAction").textContent = error.message; }
   finally { scalp.loading = false; }
 }
 async function scalpControl(action, setup=null, download=false) {
@@ -30,6 +39,7 @@ async function scalpControl(action, setup=null, download=false) {
   finally { scalp.busy = false; await loadScalping(); }
 }
 function renderScalping() {
+  document.querySelectorAll("[data-scalp-index]").forEach(b => { b.classList.toggle("active", b.dataset.scalpIndex === scalp.symbol); b.setAttribute("aria-selected", String(b.dataset.scalpIndex === scalp.symbol)); });
   const d = scalp.data; if (!d) return;
   const e = scalpText, key = scalpKey();
   $("scalpStatus").textContent = `${d.running_count}/9 running | 27 paper ledgers | Stream ${d.stream_connected ? "connected" : "disconnected"}`;
@@ -41,7 +51,6 @@ function renderScalping() {
   $("scalpCsv").href = `/api/scalping/export?${scalpRange()}&format=csv`;
   $("scalpOverview").innerHTML = Object.entries(d.states).map(([k,s]) => `<tr><td>${e(k)}<div class="cell-note">${e(d.setups[k.split(":")[1]])}</div></td><td>${e(s.phase)}<div class="cell-note">${e(s.reason)}</div></td><td>${fmtDateTime(s.started_at)}<br>${fmtDateTime(s.stopped_at)}</td><td>${fmtDateTime(s.last_checked)}<br>${fmtDateTime(s.last_bar)}</td><td><button type="button" data-scalp-action="${s.enabled ? "stop" : "start"}" data-key="${e(k)}">${s.enabled ? "Stop entries" : "Start"}</button></td></tr>`).join("");
   $("scalpFeeds").innerHTML = Object.entries(d.feeds).map(([s,f]) => `<tr><td>${e(s)}</td><td>${e(f.phase)}<br>${fmtDateTime(f.latest_candle)}</td><td>${fmtDateTime(f.last_refresh)}</td><td>${fmt(f.spot?.price)}<br>${fmtDateTime(f.spot?.quote_time)}</td><td>${fmt(f.pair?.strike)} / ${e(f.pair?.expiry)}</td><td>${f.option_samples}<div class="cell-note">${e(f.error || f.stream_error)}</div></td></tr>`).join("");
-  document.querySelectorAll("[data-scalp-index]").forEach(b => { b.classList.toggle("active", b.dataset.scalpIndex === scalp.symbol); b.setAttribute("aria-selected", String(b.dataset.scalpIndex === scalp.symbol)); });
   $("scalpMetrics").innerHTML = d.metrics.filter(r => r.setup === key).map(r => `<tr><td>${r.variant}: ${e(d.variants[r.variant])}</td><td>${r.open}</td><td>${r.closed}</td><td>${fmt(r.win_rate)}</td><td>${fmt(r.net_r)}</td><td>${fmt(r.expectancy_r)}</td><td>${fmt(r.profit_factor)}</td><td>${fmt(r.max_drawdown_r)}</td><td>${r.excluded}</td></tr>`).join("");
   const trades = d.trades.filter(t => t.setup === key && ($("scalpVariant").value === "all" || t.variant === $("scalpVariant").value) && ($("scalpTradeStatus").value === "all" || t.status === $("scalpTradeStatus").value));
   $("scalpTrades").innerHTML = scalpPage("Trade", trades, t => {

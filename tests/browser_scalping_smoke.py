@@ -12,6 +12,10 @@ def main():
     with urlopen(url + "/api/scalping/status") as response:
         fixture = json.load(response)
     day = fixture["from_date"]
+    fixture["running_count"] = 0
+    for state in fixture["states"].values():
+        state["enabled"] = False
+        state["phase"] = "stopped"
     fixture["research"] = {"phase":"idle", "rows":[]}
     fixture["trades"] = [{"id": f"SC-UI-{i}", "symbol":"NIFTY", "setup":"NIFTY:Scalp1", "variant":"A",
         "direction":"bullish", "status":"closed", "entry_time":day+"T10:00:01+05:30", "entry_price":23000,
@@ -25,6 +29,21 @@ def main():
         browser = p.chromium.launch(channel="chrome",headless=True)
         page = browser.new_page(viewport={"width":1440,"height":1000})
         page.on("pageerror", lambda e: errors.append(str(e)))
+        # Exercise the real UI/API date contract before replacing responses with fixtures.
+        page.route("**/api/**", lambda route: route.abort() if route.request.method == "POST" else route.continue_())
+        page.goto(url,wait_until="domcontentloaded")
+        page.locator('[data-tab-target="scalping"]').click()
+        expect(page.locator("#scalpOverview tr")).to_have_count(9)
+        expect(page.locator("#scalpAction")).not_to_contain_text("Unknown scalping filter")
+        for symbol in ("BANKNIFTY", "SENSEX", "NIFTY"):
+            tab = page.locator(f'[data-scalp-index="{symbol}"]')
+            tab.click()
+            expect(tab).to_have_attribute("aria-selected", "true")
+            expect(page.locator("#scalpMetrics tr")).to_have_count(3)
+        for link in ("#scalpCsv", "#scalpZip"):
+            response = page.request.get(url + page.locator(link).get_attribute("href"))
+            assert response.ok, response.text()
+        page.unroute("**/api/**")
         def route(route):
             if "/api/scalping/status" in route.request.url:
                 route.fulfill(json=fixture)
