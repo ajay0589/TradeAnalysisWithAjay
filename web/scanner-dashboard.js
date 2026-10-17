@@ -1,6 +1,6 @@
 /* Read-only views. Opening these panels never starts a scanner or quote feed. */
 const ledgerViews = {};
-const ledgerSources = ["NIFTY", "BANKNIFTY", "SENSEX", "MCX", "pullbacks", "purple", ...Array.from({length: 5}, (_, i) => `Nifty_Setup${i + 1}`)];
+const ledgerSources = ["NIFTY", "BANKNIFTY", "SENSEX", "MCX", "scalping", "pullbacks", "purple", ...Array.from({length: 5}, (_, i) => `Nifty_Setup${i + 1}`)];
 const ledgerHeading = '<tr><th>Trade / scanner</th><th>Status / direction</th><th>Result (points / %)</th><th>Horizon / variant</th><th>Entry (IST)</th><th>Entry price</th><th>Exit (IST)</th><th>Exit price</th><th>Open time</th><th>Stop / target</th><th>India VIX at entry</th><th>India VIX at exit</th><th>Exit reason</th></tr>';
 
 function tradeResultCell(result) {

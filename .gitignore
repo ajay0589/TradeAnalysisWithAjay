@@ -13,3 +13,4 @@ data/raw/
 data/processed/
 web_server.log
 *.zip
+data/scalping/

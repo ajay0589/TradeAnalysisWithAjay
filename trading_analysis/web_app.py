@@ -16,6 +16,7 @@ from trading_analysis.instrument_master_service import InstrumentMasterService
 from trading_analysis.all_index_monitor import AllIndexMonitor
 from trading_analysis.pullback_scanner import PullbackScanner
 from trading_analysis.nifty_lab.service import NiftySetupLab
+from trading_analysis.scalping.service import ScalpingLab
 from trading_analysis.mcx.service import McxSwingScanner
 from trading_analysis.scanner_dashboard import ScannerDashboard
 from trading_analysis.notifications.telegram import TelegramNotifier
@@ -52,6 +53,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
     all_index_monitor = AllIndexMonitor(nifty_auto_service, index_scanner_service, instrument_master_service)
     pullback_scanner = PullbackScanner(service)
     nifty_lab = NiftySetupLab(service)
+    scalping_lab = ScalpingLab(service)
     mcx_scanner = McxSwingScanner()
 
     @diagnostics.audit_http
@@ -66,8 +68,22 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_file(WEB_ROOT / "app.js", "application/javascript; charset=utf-8")
             elif parsed.path == "/nifty-lab.js":
                 self._send_file(WEB_ROOT / "nifty-lab.js", "application/javascript; charset=utf-8")
-            elif parsed.path in {"/scanner-dashboard.js", "/table-pagination.js", "/mcx.js", "/help.js"}:
+            elif parsed.path in {"/scanner-dashboard.js", "/table-pagination.js", "/mcx.js", "/help.js", "/scalping.js"}:
                 self._send_file(WEB_ROOT / parsed.path[1:], "application/javascript; charset=utf-8")
+            elif parsed.path in {"/api/scalping/status", "/api/scalping/export"}:
+                params = parse_qs(parsed.query)
+                if set(params) - {"from_date", "to_date", "format"}:
+                    raise ValueError("Unknown scalping filter")
+                if parsed.path.endswith("status"):
+                    self._send_json(self.scalping_lab.status(**_export_dates(params)))
+                else:
+                    report = self.scalping_lab.export(**_export_dates(params))
+                    if params.get("format") == ["csv"]:
+                        self._send_csv(report["trades"], "scalping-trades", report)
+                    elif params.get("format") == ["zip"]:
+                        self._send_zip(report, "scalping-audit")
+                    else:
+                        self._send_json(report)
             elif parsed.path == "/api/help":
                 from trading_analysis.help_guide import guide
                 self._send_json(guide())
@@ -126,6 +142,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 report["scanners"] = diagnostics.clean(self.all_index_monitor.diagnostics(**dates))
                 report["pullbacks"] = diagnostics.clean(self.pullback_scanner.export(**dates))
                 report["nifty_setup_lab"] = self.nifty_lab.export(**dates)
+                report["scalping"] = self.scalping_lab.export(**dates)
                 report["mcx"] = self.mcx_scanner.export(**dates)
                 if params.get("format") == ["zip"]:
                     self._send_zip(report, "trading-app-log")
@@ -628,6 +645,19 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/mcx/test-telegram":
                 self._read_json()
                 self._send_json(TelegramNotifier.from_env("MCX_").send_message("MCX SWING - CONNECTION TEST ONLY. No trade or order."))
+            elif parsed.path == "/api/scalping/start":
+                payload = self._read_json()
+                self._send_json(self.scalping_lab.start(payload.get("setup"), payload.get("telegram_enabled", False)))
+            elif parsed.path == "/api/scalping/stop":
+                self._send_json(self.scalping_lab.stop(self._read_json().get("setup")))
+            elif parsed.path == "/api/scalping/research":
+                self._send_json(self.scalping_lab.start_research(self._read_json().get("download", False)))
+            elif parsed.path == "/api/scalping/cancel-research":
+                self._read_json()
+                self._send_json(self.scalping_lab.cancel_research())
+            elif parsed.path == "/api/scalping/test-telegram":
+                self._read_json()
+                self._send_json(TelegramNotifier.from_env("SCALP_").send_message("SCALPING LAB - CONNECTION TEST ONLY. No signal, trade or order."))
             elif parsed.path == "/api/nifty-lab/start":
                 payload = self._read_json()
                 self._send_json(self.nifty_lab.start(payload.get("setup"), payload.get("telegram_enabled", False)))

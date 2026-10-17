@@ -37,6 +37,13 @@ Keep all trades and sessions, not only winners or losers.
 
 def guide():
     sections = [
+        {"id": "scalping", "title": "Index Scalping Lab", "items": [
+            ("Unvalidated experiments", "NIFTY, Bank Nifty and Sensex each have trend-pullback, opening-range-retest and failed-breakout setups. Three variants per setup: A technical, B technical plus fixed-contract ATM call/put premiums, C B plus OI activity. All 27 ledgers are paper-only; no orders are placed."),
+            ("Timing and execution", "Live entries use completed 1m candles and closed 5m context. Signal age <=10s; spot/options <=3s old; option spread <=1.5%. Entry cutoff 14:45 IST, maximum holding 20m, session exit 15:20. Targets remain fixed at 1.5R from signal close. Stop new entries keeps exits running."),
+            ("Premium and OI evidence", "Spot, same-expiry ATM CE and PE must agree over 1m and 3m windows. ATM changes reset evidence. B needs opposite CE/PE midpoint moves of at least 0.2%; C also needs >=0.5% absolute OI change and positive volume increments on both sides. These are positioning hypotheses, not institutional identities. A does not wait for options."),
+            ("Results and research", "Observed spot net R assumes 2 bps per side. Indicative option ask-to-bid gross points exclude fees/slippage and are not fills. Research tests 1m/3m, 1R/1.5R/2R, 1/2 weeks and 1/2/3/6 months. Missing coverage stays missing. No automatic promotion, no claim of historical option replay, and no profitability guarantee."),
+            ("Review packet", "Scalping Lab date-range ZIP includes decisions, option evidence, trades, costs, policies, monitor events and Telegram delivery. Download CSV for compact spot results. Logs do not include credentials. SCALP_TELEGRAM_BOT_TOKEN and SCALP_TELEGRAM_CHAT_ID configure a dedicated opt-in paper chat."),
+        ]},
         {"id": "scope", "title": "About & Price Basis", "items": [
             ("Research, not execution", "This is a read-only scanner and paper-trade audit application. It does not place orders. A signal is a testable rule outcome, not a recommendation or a guaranteed edge."),
             ("Index signals", "NIFTY, Bank Nifty and Sensex entries/results track the underlying spot index, not futures, option premiums, strikes or spread P&L. Option strategy names are context, not executed option legs. A correct spot direction can still lose on options because of time decay, IV changes, spreads and costs."),

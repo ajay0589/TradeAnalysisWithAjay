@@ -4,7 +4,7 @@
   const states = new WeakMap();
   function paginate(table) {
     const body = table.tBodies[0];
-    if (!body || table.dataset.managedPagination || managed.has(body.id)) return;
+    if (!body || table.hasAttribute("data-no-pagination") || table.dataset.managedPagination || managed.has(body.id)) return;
     let s = states.get(table);
     if (!s) {
       const pager = document.createElement("div");

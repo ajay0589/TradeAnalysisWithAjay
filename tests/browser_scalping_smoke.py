@@ -1,0 +1,75 @@
+"""UI-only fixtures. All control requests intercepted; no broker or Telegram calls."""
+import json
+from pathlib import Path
+import sys
+from urllib.request import urlopen
+
+from playwright.sync_api import expect, sync_playwright
+
+
+def main():
+    url = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8766"
+    with urlopen(url + "/api/scalping/status") as response:
+        fixture = json.load(response)
+    day = fixture["from_date"]
+    fixture["research"] = {"phase":"idle", "rows":[]}
+    fixture["trades"] = [{"id": f"SC-UI-{i}", "symbol":"NIFTY", "setup":"NIFTY:Scalp1", "variant":"A",
+        "direction":"bullish", "status":"closed", "entry_time":day+"T10:00:01+05:30", "entry_price":23000,
+        "exit_time":day+"T10:10:00+05:30", "exit_price":23030, "open_seconds":599,
+        "stop_level":22980,"target_level":23030,"risk_points":20,"net_r":1,"performance_eligible":True,
+        "exit_reason":"spot_target","telegram_enabled":False} for i in range(25)]
+    errors, commands = [], []
+    out = Path("logs/scalping-ui-qa")
+    out.mkdir(parents=True,exist_ok=True)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel="chrome",headless=True)
+        page = browser.new_page(viewport={"width":1440,"height":1000})
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        def route(route):
+            if "/api/scalping/status" in route.request.url:
+                route.fulfill(json=fixture)
+            elif route.request.method == "POST":
+                if "/api/scalping/" in route.request.url:
+                    commands.append(route.request.url)
+                    enabled = route.request.url.endswith("/start")
+                    for s in fixture["states"].values(): s["enabled"] = enabled
+                    fixture["running_count"] = 9 if enabled else 0
+                    route.fulfill(json={"ok":True})
+                elif route.request.url.endswith("/client-event"): route.continue_()
+                else: route.abort()
+            else: route.continue_()
+        page.route("**/api/**",route)
+        page.goto(url,wait_until="domcontentloaded")
+        page.locator('[data-tab-target="scalping"]').click()
+        expect(page.locator("#scalpStatus")).to_contain_text("0/9")
+        expect(page.locator("#scalpOverview tr")).to_have_count(9)
+        expect(page.locator("#scalpTrades tr")).to_have_count(10)
+        assert not commands
+        page.locator('#scalpTradePager [data-step="1"]').click()
+        expect(page.locator("#scalpTradePager")).to_contain_text("Page 2 of 3")
+        page.locator('#scalpTradePager [data-step="1"]').click()
+        expect(page.locator("#scalpTrades tr")).to_have_count(5)
+        page.locator("#scalpTradeStatus").select_option("open")
+        expect(page.locator("#scalpTrades")).to_contain_text("No trades")
+        page.locator("#scalpTradeStatus").select_option("all")
+        for symbol in ("BANKNIFTY","SENSEX","NIFTY"):
+            page.locator(f'[data-scalp-index="{symbol}"]').click()
+            expect(page.locator("#scalpMetrics tr")).to_have_count(3)
+        page.locator("#scalpStart").click()
+        expect(page.locator("#scalpStatus")).to_contain_text("9/9")
+        page.locator("#scalpStop").click()
+        expect(page.locator("#scalpStatus")).to_contain_text("0/9")
+        for width,height in ((1440,1000),(390,844)):
+            page.set_viewport_size({"width":width,"height":height})
+            page.locator("#scalpStatus").scroll_into_view_if_needed()
+            page.screenshot(path=str(out/f"{width}-overview.png"))
+            page.locator("#scalpMetrics").scroll_into_view_if_needed()
+            page.screenshot(path=str(out/f"{width}-trades.png"))
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+        assert len(commands)==2
+        assert not errors, errors
+        browser.close()
+    print("Scalping UI: controls, index tabs, filters, ten-row pagination and responsive layouts passed")
+
+
+if __name__ == "__main__": main()

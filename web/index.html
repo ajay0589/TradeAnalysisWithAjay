@@ -33,6 +33,7 @@
         <button class="tab-btn active" data-tab-target="research" type="button">Stock Research</button>
         <button class="tab-btn" data-tab-target="indices" type="button">Index Scanning</button>
         <button class="tab-btn" data-tab-target="nifty-lab" type="button">NIFTY Setup Lab</button>
+        <button class="tab-btn" data-tab-target="scalping" type="button">Scalping Lab</button>
         <button class="tab-btn" data-tab-target="mcx" type="button">MCX Swing</button>
         <button class="tab-btn" data-tab-target="purple" type="button">Purple Touch</button>
         <button class="tab-btn" data-tab-target="data" type="button">Data Ops</button>
@@ -488,6 +489,33 @@
           </section>
         </section>
 
+        <section id="tab-scalping" class="tab-pane" data-tab-panel="scalping">
+          <div class="lab-content">
+            <header class="lab-heading"><div><h2>Index Scalping Lab</h2><span class="muted">Experimental paper trading / Unvalidated / IST</span></div><strong id="scalpStatus" role="status">Not loaded</strong></header>
+            <div class="lab-controls">
+              <button id="scalpStart" type="button">Start all experiments</button><button id="scalpStop" type="button">Stop new entries</button>
+              <label class="lab-check"><input id="scalpTelegram" type="checkbox">Telegram paper alerts</label><button id="scalpTest" type="button">Send test</button>
+              <label>From (IST)<input id="scalpFrom" type="date"></label><label>To (IST)<input id="scalpTo" type="date"></label>
+              <a id="scalpZip" class="lab-download" download>Trades &amp; logs ZIP</a><a id="scalpCsv" class="lab-download" download>Trades CSV</a>
+            </div>
+            <p id="scalpAction" class="lab-status" role="status"></p>
+            <div class="lab-scroll"><table class="readable-table" data-no-pagination><thead><tr><th>Index / setup</th><th>State / decision</th><th>Started / stopped (IST)</th><th>Last check / candle (IST)</th><th>Controls</th></tr></thead><tbody id="scalpOverview"></tbody></table></div>
+            <details class="lab-details"><summary>Feed health</summary><div class="lab-scroll"><table class="readable-table" data-no-pagination><thead><tr><th>Index</th><th>Candles</th><th>Last refresh</th><th>Spot quote</th><th>ATM / expiry</th><th>Option samples / issue</th></tr></thead><tbody id="scalpFeeds"></tbody></table></div></details>
+            <nav class="lab-tabs" aria-label="Scalping index"><button type="button" data-scalp-index="NIFTY" class="active">NIFTY</button><button type="button" data-scalp-index="BANKNIFTY">Bank Nifty</button><button type="button" data-scalp-index="SENSEX">Sensex</button></nav>
+            <div class="lab-controls"><label>Setup<select id="scalpSetup"><option value="Scalp1">Scalp1: Trend pullback</option><option value="Scalp2">Scalp2: Opening-range retest</option><option value="Scalp3">Scalp3: Failed-breakout reversal</option></select></label></div>
+            <section class="lab-section"><h3>Variant Results</h3><div class="lab-scroll"><table class="readable-table" data-no-pagination><thead><tr><th>Variant</th><th>Open</th><th>Closed</th><th>Win %</th><th>Net spot R</th><th>Expectancy R</th><th>Profit factor</th><th>Drawdown R</th><th>Excluded</th></tr></thead><tbody id="scalpMetrics"></tbody></table></div></section>
+            <section class="lab-section"><div class="lab-heading"><h3>Paper Trades</h3><div class="lab-controls"><label>Variant<select id="scalpVariant"><option value="all">All</option><option value="A">A: Technical</option><option value="B">B: Premium confirmation</option><option value="C">C: Premium + OI confirmation</option></select></label><label>Status<select id="scalpTradeStatus"><option value="all">All</option><option value="open">Open</option><option value="closed">Closed</option></select></label></div></div>
+              <div class="lab-scroll"><table class="readable-table" data-no-pagination><thead><tr><th>Trade / variant</th><th>Direction / status</th><th>Entry (IST) / spot</th><th>Exit (IST) / spot</th><th>Duration</th><th>Spot stop / target</th><th>Spot result</th><th>Option contract / ask entry</th><th>Option bid exit / gross points</th><th>India VIX</th><th>Reason / delivery</th></tr></thead><tbody id="scalpTrades"></tbody></table></div><div id="scalpTradePager" class="lab-controls"></div>
+            </section>
+            <details class="lab-details"><summary>Signal decisions <span id="scalpDecisionCount" class="muted"></span></summary><div class="lab-scroll"><table class="readable-table" data-no-pagination><thead><tr><th>Decision (IST)</th><th>Signal / delay</th><th>A</th><th>B</th><th>C</th><th>Evidence</th></tr></thead><tbody id="scalpDecisions"></tbody></table></div><div id="scalpDecisionPager" class="lab-controls"></div></details>
+            <details class="lab-details"><summary>Historical Research</summary>
+              <div class="lab-controls"><button id="scalpResearch" type="button">Run cached research</button><button id="scalpDownloadResearch" type="button">Download 190 days &amp; research</button><button id="scalpCancelResearch" type="button" disabled>Cancel research</button><span id="scalpResearchStatus" role="status">Not run</span></div>
+              <div class="lab-scroll"><table class="readable-table" data-no-pagination><thead><tr><th>Index / setup</th><th>Frame / target R</th><th>Window / coverage</th><th>Trades</th><th>Win %</th><th>Expectancy R</th><th>Profit factor</th><th>Drawdown R</th></tr></thead><tbody id="scalpResearchRows"></tbody></table></div><div id="scalpResearchPager" class="lab-controls"></div>
+            </details>
+            <details class="lab-details"><summary>Monitor events</summary><div id="scalpEvents"></div><div id="scalpEventPager" class="lab-controls"></div></details>
+            <details class="lab-details"><summary>Rules &amp; Validation</summary><div id="scalpRules"></div></details>
+          </div>
+        </section>
         <section id="tab-nifty-lab" class="tab-pane" data-tab-panel="nifty-lab">
           <div class="lab-content">
             <header class="lab-heading"><div><h2>NIFTY Setup Lab</h2><span class="muted">Intraday paper observations / NIFTY spot / IST</span></div><strong id="labStatus" role="status">Not loaded</strong></header>
@@ -2327,6 +2355,7 @@
     <script src="/scanner-dashboard.js"></script>
     <script src="/table-pagination.js"></script>
     <script src="/nifty-lab.js"></script>
+    <script src="/scalping.js"></script>
     <script src="/mcx.js"></script>
     <script src="/help.js"></script>
   </body>

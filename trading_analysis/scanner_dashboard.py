@@ -36,7 +36,7 @@ def normalize(row, source, now):
     exited = row.get("exit_time") or row.get("closed_at")
     direction = row.get("direction") or row.get("side") or "bullish"
     symbol = row.get("symbol") or "NIFTY"
-    quote = LIVE_QUOTES.get(symbol)
+    quote = row.get("last_quote", {}) if source == "scalping" else LIVE_QUOTES.get(symbol)
     if not quote:
         quote = row.get("last_quote") or {}
     result = result_mark(row.get("entry_price"), direction, row["status"], row.get("exit_price"), quote, now, exited)
@@ -93,10 +93,17 @@ class ScannerDashboard:
                 quote = quotes.get(row["symbol"], {})
                 row["last_quote"] = {**quote, "price": quote.get("bid" if row["direction"] == "bullish" else "ask")} if quote.get("fresh") else {}
                 rows.append(normalize(row, "MCX", now))
+        if source in {"all", "scalping"} and hasattr(h, "scalping_lab"):
+            for row in h.scalping_lab.repo.trades(open_only=status == "open"):
+                if status != "all" and row["status"] != status:
+                    continue
+                with h.scalping_lab.feed.lock:
+                    row["last_quote"] = dict(h.scalping_lab.feed.quotes.get(row["symbol"], {}))
+                rows.append(normalize(row, "scalping", now))
         return sorted(rows, key=lambda r: (r["entry_time"] or "", str(r["id"])), reverse=True)
 
     def ledger(self, source="all", status="all", from_date=None, to_date=None, date_basis="entry", page=1):
-        allowed = {"all", "NIFTY", "BANKNIFTY", "SENSEX", "MCX", "pullbacks", "purple", *[f"Nifty_Setup{i}" for i in range(1, 6)]}
+        allowed = {"all", "NIFTY", "BANKNIFTY", "SENSEX", "MCX", "scalping", "pullbacks", "purple", *[f"Nifty_Setup{i}" for i in range(1, 6)]}
         if source not in allowed or status not in {"all", "open", "closed"} or date_basis not in {"entry", "exit"}:
             raise ValueError("Invalid scanner, trade status, or date basis")
         start, end = (date.fromisoformat(v) if v else None for v in (from_date, to_date))
@@ -146,6 +153,10 @@ class ScannerDashboard:
         with h.nifty_lab._lock:
             for key, state in h.nifty_lab.states.items():
                 add(key, key, dict(state), "nifty-lab", "Intraday / technical + combined ledgers", key)
+        if hasattr(h, "scalping_lab"):
+            with h.scalping_lab._lock:
+                for key, state in h.scalping_lab.states.items():
+                    add("scalp_" + key, key, dict(state), "scalping", "Unvalidated paper scalping / A, B, C", key)
         if hasattr(h, "mcx_scanner"):
             with h.mcx_scanner._lock:
                 for root in ("SILVERM", "GOLDM", "NATURALGAS", "CRUDEOIL"):

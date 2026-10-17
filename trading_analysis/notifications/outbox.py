@@ -74,8 +74,9 @@ class AlertOutbox:
                 return 0
             conn.execute("UPDATE alert_delivery_outbox SET status='sending',attempts=attempts+1,updated_at=? WHERE event_key=?", (now.isoformat(), row["event_key"]))
         age = (now - datetime.fromisoformat(row["created_at"])).total_seconds()
-        if age > 900:
-            result = {"sent": False, "delivery_status": "expired", "error": "Delivery exceeded 15 minutes; retained for audit"}
+        maximum_age = 15 if row["prefix"] == "SCALP_" else 900
+        if age > maximum_age:
+            result = {"sent": False, "delivery_status": "expired", "error": f"Delivery exceeded {maximum_age} seconds; retained for audit"}
         else:
             notifier = sender or TelegramNotifier.from_env(row["prefix"])
             message = row["message"]
