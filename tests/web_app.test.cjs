@@ -58,6 +58,24 @@ function app(includeLab = false) {
   return {context, requests, ids, events, run: (code) => vm.runInContext(code, context)};
 }
 
+test("expiry navigation is read-only, canonical date ranges and independent tabs", () => {
+  const ui=app(true);
+  ui.run(fs.readFileSync(path.join(root,"web/expiry.js"),"utf8"));
+  const before=ui.requests.length;
+  ui.context.activateTab("expiry");
+  assert.ok(ui.requests.at(-1).url.startsWith("/api/expiry/status?from_date="));
+  assert.ok(ui.requests.slice(before).every(r=>!r.options?.method || r.options.method==="GET"));
+  for(const view of ["NIFTY","SENSEX","comparison","logs","overview"]) {
+    ui.run(`expiryView(${JSON.stringify(view)})`);
+    assert.equal(ui.run("expiryUI.view"),view);
+  }
+  ui.ids.get("expiryFrom").value="2026-10-01";
+  ui.ids.get("expiryTo").value="2026-10-20";
+  assert.equal(ui.run("expiryDates().to_date"),"2026-10-20");
+  ui.ids.get("expiryTo").value="2026-09-01";
+  assert.throws(()=>ui.run("expiryDates()"),/valid From/);
+});
+
 test("scalping dates use the API range contract and tabs work before data loads", () => {
   const ui = app(true);
   ui.run(fs.readFileSync(path.join(root, "web/scalping.js"), "utf8"));

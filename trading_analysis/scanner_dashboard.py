@@ -100,10 +100,16 @@ class ScannerDashboard:
                 with h.scalping_lab.feed.lock:
                     row["last_quote"] = dict(h.scalping_lab.feed.quotes.get(row["symbol"], {}))
                 rows.append(normalize(row, "scalping", now))
+        if source in {"all", "expiry"} and hasattr(h, "expiry_lab"):
+            for trade in h.expiry_lab.repo.trades(open_only=status == "open"):
+                if status != "all" and trade["status"] != status: continue
+                row = normalize({**trade, "entry_price": None, "exit_price": None}, "expiry", now)
+                row.update(variant=trade["setup"], price_basis="paper_option_spread; see Expiry Lab for net INR")
+                rows.append(row)
         return sorted(rows, key=lambda r: (r["entry_time"] or "", str(r["id"])), reverse=True)
 
     def ledger(self, source="all", status="all", from_date=None, to_date=None, date_basis="entry", page=1):
-        allowed = {"all", "NIFTY", "BANKNIFTY", "SENSEX", "MCX", "scalping", "pullbacks", "purple", *[f"Nifty_Setup{i}" for i in range(1, 6)]}
+        allowed = {"all", "NIFTY", "BANKNIFTY", "SENSEX", "MCX", "scalping", "expiry", "pullbacks", "purple", *[f"Nifty_Setup{i}" for i in range(1, 6)]}
         if source not in allowed or status not in {"all", "open", "closed"} or date_basis not in {"entry", "exit"}:
             raise ValueError("Invalid scanner, trade status, or date basis")
         start, end = (date.fromisoformat(v) if v else None for v in (from_date, to_date))
@@ -157,6 +163,10 @@ class ScannerDashboard:
             with h.scalping_lab._lock:
                 for key, state in h.scalping_lab.states.items():
                     add("scalp_" + key, key, dict(state), "scalping", "Unvalidated paper scalping / A, B, C", key)
+        if hasattr(h, "expiry_lab"):
+            with h.expiry_lab._lock:
+                for key, state in h.expiry_lab.states.items():
+                    add("expiry_"+key, key, dict(state), "expiry", "Expiry-day paper debit spread", key)
         if hasattr(h, "mcx_scanner"):
             with h.mcx_scanner._lock:
                 for root in ("SILVERM", "GOLDM", "NATURALGAS", "CRUDEOIL"):

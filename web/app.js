@@ -62,7 +62,7 @@ function activateTab(name) {
     name = "research";
   }
   const panelName = name === "research" ? state.research.active : name;
-  $("notes").hidden = ["stocks", "scans", "backtest", "pullbacks", "nifty-lab", "dashboard", "mcx", "help", "scalping"].includes(panelName);
+  $("notes").hidden = ["stocks", "scans", "backtest", "pullbacks", "nifty-lab", "dashboard", "mcx", "help", "scalping", "expiry"].includes(panelName);
   if (name === "help" && typeof loadHelpGuide === "function") loadHelpGuide();
   if (panelName === "pullbacks") {
     loadPullbacks();
@@ -74,6 +74,7 @@ function activateTab(name) {
   state.activeTab = panelName;
   if (["stocks", "backtest"].includes(panelName) && typeof loadStocks === "function") loadStocks();
   if (name === "scalping" && typeof loadScalping === "function") loadScalping();
+  if (name === "expiry" && typeof loadExpiry === "function") loadExpiry();
   if (name === "mcx" && typeof loadMcx === "function") loadMcx();
   if (name === "dashboard" && typeof loadScannerDashboard === "function") loadScannerDashboard();
   document.querySelectorAll("[data-tab-target]").forEach((button) => {

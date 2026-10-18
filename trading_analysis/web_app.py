@@ -17,6 +17,7 @@ from trading_analysis.all_index_monitor import AllIndexMonitor
 from trading_analysis.pullback_scanner import PullbackScanner
 from trading_analysis.nifty_lab.service import NiftySetupLab
 from trading_analysis.scalping.service import ScalpingLab
+from trading_analysis.expiry.service import ExpiryLab
 from trading_analysis.stock_research import StockResearch
 from trading_analysis.mcx.service import McxSwingScanner
 from trading_analysis.scanner_dashboard import ScannerDashboard
@@ -55,6 +56,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
     pullback_scanner = PullbackScanner(service)
     nifty_lab = NiftySetupLab(service)
     scalping_lab = ScalpingLab(service)
+    expiry_lab = ExpiryLab(service)
     stock_research = StockResearch(service)
     mcx_scanner = McxSwingScanner()
 
@@ -70,8 +72,22 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_file(WEB_ROOT / "app.js", "application/javascript; charset=utf-8")
             elif parsed.path == "/nifty-lab.js":
                 self._send_file(WEB_ROOT / "nifty-lab.js", "application/javascript; charset=utf-8")
-            elif parsed.path in {"/scanner-dashboard.js", "/table-pagination.js", "/mcx.js", "/help.js", "/scalping.js", "/stocks.js"}:
+            elif parsed.path in {"/scanner-dashboard.js", "/table-pagination.js", "/mcx.js", "/help.js", "/scalping.js", "/stocks.js", "/expiry.js"}:
                 self._send_file(WEB_ROOT / parsed.path[1:], "application/javascript; charset=utf-8")
+            elif parsed.path in {"/api/expiry/status", "/api/expiry/export"}:
+                params = parse_qs(parsed.query)
+                if set(params) - {"from_date", "to_date", "format"}:
+                    raise ValueError("Unknown expiry filter")
+                if parsed.path.endswith("status"):
+                    self._send_json(self.expiry_lab.status(**_export_dates(params)))
+                else:
+                    report = self.expiry_lab.export(**_export_dates(params), include_frames=params.get("format") == ["zip"])
+                    if params.get("format") == ["csv"]:
+                        self._send_csv(report["trades"] + report["portfolio_trades"], "expiry-trades", report)
+                    elif params.get("format") == ["zip"]:
+                        self._send_zip(report, "expiry-audit")
+                    else:
+                        self._send_json(report)
             elif parsed.path in {"/api/stocks/status", "/api/stocks/export"}:
                 params = parse_qs(parsed.query)
                 if set(params) - {"from_date", "to_date", "format"}:
@@ -159,6 +175,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 report["pullbacks"] = diagnostics.clean(self.pullback_scanner.export(**dates))
                 report["nifty_setup_lab"] = self.nifty_lab.export(**dates)
                 report["scalping"] = self.scalping_lab.export(**dates)
+                report["expiry"] = self.expiry_lab.export(**dates)
                 report["stock_research"] = self.stock_research.export(**dates)
                 report["mcx"] = self.mcx_scanner.export(**dates)
                 if params.get("format") == ["zip"]:
@@ -672,6 +689,17 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(self.stock_research.cancel())
             elif parsed.path == "/api/stocks/start":
                 raise ValueError("Live stock strategies are blocked pending validation review")
+            elif parsed.path == "/api/expiry/start":
+                payload = self._read_json()
+                self._send_json(self.expiry_lab.start(payload.get("setup"), payload.get("telegram_enabled", False), payload.get("acknowledge", False)))
+            elif parsed.path == "/api/expiry/stop":
+                self._send_json(self.expiry_lab.stop(self._read_json().get("setup")))
+            elif parsed.path == "/api/expiry/replay":
+                payload = self._read_json()
+                if set(payload) - {"from_date", "to_date"}: raise ValueError("Unknown replay filter")
+                self._send_json(self.expiry_lab.replay(**payload))
+            elif parsed.path == "/api/expiry/manual":
+                self._send_json(self.expiry_lab.record_manual(self._read_json()))
             elif parsed.path == "/api/scalping/start":
                 payload = self._read_json()
                 self._send_json(self.scalping_lab.start(payload.get("setup"), payload.get("telegram_enabled", False)))
@@ -771,6 +799,8 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                     archive.writestr(symbol.lower() + "-trades.csv", trade_csv(report[symbol].get("trades", [])))
             if "trades" in report:
                 archive.writestr("trades.csv", trade_csv(report["trades"], report.get("csv_columns", ())))
+            if "portfolio_trades" in report:
+                archive.writestr("portfolio-trades.csv", trade_csv(report["portfolio_trades"], report.get("csv_columns", ())))
         body = buffer.getvalue()
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/zip")

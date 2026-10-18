@@ -34,6 +34,7 @@
         <button class="tab-btn" data-tab-target="indices" type="button">Index Scanning</button>
         <button class="tab-btn" data-tab-target="nifty-lab" type="button">NIFTY Setup Lab</button>
         <button class="tab-btn" data-tab-target="scalping" type="button">Scalping Lab</button>
+        <button class="tab-btn" data-tab-target="expiry" type="button">Expiry Lab</button>
         <button class="tab-btn" data-tab-target="mcx" type="button">MCX Swing</button>
         <button class="tab-btn" data-tab-target="data" type="button">Data Ops</button>
         <button class="tab-btn" data-tab-target="reports" type="button">Reports</button>
@@ -502,6 +503,53 @@
           </section>
         </section>
 
+        <section id="tab-expiry" class="tab-pane" data-tab-panel="expiry">
+          <div class="section-heading"><h2>Expiry Day Lab</h2><strong id="expiryStatus" role="status">Stopped / Unvalidated paper</strong></div>
+          <div class="expiry-controls">
+            <label class="check-row"><input type="checkbox" id="expiryAck" />Unvalidated paper experiments</label>
+            <label class="check-row"><input type="checkbox" id="expiryTelegram" />Telegram paper alerts</label>
+            <button id="expiryStart" type="button">Start all experiments</button><button id="expiryStop" type="button">Stop new entries</button>
+            <label>From (IST)<input id="expiryFrom" type="date" /></label><label>To (IST)<input id="expiryTo" type="date" /></label>
+            <a id="expiryCsv">Trades CSV</a><a id="expiryZip">Trades &amp; replay logs ZIP</a>
+          </div>
+          <div id="expiryAction" class="mini-status" role="status"></div>
+          <div class="sub-tabs" role="tablist" aria-label="Expiry lab views">
+            <button type="button" data-expiry-view="overview" role="tab" aria-selected="true" class="active">Overview</button>
+            <button type="button" data-expiry-view="NIFTY" role="tab" aria-selected="false">NIFTY</button>
+            <button type="button" data-expiry-view="SENSEX" role="tab" aria-selected="false">SENSEX</button>
+            <button type="button" data-expiry-view="comparison" role="tab" aria-selected="false">Comparison</button>
+            <button type="button" data-expiry-view="logs" role="tab" aria-selected="false">Logs</button>
+          </div>
+          <section data-expiry-panel="overview">
+            <h3>Eight Independent Experiments</h3>
+            <div class="wide-table"><table class="readable-table"><thead><tr><th>Index / setup</th><th>State / reason</th><th>Started / stopped (IST)</th><th>Last check / signal close (IST)</th><th>Control</th></tr></thead><tbody id="expiryStates"></tbody></table></div>
+            <h3>Feed Health</h3><div id="expiryFeed" class="wide-table"></div>
+            <details><summary>Rule Version &amp; Risk Policy</summary><div id="expiryRules"></div></details>
+          </section>
+          <section data-expiry-panel="trades" hidden>
+            <h3 id="expiryIndexTitle">NIFTY Paper Spreads</h3>
+            <div class="expiry-controls"><label>Setup<select id="expirySetup"><option value="all">All setups</option><option>Expiry_1</option><option>Expiry_2</option><option>Expiry_3</option><option>Expiry_4</option></select></label><label>Status<select id="expiryTradeStatus"><option value="all">All</option><option value="open">Open</option><option value="closed">Closed</option></select></label><label>Ledger<select id="expiryLedger"><option value="all">Independent research</option><option value="portfolio">Portfolio accepted only</option></select></label></div>
+            <div class="wide-table"><table class="readable-table"><thead><tr><th>Trade / setup</th><th>Direction / status</th><th>Buy / sell contracts</th><th>Expiry / quantity</th><th>Entry (IST) / debit</th><th>Exit (IST) / credit</th><th>Duration</th><th>Net INR / R</th><th>Spot invalidation</th><th>Portfolio / quality</th><th>India VIX</th></tr></thead><tbody id="expiryTrades"></tbody></table></div><div id="expiryTradePager" class="pagination"></div>
+            <details><summary>Manual Fill Journal</summary>
+              <form id="expiryManualForm" class="expiry-controls">
+                <label>Trade ID<select id="expiryManualTrade" required></select></label><label>Kind<select id="expiryManualKind"><option value="entry">Entry</option><option value="exit">Exit</option></select></label>
+                <label>Fill time (IST)<input id="expiryManualTime" type="datetime-local" required /></label><label>Quantity<input id="expiryManualQty" type="number" min="1" step="1" required /></label>
+                <label>Long-leg fill<input id="expiryManualLong" type="number" min="0.01" step="0.01" required /></label><label>Short-leg fill<input id="expiryManualShort" type="number" min="0.01" step="0.01" required /></label>
+                <label>Charges INR<input id="expiryManualCharges" type="number" min="0" step="0.01" required /></label><button type="submit">Record actual fill</button>
+              </form><div id="expiryManualRows" class="wide-table"></div><div id="expiryManualPager" class="pagination"></div>
+            </details>
+          </section>
+          <section data-expiry-panel="comparison" hidden>
+            <h3>Independent Results</h3><div class="wide-table"><table class="readable-table"><thead><tr><th>Index / setup</th><th>Open / closed</th><th>Win %</th><th>Net INR</th><th>Expectancy INR</th><th>Profit factor</th><th>Drawdown INR</th><th>Excluded</th></tr></thead><tbody id="expiryMetrics"></tbody></table></div>
+            <h3>Shared-Budget Portfolio Simulation</h3><div id="expiryPortfolio" class="compact-metrics"></div>
+            <h3>Recorded-Quote Replay</h3><button id="expiryReplay" type="button">Replay selected dates</button><div id="expiryReplayStatus" class="mini-status"></div><div id="expiryReplayRows" class="wide-table"></div>
+          </section>
+          <section data-expiry-panel="logs" hidden>
+            <h3>Decisions &amp; Rejections</h3><div id="expiryRejections" class="mini-status"></div>
+            <div class="wide-table"><table class="readable-table"><thead><tr><th>Checked (IST)</th><th>Setup</th><th>Decision</th><th>Delay</th><th>Evidence</th></tr></thead><tbody id="expiryDecisions"></tbody></table></div><div id="expiryDecisionPager" class="pagination"></div>
+            <h3>Operational Events &amp; Delivery</h3><div id="expiryEvents"></div><div id="expiryEventPager" class="pagination"></div>
+          </section>
+        </section>
         <section id="tab-scalping" class="tab-pane" data-tab-panel="scalping">
           <div class="lab-content">
             <header class="lab-heading"><div><h2>Index Scalping Lab</h2><span class="muted">Experimental paper trading / Unvalidated / IST</span></div><strong id="scalpStatus" role="status">Not loaded</strong></header>
@@ -1401,6 +1449,7 @@
     <script src="/table-pagination.js"></script>
     <script src="/nifty-lab.js"></script>
     <script src="/scalping.js"></script>
+    <script src="/expiry.js"></script>
     <script src="/mcx.js"></script>
     <script src="/help.js"></script>
   </body>

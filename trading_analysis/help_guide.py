@@ -37,7 +37,13 @@ Keep all trades and sessions, not only winners or losers.
 
 def guide():
     from trading_analysis.stock_research import RULES
+    from trading_analysis.expiry.rules import RULES as EXPIRY_RULES
     sections = [
+        {"id": "expiry", "title": "Expiry Day Lab", "items": [(f"Rule {i+1}", rule) for i,rule in enumerate(EXPIRY_RULES)] + [
+            ("Validation", "Recorded option quotes can be replayed using the same versioned engine. This is reproducibility, not historical proof of profitability. No historical option result is invented from spot candles. Missing exits and observation gaps are excluded."),
+            ("Paper and manual", "Eight independent research ledgers plus one shared-budget paper portfolio. One lot per trade, INR 12,500 debit/cost allowance, INR 25,000 combined budget and daily loss trigger. Manual fills are a separate user-reported journal and do not change paper positions. No broker orders."),
+            ("Operations", "Acknowledge paper experiments before starting. Stop new entries leaves open exits monitored. Keep server awake through 15:10 IST and until all exits resolve. After restart, explicitly start to resume monitoring; interrupted trades are excluded. EXPIRY_TELEGRAM_BOT_TOKEN and EXPIRY_TELEGRAM_CHAT_ID are isolated opt-in alerts."),
+        ]},
         {"id": "fno-stocks", "title": "F&O Stock Research", "items": [(f"Rule {i+1}", rule) for i, rule in enumerate(RULES)]},
         {"id": "scalping", "title": "Index Scalping Lab", "items": [
             ("Unvalidated experiments", "NIFTY, Bank Nifty and Sensex each have trend-pullback, opening-range-retest and failed-breakout setups. Three variants per setup: A technical, B technical plus fixed-contract ATM call/put premiums, C B plus OI activity. All 27 ledgers are paper-only; no orders are placed."),

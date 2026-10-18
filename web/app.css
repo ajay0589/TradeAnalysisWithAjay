@@ -1443,3 +1443,12 @@ tr:last-child td {
 #stockRules p, #stockErrors { overflow-wrap: anywhere; }
 [data-backtest-view="validation"] .ledger-filters { flex-wrap: wrap; }
 [data-backtest-view="validation"] .ledger-filters label { min-width: 130px; }
+.expiry-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 16px 0; }
+.expiry-controls label { min-width: 130px; max-width: 100%; }
+#tab-expiry { min-width: 0; padding: 24px; box-sizing: border-box; }
+#tab-expiry .section-heading { flex-wrap: wrap; gap: 12px; }
+#tab-expiry .check-row { white-space: normal; }
+#tab-expiry pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
+#tab-expiry .sub-tabs { display: flex; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid #d8dee6; margin: 16px 0; }
+#tab-expiry .sub-tabs button { border: 0; border-radius: 0; background: transparent; padding: 10px 14px; }
+#tab-expiry .sub-tabs button.active { border-bottom: 3px solid #008575; font-weight: 700; }
