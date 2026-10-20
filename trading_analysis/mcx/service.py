@@ -351,21 +351,19 @@ class McxSwingScanner:
         trades = self.repository.trades()
         selected_trades = []
         for t in trades:
-            # Date filters show positions that overlap the review period.
-            if t["entry_time"][:10] > end or (t.get("exit_time") and t["exit_time"][:10] < start):
-                continue
             quote = quotes.get(t["symbol"], {})
             side_price = quote.get("bid" if t["direction"] == "bullish" else "ask")
             mark = {**quote, "price": side_price} if quote.get("fresh") else {}
             t["result"] = result_mark(t["entry_price"], t["direction"], t["status"], t.get("exit_price"), mark, now, t.get("exit_time"))
             t["open_seconds"] = (as_ist(t["exit_time"]) - as_ist(t["entry_time"])).total_seconds() if t.get("exit_time") else (now-as_ist(t["entry_time"])).total_seconds()
-            selected_trades.append(t)
+            if t["entry_time"][:10] <= end and (not t.get("exit_time") or t["exit_time"][:10] >= start):
+                selected_trades.append(t)
         charts = {root: [{"time": as_ist(c.timestamp).isoformat(), "close": c.close} for c in
                          closed_rows(sources.get(contract["symbol"], {}).get("day", []), "day", now)[-60:]]
                   for root, contract in contracts.items()}
         metric_trades = [t for t in selected_trades if t["status"] == "open" or start <= t["exit_time"][:10] <= end]
         return {**state, "version": VERSION, "roots": ROOTS, "contracts": contracts, "quotes": quotes, "charts": charts,
-                "freshness": freshness, "decisions": list(decisions.values()), "trades": selected_trades,
+                "freshness": freshness, "decisions": list(decisions.values()), "trades": selected_trades, "trade_history": trades,
                 "metrics": performance(metric_trades), "metrics_by_root": {r: performance([t for t in metric_trades if t["root"] == r]) for r in ROOTS},
                 "risk": RISK, "settings": dict(self.settings),
                 "telegram_configured": TelegramNotifier.from_env("MCX_").configured(),
@@ -377,6 +375,7 @@ class McxSwingScanner:
 
     def export(self, from_date=None, to_date=None):
         report = self.status(from_date, to_date)
+        report.pop("trade_history", None)
         report["decisions"] = self.repository.records("decisions", report["from_date"], report["to_date"])
         report["events"] = self.repository.records("events", report["from_date"], report["to_date"])
         report["delivery"] = [r for r in self.repository.outbox.history() if report["from_date"] <= r["created_at"][:10] <= report["to_date"]]

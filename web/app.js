@@ -1,3 +1,56 @@
+function futuresTradeCell(evidence) {
+  if (!evidence) return '<div class="cell-note">Futures: not recorded</div>';
+  return `<details><summary>Futures: ${escapeHtml(evidence.alignment || evidence.state)}</summary><pre>${escapeHtml(JSON.stringify(evidence, null, 2))}</pre></details>`;
+}
+
+function renderFutures(id, data, trades = []) {
+  const rows = Object.entries(data || {});
+  const header = '<thead><tr><th>Index / futures contract</th><th>State / bias</th><th>Quote (IST)</th><th>Price / VWAP / basis</th><th>Window</th><th>Futures / spot %</th><th>OI % / volume change</th><th>Interpretation</th></tr></thead>';
+  const body = rows.flatMap(([symbol, e]) => [3, 6, 15].map(minutes => {
+    const w = e.windows?.[minutes] || {}, q = e.latest || {};
+    return `<tr><td>${escapeHtml(symbol)}<div class="cell-note">${escapeHtml(q.contract?.tradingsymbol || "-")} / ${escapeHtml(q.contract?.expiry || "-")}</div></td><td>${escapeHtml(e.state)} / ${escapeHtml(e.bias)}<div class="cell-note">${escapeHtml(e.reason)}</div></td><td>${fmtDateTime(q.quote_time)}</td><td>${fmt(q.price)} / ${fmt(q.vwap)} / ${fmt(q.basis)}</td><td>${minutes} min</td><td>${fmt(w.price_change_pct)} / ${fmt(w.spot_change_pct)}</td><td>${fmt(w.oi_change_pct)} / ${fmt(w.volume_delta)}</td><td>${escapeHtml(w.interpretation || w.state || "unavailable")}</td></tr>`;
+  })).join("");
+  const groups = {};
+  trades.forEach(t => {
+    const key = `${t.setup} / ${t.variant} / ${t.futures_evidence?.alignment || "not_recorded"}`;
+    const g = groups[key] ||= {total:0, eligible:0, wins:0, net:0};
+    g.total++;
+    if (t.status === "closed" && t.performance_eligible && t.net_r != null) {
+      g.eligible++; g.wins += t.net_r > 0 ? 1 : 0; g.net += t.net_r;
+    }
+  });
+  const metrics = Object.entries(groups).map(([key,g]) => `<tr><td>${escapeHtml(key)}</td><td>${g.total} / ${g.eligible}</td><td>${g.eligible ? fmt(100*g.wins/g.eligible) : "-"}%</td><td>${fmt(g.net)}</td></tr>`).join("");
+  $(id).innerHTML = `<div class="cell-note">Shadow research / no entry gate / unvalidated</div><div class="wide-table"><table class="readable-table">${header}<tbody>${body || '<tr><td colspan="8">No futures samples.</td></tr>'}</tbody></table></div>${metrics ? `<h4>All-history entry alignment</h4><div class="wide-table"><table class="readable-table"><thead><tr><th>Setup / variant / futures alignment</th><th>Observed / eligible closed</th><th>Win %</th><th>Net spot R</th></tr></thead><tbody>${metrics}</tbody></table></div>` : ""}`;
+}
+
+function tradeHistoryMatches(trade, prefix) {
+  const first = $(prefix + "TradeFrom").value, last = $(prefix + "TradeTo").value;
+  const field = $(prefix + "TradeBasis").value === "exit" ? "exit_time" : "entry_time";
+  if (!first && !last) return true;
+  if (first && last && first > last) return false;
+  const date = parseDateTime(trade[field]);
+  if (!date || Number.isNaN(date.getTime())) return false;
+  const day = new Intl.DateTimeFormat("en-CA", {timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).format(date);
+  return (!first || day >= first) && (!last || day <= last);
+}
+
+function paperResult(value, unit, trade, basis = "After assumed costs") {
+  if (value == null || !Number.isFinite(Number(value))) return '<span class="cell-note">Result unavailable</span>';
+  const number = Number(value), label = number > 0 ? "Profit" : number < 0 ? "Loss" : "Flat";
+  const color = number > 0 ? "points-positive" : number < 0 ? "points-negative" : "";
+  const excluded = trade.status === "closed" && trade.performance_eligible === false;
+  return `<strong class="${color}">${label} ${number > 0 ? "+" : ""}${fmt(number)} ${escapeHtml(unit)}</strong><div class="cell-note">${escapeHtml(basis)}${excluded ? " / Observed only; excluded from validated metrics" : ""}</div>`;
+}
+
+function tradeFilterEvents(prefix, render) {
+  for (const field of ["TradeFrom", "TradeTo", "TradeBasis"]) $(prefix + field).addEventListener("change", render);
+  $(prefix + "TradeClear").addEventListener("click", () => {
+    $(prefix + "TradeFrom").value = $(prefix + "TradeTo").value = "";
+    $(prefix + "TradeBasis").value = "entry";
+    render();
+  });
+}
+
 const state = {
   symbols: [],
   lastAnalysis: null,
@@ -3752,6 +3805,7 @@ async function loadAllIndexStatus() {
 }
 
 function renderAllIndexStatus(data) {
+  renderFutures("indexFutures", data.futures);
   const quotes = data.live_quotes || {};
   $("indexQuoteStatus").textContent = `Quotes: ${quotes.mode || "stopped"}${quotes.error ? ` | ${quotes.error}` : ""}`;
   $("indexMarketEvidence").innerHTML = ["NIFTY", "BANKNIFTY", "SENSEX"].map((symbol) => {

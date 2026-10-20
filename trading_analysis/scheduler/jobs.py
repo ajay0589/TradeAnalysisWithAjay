@@ -283,7 +283,9 @@ class NiftyMarketJobs:
             }
             if signal:
                 signal["context_snapshot_id"] = context_snapshot_id
+                from trading_analysis.futures_context import FUTURES
                 signal["metadata"] = {**(signal.get("metadata") or {}), **data_links,
+                                      "futures_evidence": FUTURES.evidence("NIFTY", datetime.now(IST), signal["direction"]),
                                       "rolling_options": self.rolling_options,
                                       "latest_candle_timestamp": signal["entry_candle_timestamp"].isoformat()}
                 opened = self.trade_repository.open_trade(signal) if not self.cancelled() else {"created": False}

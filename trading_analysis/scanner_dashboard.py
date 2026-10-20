@@ -40,6 +40,9 @@ def normalize(row, source, now):
     if not quote:
         quote = row.get("last_quote") or {}
     result = result_mark(row.get("entry_price"), direction, row["status"], row.get("exit_price"), quote, now, exited)
+    if row["status"] == "closed" and "net_r" in row:
+        result.update(unit="R", value=row["net_r"], basis="After assumed costs", status="closed",
+                      performance_eligible=row.get("performance_eligible"))
     end = as_ist(exited) if exited else now
     return {"id": row.get("trade_id") or row.get("id"), "scanner": source, "symbol": symbol,
             "status": row["status"], "direction": direction, "horizon": row.get("horizon") or row.get("purple_timeframe") or row.get("timeframe") or "intraday",
@@ -49,6 +52,7 @@ def normalize(row, source, now):
             "open_seconds": max(0, (end - as_ist(entered)).total_seconds()) if entered else None,
             "result": result, "stop": row.get("stop_level", row.get("stop")), "target": row.get("target_level", row.get("target")),
             "exit_reason": row.get("exit_reason"), "net_r": row.get("net_r"),
+            "futures_evidence": row.get("futures_evidence") or meta.get("futures_evidence"),
             "india_vix_entry": row.get("india_vix_entry") or meta.get("india_vix_entry"),
             "india_vix_exit": row.get("india_vix_exit") or meta.get("india_vix_exit"),
             "price_basis": row.get("price_basis") or meta.get("price_basis") or "candle_reference",
@@ -104,6 +108,10 @@ class ScannerDashboard:
             for trade in h.expiry_lab.repo.trades(open_only=status == "open"):
                 if status != "all" and trade["status"] != status: continue
                 row = normalize({**trade, "entry_price": None, "exit_price": None}, "expiry", now)
+                value = trade.get("net_pnl") if trade["status"] == "closed" else trade.get("mark_pnl") if trade.get("mark_time") and 0 <= (now-as_ist(trade["mark_time"])).total_seconds() <= 3 else None
+                row["result"] = dict(value=value, unit="INR", status=trade["status"],
+                    basis="Net spread after assumed costs" if trade["status"] == "closed" else "Unrealized spread mark",
+                    performance_eligible=trade.get("performance_eligible"))
                 row.update(variant=trade["setup"], price_basis="paper_option_spread; see Expiry Lab for net INR")
                 rows.append(row)
         return sorted(rows, key=lambda r: (r["entry_time"] or "", str(r["id"])), reverse=True)

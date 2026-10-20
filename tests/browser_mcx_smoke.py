@@ -27,6 +27,7 @@ def main():
                 signal_time=day+"T10:00:00+05:30",reference_price=99,exit_time=day+"T12:00:00+05:30" if i%2 else None,
                 exit_price=102 if i%2 else None,open_seconds=7200,stop_level=96,target_level=108,net_r=.5 if i%2 else None,
                 indicators={"atr_percent":4},result={"points":2,"percent":2,"basis":"closed" if i%2 else "live","time":day+"T12:00:00+05:30"}))
+    fixture["trade_history"] = fixture["trades"]
     commands, errors = [], []
     out = Path("logs/mcx-ui-qa"); out.mkdir(parents=True,exist_ok=True)
     with sync_playwright() as p:
@@ -61,6 +62,12 @@ def main():
         expect(page.locator("#mcxTrades")).not_to_contain_text("UI-SILVERM")
         page.locator("#mcxFrom").fill("2026-10-01")
         expect(page.locator("#mcxExport")).to_have_attribute("href",re.compile("from_date=2026-10-01"))
+        expect(page.locator("#mcxPage")).to_contain_text("12 trades")
+        page.locator("#mcxTradeBasis").select_option("exit")
+        page.locator("#mcxTradeFrom").fill(day)
+        expect(page.locator("#mcxTrades")).to_contain_text("No trades")
+        page.locator("#mcxTradeClear").click()
+        expect(page.locator("#mcxPage")).to_contain_text("12 trades")
         for width in (1440,768,390):
             page.set_viewport_size({"width":width,"height":1000})
             page.locator("#mcxStart").scroll_into_view_if_needed()

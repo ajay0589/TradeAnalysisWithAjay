@@ -9,6 +9,7 @@ from trading_analysis.instrument_master_service import InstrumentMasterService
 from trading_analysis.nifty.auto_scan_service import NiftyAutoScanService
 from trading_analysis.notifications.telegram import TelegramNotifier
 from trading_analysis.live_quotes import LIVE_QUOTES
+from trading_analysis.futures_context import FUTURES
 from trading_analysis.audit_exports import date_window, days, trade_overlaps
 
 
@@ -43,7 +44,7 @@ class AllIndexMonitor:
                 "any_running": any((nifty["running"], bank["running"], sensex["running"])),
                 "masters_ready": self.masters.status()["ready_for_all"],
                 "unconfigured_telegram": [symbol for symbol, row in scanners.items() if not row["telegram_configured"]],
-                "scanners": scanners, "live_quotes": LIVE_QUOTES.status(),
+                "scanners": scanners, "live_quotes": LIVE_QUOTES.status(), "futures": {s: FUTURES.evidence(s) for s in ("NIFTY", "BANKNIFTY", "SENSEX")},
                 "market_evidence": {"NIFTY": {"rolling": nifty.get("option_evidence") or {}, "signals": nifty.get("signal_states") or {}},
                                     **{symbol: {"rolling": ((state.get("last_result") or {}).get("horizons", {}).get("intraday", {}).get("option") or {}).get("rolling") or {},
                                                 "signals": (state.get("last_result") or {}).get("horizons") or {}}
@@ -129,6 +130,7 @@ class AllIndexMonitor:
                     result = part
                     continue
                 result["delivery"].extend(part["delivery"])
+                result["futures_samples"].extend(part["futures_samples"])
                 for symbol in ("NIFTY", "BANKNIFTY", "SENSEX"):
                     result["option_observations"][symbol].extend(part["option_observations"][symbol])
                     for key, rows in part[symbol].items():
@@ -154,7 +156,7 @@ class AllIndexMonitor:
                 "timezone": "Asia/Kolkata", "truncated": False,
                 "trade_date_basis": "Position overlaps selected dates; records show latest stored state, not an as-of reconstruction.",
                 "retention_note": "Only retained records can be exported; empty days do not prove a scanner was running.",
-                "live_quotes": LIVE_QUOTES.status(),
+                "live_quotes": LIVE_QUOTES.status(), "futures_samples": FUTURES.export(first, last),
                 "delivery": AlertOutbox(self.nifty.trade_repository.db_path).history(stamp),
                 "option_observations": {symbol: history.load(symbol, start, start + timedelta(days=1) - timedelta(microseconds=1))
                                         for symbol in ("NIFTY", "BANKNIFTY", "SENSEX")},

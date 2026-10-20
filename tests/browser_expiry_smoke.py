@@ -35,6 +35,8 @@ def main():
             entry_time=now,exit_time=now,debit=42,exit_fill={"value":45},open_seconds=300,net_pnl=100,net_r=.04,
             stop_level=23000,portfolio_reason="accepted",portfolio_accepted=True,performance_eligible=True) for i in range(25)]
         fixture["portfolio_trades"]=[{**fixture["trades"][0],"id":"EX-UI-0-P","variant":"portfolio"}]
+        fixture["trade_history"]=fixture["trades"]
+        fixture["portfolio_history"]=fixture["portfolio_trades"]
         def mocked(route):
             if "/api/expiry/status" in route.request.url:route.fulfill(json=fixture)
             elif route.request.method=="POST":

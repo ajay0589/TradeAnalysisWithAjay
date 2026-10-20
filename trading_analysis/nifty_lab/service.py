@@ -15,6 +15,7 @@ from trading_analysis.live_quotes import LIVE_QUOTES
 from trading_analysis.live_timing import IST, as_ist, expected_closed_bar, prepare_live_entry, quote_is_fresh
 from trading_analysis.nifty.live_scanner import candle_close_time, closed_candles
 from trading_analysis.nifty_lab.options import option_evidence
+from trading_analysis.futures_context import FUTURES
 from trading_analysis.nifty_lab.repository import LabRepository, comparisons, day_value
 from trading_analysis.nifty_lab.setups import RISK, SETUPS, VARIANTS, VERSION, technical_read
 from trading_analysis.notifications.telegram import TelegramNotifier
@@ -252,6 +253,7 @@ class NiftySetupLab:
         except Exception as exc:
             evidence = {"bias": "unavailable", "reason": "option_history_error", "error": diagnostics.clean(str(exc))}
         reason = checks.get("gate") or reading["reason"]
+        futures = FUTURES.evidence("NIFTY", now, reading["direction"])
         variants = {key: reason for key in VARIANTS}
         entries = {}
         if prepared:
@@ -261,14 +263,14 @@ class NiftySetupLab:
                      "quote": quote, "price_basis": "observed_spot_not_fill", "frame": SETUPS[setup]["frame"],
                      "signal_closed_at": reading["closed_at"], "signal_delay_seconds": checks.get("signal_delay_seconds"),
                      "cost_bps_per_side": RISK["cost_bps_per_side"], "max_holding_minutes": RISK["max_holding_minutes"],
-                     "telegram_enabled": state["telegram_enabled"], "run_id": state["run_id"]}
+                     "telegram_enabled": state["telegram_enabled"], "run_id": state["run_id"], "futures_evidence": futures}
             entries["technical"] = trade
             if evidence.get("state") == "ready" and evidence.get("bias") == reading["direction"]:
                 entries["combined"] = trade
             else:
                 variants["combined"] = "options_" + str(evidence.get("reason") or evidence.get("bias"))
         decision = {"id": identifier, "setup": setup, "checked_at": now.isoformat(), "run_id": state["run_id"],
-                    "version": VERSION, **reading, "entry_checks": checks, "option_evidence": evidence, "variants": variants}
+                    "version": VERSION, **reading, "entry_checks": checks, "option_evidence": evidence, "futures_evidence": futures, "variants": variants}
         with self._lock:
             if not self._valid(setup, state["generation"]):
                 return
@@ -320,7 +322,7 @@ class NiftySetupLab:
                 if closed and trade["telegram_enabled"] and basis == "observed_spot_not_fill":
                     self.repo.outbox.start()
 
-    def status(self, day=None):
+    def status(self, day=None, include_history=True):
         now = datetime.now(IST)
         day = day_value(day or now.date().isoformat())
         trades, decisions = self.repo.trades(day), self.repo.decisions(day)
@@ -346,7 +348,8 @@ class NiftySetupLab:
                 "states": states, "running_count": sum(s["enabled"] for s in states.values()), "data_service": sources,
                 "freshness": freshness, "spot": quote, "spot_fresh": quote_is_fresh(quote, now),
                 "quote_feed": {k: quote_health.get(k) for k in ("mode", "error", "stream_connected")}, "option_evidence": evidence,
-                "comparisons": comparisons(trades, decisions, day), "trades": trades,
+                "comparisons": comparisons(trades, decisions, day), "trades": trades, "futures": {"NIFTY": FUTURES.evidence("NIFTY", now)},
+                **({"trade_history": self.repo.trades(), "trade_delivery": self.repo.outbox.history()} if include_history else {}),
                 "decisions": decisions[:250], "decision_count": len(decisions),
                 "delivery": self.repo.outbox.history(day), "events": self.repo.events(day)[-100:],
                 "telegram_configured": TelegramNotifier.from_env("NIFTY_LAB_").configured()}
@@ -357,7 +360,7 @@ class NiftySetupLab:
         if first != last:
             reports = [self.export(selected) for selected in days(first, last)]
             result = dict(reports[-1])
-            for key in ("trades", "decisions", "events", "delivery", "option_snapshots", "trade_entry_decisions"):
+            for key in ("trades", "decisions", "events", "delivery", "option_snapshots", "trade_entry_decisions", "futures_samples"):
                 rows = [row for report in reports for row in report[key]]
                 result[key] = list({json.dumps(r, sort_keys=True): r for r in rows}.values())
             result.update(date=first, from_date=first, to_date=last,
@@ -366,10 +369,10 @@ class NiftySetupLab:
             result.pop("comparisons", None)
             return result
         day = first
-        report = self.status(day)
+        report = self.status(day, include_history=False)
         day = report["date"]
         begin = as_ist(day + "T00:00:00")
-        report.update(decisions=self.repo.decisions(day), events=self.repo.events(day),
+        report.update(decisions=self.repo.decisions(day), events=self.repo.events(day), futures_samples=FUTURES.export(first, last),
                       option_snapshots=self.options.load("NIFTY", begin, begin + timedelta(days=1) - timedelta(microseconds=1)),
                       runtime=diagnostics.runtime(), timezone="Asia/Kolkata", from_date=first, to_date=last,
                       limitations=["Forward paper observations, not broker fills or option P&L.",

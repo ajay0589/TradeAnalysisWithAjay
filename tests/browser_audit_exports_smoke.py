@@ -42,7 +42,7 @@ def main():
         assert response.status == 400
         for width in (1440, 390):
             page.set_viewport_size({"width": width, "height": 1000})
-            page.locator(".lab-controls").first.scroll_into_view_if_needed()
+            page.locator("#labDate").scroll_into_view_if_needed()
             page.screenshot(path=str(output / f"range-{width}.png"))
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
         assert not errors, errors

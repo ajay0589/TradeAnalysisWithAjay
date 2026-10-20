@@ -60,13 +60,14 @@ function renderExpiry() {
   $("expiryFeed").innerHTML=`<table class="readable-table"><thead><tr><th>Index</th><th>Status</th><th>Expiry / ATM</th><th>Last refresh (IST)</th><th>Samples</th><th>Issue</th></tr></thead><tbody>${Object.entries(d.feeds).map(([s,f])=>`<tr><td>${e(s)}</td><td>${e(f.phase)}</td><td>${e(f.pair?.expiry)} / ${fmt(f.pair?.strike)}</td><td>${fmtDateTime(f.last_refresh)}</td><td>${f.samples}</td><td>${e(f.error||f.stream_error)}</td></tr>`).join("")}</tbody></table>`;
   $("expiryRules").innerHTML=`<strong>${e(d.version)}</strong><ul>${d.rules.map(r=>`<li>${e(r)}</li>`).join("")}</ul><pre>${e(JSON.stringify(d.policy,null,2))}</pre>`;
   $("expiryIndexTitle").textContent=`${view} Paper Spreads`;
-  const ledger=$("expiryLedger").value==="portfolio"?(d.portfolio_trades||[]):d.trades;
-  const selected=ledger.filter(t=>t.symbol===view && ($("expirySetup").value==="all"||t.setup.endsWith(":"+$("expirySetup").value)) && ($("expiryTradeStatus").value==="all"||t.status===$("expiryTradeStatus").value));
-  $("expiryTrades").innerHTML=expiryPage("Trade",selected,t=>`<tr><td>${e(t.id)}<br>${e(t.setup)}</td><td>${e(t.direction)} / ${e(t.status)}</td><td>${e(t.long.tradingsymbol)}<br>${e(t.short.tradingsymbol)}</td><td>${e(t.long.expiry)} / ${t.quantity}</td><td>${fmtDateTime(t.entry_time)}<br>${fmt(t.debit)}</td><td>${fmtDateTime(t.exit_time)}<br>${fmt(t.exit_fill?.value)}</td><td>${formatSeconds(t.open_seconds ?? Math.max(0,(Date.parse(d.now)-Date.parse(t.entry_time))/1000))}</td><td>${fmt(t.status==="open"?t.mark_pnl:t.net_pnl)} / ${fmt(t.net_r)}<div class="cell-note">${t.status==="open"?"Mark; not realized":"Net with assumed costs"}</div></td><td>${fmt(t.stop_level)}</td><td>${e(t.portfolio_reason)}<div class="cell-note">${e(t.monitoring_interrupted||t.pending_exit||t.exit_reason)}</div></td><td>${vixCell(t.india_vix_entry)}</td></tr>`)||'<tr><td colspan="11">No trades for these filters.</td></tr>';
+  const history=d.trade_history||d.trades;
+  const ledger=$("expiryLedger").value==="portfolio"?(d.portfolio_history||d.portfolio_trades||[]):history;
+  const selected=ledger.filter(t=>tradeHistoryMatches(t,"expiry") && t.symbol===view && ($("expirySetup").value==="all"||t.setup.endsWith(":"+$("expirySetup").value)) && ($("expiryTradeStatus").value==="all"||t.status===$("expiryTradeStatus").value));
+  $("expiryTrades").innerHTML=expiryPage("Trade",selected,t=>`<tr><td>${e(t.id)}<br>${e(t.setup)}</td><td>${e(t.direction)} / ${e(t.status)}</td><td>${e(t.long.tradingsymbol)}<br>${e(t.short.tradingsymbol)}</td><td>${e(t.long.expiry)} / ${t.quantity}</td><td>${fmtDateTime(t.entry_time)}<br>${fmt(t.debit)}</td><td>${fmtDateTime(t.exit_time)}<br>${fmt(t.exit_fill?.value)}</td><td>${formatSeconds(t.open_seconds ?? Math.max(0,(Date.parse(d.now)-Date.parse(t.entry_time))/1000))}</td><td>${paperResult(t.status==="open"?(t.pending_exit || !t.mark_time || Date.parse(d.now) - Date.parse(t.mark_time) < 0 || Date.parse(d.now) - Date.parse(t.mark_time) > 3000 ? null : t.mark_pnl):t.net_pnl,"INR",t,t.status==="open"?"Unrealized spread mark":"Net spread after assumed costs")} / ${fmt(t.net_r)} R</td><td>${fmt(t.stop_level)}</td><td>${e(t.portfolio_reason)}<div class="cell-note">${e(t.monitoring_interrupted||t.pending_exit||t.exit_reason)}</div></td><td>${vixCell(t.india_vix_entry)}</td></tr>`)||'<tr><td colspan="11">No trades for these filters.</td></tr>';
   const prior=$("expiryManualTrade").value;
-  $("expiryManualTrade").innerHTML=d.trades.filter(t=>t.symbol===view).map(t=>`<option value="${e(t.id)}">${e(t.id)}</option>`).join("");
-  if(d.trades.some(t=>t.id===prior))$("expiryManualTrade").value=prior;
-  const manual=d.manual_fills.filter(r=>d.trades.some(t=>t.id===r.trade_id && t.symbol===view));
+  $("expiryManualTrade").innerHTML=history.filter(t=>t.symbol===view).map(t=>`<option value="${e(t.id)}">${e(t.id)}</option>`).join("");
+  if(history.some(t=>t.id===prior))$("expiryManualTrade").value=prior;
+  const manual=(d.manual_history||d.manual_fills).filter(r=>history.some(t=>t.id===r.trade_id && t.symbol===view));
   $("expiryManualRows").innerHTML=`<table class="readable-table"><thead><tr><th>Trade</th><th>Kind</th><th>Time (IST)</th><th>Qty</th><th>Long / short fill</th><th>Charges INR</th></tr></thead><tbody>${expiryPage("Manual",manual,r=>`<tr><td>${e(r.trade_id)}</td><td>${e(r.kind)}</td><td>${fmtDateTime(r.time)}</td><td>${r.quantity}</td><td>${fmt(r.long_price)} / ${fmt(r.short_price)}</td><td>${fmt(r.charges)}</td></tr>`)}</tbody></table>`;
   $("expiryMetrics").innerHTML=expiryMetricRows(d.metrics);
   const p=d.portfolio;
@@ -99,3 +100,4 @@ $("expiryManualForm").addEventListener("submit",async event=>{
   }catch(e){$("expiryAction").textContent=e.message;}finally{expiryUI.busy=false;await loadExpiry();}
 });
 setInterval(loadExpiry,3000);
+tradeFilterEvents("expiry",()=>{expiryUI.pages.Trade=1;renderExpiry();});

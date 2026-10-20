@@ -433,6 +433,49 @@ test("Lab filters and pagination keep setup and variant ledgers separate", () =>
   assert.equal(ui.ids.get("labPage").textContent, "Page 1 of 1 / 0 trades");
 });
 
+test("trade history has local dates independent of export dates and shows excluded outcomes", () => {
+  const ui=app(true);
+  const old={id:"OLD",setup:"Nifty_Setup1",variant:"technical",status:"closed",entry_time:"2026-10-12T10:00:00+05:30",exit_time:"2026-10-13T10:00:00+05:30",open_seconds:86400,net_r:-1,performance_eligible:false};
+  ui.run(`niftyLab.data=${JSON.stringify({trades:[],trade_history:[old],delivery:[]})}`);
+  ui.ids.get("labVariant").value="all";ui.ids.get("labTradeState").value="all";
+  ui.ids.get("labDate").value="2026-10-19";
+  ui.context.renderLabTrades();
+  assert.match(ui.ids.get("labTrades").innerHTML,/OLD/);
+  assert.match(ui.ids.get("labTrades").innerHTML,/points-negative/);
+  assert.match(ui.ids.get("labTrades").innerHTML,/Loss/);
+  assert.match(ui.ids.get("labTrades").innerHTML,/excluded from validated metrics/);
+  ui.ids.get("labTradeFrom").value="2026-10-13";
+  ui.ids.get("labTradeFrom").handlers.change();
+  assert.match(ui.ids.get("labPage").textContent,/0 trades/);
+  ui.ids.get("labTradeBasis").value="exit";
+  ui.ids.get("labTradeBasis").handlers.change();
+  assert.match(ui.ids.get("labPage").textContent,/1 trades/);
+  ui.ids.get("labTradeClear").handlers.click();
+  assert.equal(ui.ids.get("labTradeFrom").value,"");
+  assert.equal(ui.ids.get("labDate").value,"2026-10-19");
+});
+
+test("profit/loss formatting distinguishes missing, zero, negative and open marks",()=>{
+  const ui=app();
+  assert.match(ui.run('paperResult(1,"R",{status:"closed"})'),/Profit.*1.00/);
+  assert.match(ui.run('paperResult(-1,"INR",{status:"open"},"Unrealized")'),/Loss/);
+  assert.match(ui.run('paperResult(0,"R",{status:"closed"})'),/Flat/);
+  assert.doesNotMatch(ui.run('paperResult(null,"R",{status:"closed"})'),/Profit|Loss|Flat/);
+  assert.match(ui.run('paperResult(NaN,"R",{status:"closed"})'),/unavailable/);
+});
+
+test("all module trade date filters use IST and never mutate export controls",()=>{
+  const ui=app();
+  for(const prefix of ["lab","scalp","expiry","mcx"]){
+    ui.ids.get(prefix+"TradeFrom").value="2026-10-20";
+    ui.ids.get(prefix+"TradeTo").value="2026-10-20";
+    assert.equal(ui.run(`tradeHistoryMatches({entry_time:"2026-10-19T20:00:00Z"},"${prefix}")`),true);
+    assert.equal(ui.run(`tradeHistoryMatches({entry_time:"2026-10-19T12:00:00Z"},"${prefix}")`),false);
+    ui.ids.get(prefix+"TradeBasis").value="exit";
+    assert.equal(ui.run(`tradeHistoryMatches({entry_time:"2026-10-20T10:00:00+05:30"},"${prefix}")`),false);
+  }
+});
+
 test("retired sections are absent and no longer poll on startup", () => {
   const ui = app();
   assert.ok(!html.includes('id="tab-purple"'));

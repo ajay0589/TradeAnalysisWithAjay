@@ -60,10 +60,10 @@ function renderMcx() {
 }
 
 function renderMcxTrades() {
-  const rows = (mcx.data?.trades || []).filter(t => t.root === mcx.root && ($("mcxTradeState").value === "all" || t.status === $("mcxTradeState").value));
+  const rows = (mcx.data?.trade_history || mcx.data?.trades || []).filter(t => tradeHistoryMatches(t, "mcx") && t.root === mcx.root && ($("mcxTradeState").value === "all" || t.status === $("mcxTradeState").value));
   const pages = Math.max(1, Math.ceil(rows.length / 10));
   mcx.page = Math.min(mcx.page, pages);
-  $("mcxTrades").innerHTML = rows.slice((mcx.page-1)*10, mcx.page*10).map(t => `<tr><td>${escapeHtml(t.id)}<div class="cell-note">${escapeHtml(t.symbol)} / ${escapeHtml(t.expiry)}</div></td><td>${escapeHtml(t.status)} / ${escapeHtml(t.direction)}</td><td>${tradeResultCell(t.result)}</td><td>${fmtDateTime(t.entry_time)}<br>${fmt(t.entry_price)}</td><td>${fmtDateTime(t.signal_time)}<br>${fmt(t.reference_price)}</td><td>${fmtDateTime(t.exit_time)}<br>${fmt(t.exit_price)}</td><td>${formatSeconds(t.open_seconds)}</td><td>${fmt(t.stop_level)} / ${fmt(t.target_level)}</td><td>${fmt(t.net_r)}</td><td>${fmt(t.indicators?.atr_percent)}%</td><td>${escapeHtml(mcxLabel(t.exit_reason || "-"))}<div class="cell-note">${escapeHtml(mcxLabel(t.monitoring_interrupted || ""))}</div></td></tr>`).join("") || '<tr><td colspan="11">No trades matching these filters.</td></tr>';
+  $("mcxTrades").innerHTML = rows.slice((mcx.page-1)*10, mcx.page*10).map(t => `<tr><td>${escapeHtml(t.id)}<div class="cell-note">${escapeHtml(t.symbol)} / ${escapeHtml(t.expiry)}</div></td><td>${escapeHtml(t.status)} / ${escapeHtml(t.direction)}</td><td>${tradeResultCell(t.result)}</td><td>${fmtDateTime(t.entry_time)}<br>${fmt(t.entry_price)}</td><td>${fmtDateTime(t.signal_time)}<br>${fmt(t.reference_price)}</td><td>${fmtDateTime(t.exit_time)}<br>${fmt(t.exit_price)}</td><td>${formatSeconds(t.open_seconds)}</td><td>${fmt(t.stop_level)} / ${fmt(t.target_level)}</td><td>${paperResult(t.net_r,"R",t,"After assumed costs")}</td><td>${fmt(t.indicators?.atr_percent)}%</td><td>${escapeHtml(mcxLabel(t.exit_reason || "-"))}<div class="cell-note">${escapeHtml(mcxLabel(t.monitoring_interrupted || ""))}</div></td></tr>`).join("") || '<tr><td colspan="11">No trades matching these filters.</td></tr>';
   $("mcxPage").textContent = `Page ${mcx.page} of ${pages} / ${rows.length} trades`;
   $("mcxPrev").disabled = mcx.page <= 1;
   $("mcxNext").disabled = mcx.page >= pages;
@@ -99,6 +99,7 @@ document.querySelectorAll("[data-mcx-root]").forEach(b => b.addEventListener("cl
 }));
 for (const id of ["mcxFrom", "mcxTo"]) $(id).addEventListener("change", () => { mcx.page = 1; ++mcx.generation; loadMcx(); });
 const mcxToday = new Intl.DateTimeFormat("en-CA", {timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit"}).format(new Date());
+tradeFilterEvents("mcx", () => { mcx.page = 1; renderMcxTrades(); });
 $("mcxFrom").value = $("mcxTo").value = mcxToday;
 setInterval(loadMcx, 5000);
 window.addEventListener("resize", () => { if (state.activeTab === "mcx") drawMcxChart(); });

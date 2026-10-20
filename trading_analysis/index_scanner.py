@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 from trading_analysis import diagnostics
 from trading_analysis.live_quotes import LIVE_QUOTES
+from trading_analysis.futures_context import FUTURES
 from trading_analysis.live_timing import expected_closed_bar, prepare_live_entry, live_quote_exit, price_closed_exit
 from trading_analysis.option_history import OptionHistory
 from trading_analysis.notifications.outbox import AlertOutbox
@@ -181,7 +182,7 @@ class IndexScanRepository:
     def history(self, symbol: str) -> dict[str, Any]:
         with self._connect() as conn:
             trades = [dict(row) for row in conn.execute(
-                "SELECT * FROM index_scan_trades WHERE symbol = ? ORDER BY created_at DESC LIMIT 100", (symbol,)).fetchall()]
+                "SELECT * FROM index_scan_trades WHERE symbol = ? ORDER BY created_at DESC", (symbol,)).fetchall()]
             alerts = [dict(row) for row in conn.execute(
                 "SELECT * FROM index_scan_alerts WHERE symbol = ? ORDER BY id DESC LIMIT 100", (symbol,)).fetchall()]
         for row in trades:
@@ -869,7 +870,8 @@ class IndexScannerService:
             signal = prepare_live_entry(signal, LIVE_QUOTES.get(symbol), _now(), diagnostics)
         if signal:
             signal["metadata"] = {**signal["metadata"], "index_option_footprint": option,
-                                   "leader_confirmation": confirmation, "leaders": leaders}
+                                   "leader_confirmation": confirmation, "leaders": leaders,
+                                   "futures_evidence": FUTURES.evidence(symbol, _now(), signal["direction"])}
         return signal
 
     def _exit_loop(self, symbol):

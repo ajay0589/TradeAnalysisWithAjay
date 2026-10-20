@@ -19,6 +19,7 @@ def main():
                              direction="bullish", status="closed", entry_time=day+"T10:00:00+05:30", entry_price=23000,
                              exit_time=day+"T10:20:00+05:30", exit_price=23050, stop_level=22950, target_level=23100,
                              open_seconds=1200, net_r=.816, performance_eligible=True, exit_reason="holding_limit") for i in range(25)]
+    fixture["trade_history"] = fixture["trades"]
     for row in fixture["comparisons"]:
         for variant in ("technical", "combined"):
             row["metrics"][variant].update(closed=3, open=1, win_rate=66.67, net_r=1.2, expectancy_r=.4,

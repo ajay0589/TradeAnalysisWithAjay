@@ -23,7 +23,7 @@ async function loadNiftyLab() {
 
 async function controlNiftyLab(action, setup = null) {
   if (niftyLab.action) return;
-  const open = (niftyLab.data?.trades || []).some(t => t.status === "open" && (!setup || t.setup === setup));
+  const open = (niftyLab.data?.trade_history || niftyLab.data?.trades || []).some(t => t.status === "open" && (!setup || t.setup === setup));
   if (action === "stop" && open && !confirm("Stop entry and exit monitoring? Open paper trades will be marked interrupted and excluded from performance when closed.")) return;
   niftyLab.action = true;
   ++niftyLab.request;
@@ -44,6 +44,7 @@ function labShortMetric(m) {
 function renderNiftyLab() {
   const d = niftyLab.data;
   if (!d) return;
+  renderFutures("labFutures", d.futures, d.trade_history || d.trades);
   $("labStatus").textContent = `${d.running_count} / 5 running | Intraday only | 10 paper ledgers | ${d.version}`;
   $("labStartAll").disabled = niftyLab.action || d.running_count === 5;
   $("labStopAll").disabled = niftyLab.action || d.running_count === 0;
@@ -85,22 +86,22 @@ function renderNiftyLab() {
   renderLabTrades();
   const decisions = (d.decisions || []).filter(r => r.setup === niftyLab.setup);
   $("labDecisionCount").textContent = `${decisions.length} shown / ${row.checked_candles} total`;
-  $("labDecisions").innerHTML = decisions.map(r => `<tr><td>${fmtDateTime(r.checked_at)}</td><td>${fmtDateTime(r.closed_at)}</td><td>${escapeHtml(labLabel(r.direction || r.reason))}</td><td>${escapeHtml(labLabel(r.variants?.technical))}</td><td>${escapeHtml(labLabel(r.variants?.combined))}</td><td><details><summary>Values</summary><pre>${escapeHtml(JSON.stringify({indicators:r.indicators,entry:r.entry_checks,options:r.option_evidence}, null, 2))}</pre></details></td></tr>`).join("") || '<tr><td colspan="6">No decisions for this session.</td></tr>';
+  $("labDecisions").innerHTML = decisions.map(r => `<tr><td>${fmtDateTime(r.checked_at)}</td><td>${fmtDateTime(r.closed_at)}</td><td>${escapeHtml(labLabel(r.direction || r.reason))}</td><td>${escapeHtml(labLabel(r.variants?.technical))}</td><td>${escapeHtml(labLabel(r.variants?.combined))}</td><td><details><summary>Values</summary><pre>${escapeHtml(JSON.stringify({indicators:r.indicators,entry:r.entry_checks,options:r.option_evidence,futures:r.futures_evidence}, null, 2))}</pre></details></td></tr>`).join("") || '<tr><td colspan="6">No decisions for this session.</td></tr>';
   $("labEvents").innerHTML = (d.events || []).filter(e => !e.setup || e.setup === niftyLab.setup).slice().reverse().map(e => `<p>${fmtDateTime(e.time)} | ${escapeHtml(labLabel(e.event))} | ${escapeHtml(labLabel(e.reason || e.error || e.phase || e.worker || "-"))}</p>`).join("") || "No monitor events.";
   updateLabExport();
 }
 
 function labFilteredTrades() {
-  return (niftyLab.data?.trades || []).filter(t => t.setup === niftyLab.setup && ($("labVariant").value === "all" || t.variant === $("labVariant").value) && ($("labTradeState").value === "all" || t.status === $("labTradeState").value));
+  return (niftyLab.data?.trade_history || niftyLab.data?.trades || []).filter(t => tradeHistoryMatches(t, "lab") && t.setup === niftyLab.setup && ($("labVariant").value === "all" || t.variant === $("labVariant").value) && ($("labTradeState").value === "all" || t.status === $("labTradeState").value));
 }
 
 function renderLabTrades() {
   const rows = labFilteredTrades(), pages = Math.max(1, Math.ceil(rows.length / 10));
   niftyLab.page = Math.min(niftyLab.page, pages);
   $("labTrades").innerHTML = rows.slice((niftyLab.page - 1) * 10, niftyLab.page * 10).map(t => {
-    const delivery = (niftyLab.data.delivery || []).filter(e => e.trade_id === t.id).map(e => `${e.event_kind}: ${e.status}${e.error ? ` (${e.error})` : ""}`).join("; ");
+    const delivery = (niftyLab.data.trade_delivery || niftyLab.data.delivery || []).filter(e => e.trade_id === t.id).map(e => `${e.event_kind}: ${e.status}${e.error ? ` (${e.error})` : ""}`).join("; ");
     const seconds = t.open_seconds ?? Math.max(0, (parseDateTime(niftyLab.data.now) - parseDateTime(t.entry_time)) / 1000);
-    return `<tr><td>${escapeHtml(t.id)}<div class="cell-note">${labVariant(t.variant)}</div></td><td>${escapeHtml(t.direction)} / ${escapeHtml(t.status)}</td><td>${fmtDateTime(t.entry_time)}</td><td>${fmt(t.entry_price)}</td><td>${fmtDateTime(t.exit_time)}</td><td>${fmt(t.exit_price)}</td><td>${formatSeconds(seconds)}</td><td>${fmt(t.stop_level)} / ${fmt(t.target_level)}</td><td>${fmt(t.net_r)}</td><td>${vixCell(t.india_vix_entry)}</td><td>${vixCell(t.india_vix_exit)}</td><td>${escapeHtml(labLabel(t.monitoring_interrupted || t.exit_reason || t.price_basis))}${t.status === "closed" && !t.performance_eligible ? '<div class="cell-note">Excluded from metrics</div>' : ""}</td><td>${escapeHtml(delivery || (t.telegram_enabled ? "No delivery record for this session" : "Off"))}</td></tr>`;
+    return `<tr><td>${escapeHtml(t.id)}<div class="cell-note">${labVariant(t.variant)}</div></td><td>${escapeHtml(t.direction)} / ${escapeHtml(t.status)}</td><td>${fmtDateTime(t.entry_time)}</td><td>${fmt(t.entry_price)}</td><td>${fmtDateTime(t.exit_time)}</td><td>${fmt(t.exit_price)}</td><td>${formatSeconds(seconds)}</td><td>${fmt(t.stop_level)} / ${fmt(t.target_level)}</td><td>${paperResult(t.status === "closed" ? t.net_r : niftyLab.data.spot_fresh ? (niftyLab.data.spot.price - t.entry_price) * (t.direction === "bullish" ? 1 : -1) / t.risk_points : null, "R", t, t.status === "open" ? "Unrealized gross spot" : "Spot after assumed costs")}</td><td>${vixCell(t.india_vix_entry)}</td><td>${vixCell(t.india_vix_exit)}</td><td>${futuresTradeCell(t.futures_evidence)}${escapeHtml(labLabel(t.monitoring_interrupted || t.exit_reason || t.price_basis))}${t.status === "closed" && !t.performance_eligible ? '<div class="cell-note">Excluded from metrics</div>' : ""}</td><td>${escapeHtml(delivery || (t.telegram_enabled ? "No delivery record for this session" : "Off"))}</td></tr>`;
   }).join("") || '<tr><td colspan="13">No trades matching these filters.</td></tr>';
   $("labPage").textContent = `Page ${niftyLab.page} of ${pages} / ${rows.length} trades`;
   $("labPrev").disabled = niftyLab.page === 1;
@@ -144,7 +145,7 @@ async function exportLabCsv() {
     return;
   }
   if (niftyLab.data?.date !== $("labDate").value) { $("labAction").textContent = "Selected session is still loading."; return; }
-  const columns = ["id", "setup", "variant", "direction", "status", "entry_time", "entry_price", "exit_time", "exit_price", "open_seconds", "stop_level", "target_level", "net_r", "cost_points", "performance_eligible", "exit_reason", "monitoring_interrupted", "india_vix_entry", "india_vix_exit"];
+  const columns = ["id", "setup", "variant", "direction", "status", "entry_time", "entry_price", "exit_time", "exit_price", "open_seconds", "stop_level", "target_level", "net_r", "cost_points", "performance_eligible", "exit_reason", "monitoring_interrupted", "india_vix_entry", "india_vix_exit", "futures_evidence", "first_monitoring_gap"];
   const cell = v => `"${String(v ?? "").replace(/^[=+@]/, "'$&").replaceAll('"', '""')}"`;
   const rows = niftyLab.data?.trades || [];
   downloadBlob(new Blob([columns.join(",") + "\r\n" + rows.map(t => columns.map(k => cell(typeof t[k] === "object" && t[k] !== null ? JSON.stringify(t[k]) : t[k])).join(",")).join("\r\n")], {type: "text/csv;charset=utf-8"}), `nifty-setup-lab-trades-${$("labDate").value}.csv`);
@@ -171,6 +172,7 @@ for (const id of ["labVariant", "labTradeState"]) $(id).addEventListener("change
 $("labPrev").addEventListener("click", () => { niftyLab.page = Math.max(1, niftyLab.page - 1); renderLabTrades(); });
 $("labNext").addEventListener("click", () => { niftyLab.page += 1; renderLabTrades(); });
 $("labCsv").addEventListener("click", exportLabCsv);
+tradeFilterEvents("lab", () => { niftyLab.page = 1; renderLabTrades(); });
 setInterval(loadNiftyLab, 5000);
 window.addEventListener("resize", () => {
   if (state.activeTab === "nifty-lab" && niftyLab.data) drawLabCurve(niftyLab.data.comparisons.find(r => r.setup === niftyLab.setup).metrics);

@@ -37,7 +37,8 @@ def trade_overlaps(row, first, last):
 def trade_csv(rows, extra_columns=()):
     columns = ["symbol", "trade_id", "setup", "variant", "horizon", "direction", "status",
                "entry_time", "entry_price", "exit_time", "exit_price", "stop_level", "target_level",
-               "gross_points", "gross_r", "net_r", "exit_reason", "price_basis", "india_vix_entry", "india_vix_exit"]
+               "gross_points", "gross_r", "net_r", "exit_reason", "price_basis", "india_vix_entry", "india_vix_exit",
+               "performance_eligible", "monitoring_interrupted", "first_monitoring_gap", "futures_evidence"]
     columns += [name for name in extra_columns if name not in columns]
     buffer = io.StringIO(newline="")
     writer = csv.DictWriter(buffer, fieldnames=columns)
@@ -50,7 +51,7 @@ def trade_csv(rows, extra_columns=()):
             row["gross_points"] = (float(row["exit_price"]) - float(row["entry_price"])) * (1 if row.get("direction") == "bullish" else -1)
             risk = abs(float(row["entry_price"]) - float(row.get("stop_level") or row["entry_price"]))
             row["gross_r"] = row["gross_points"] / risk if risk else None
-        for key in ("price_basis", "india_vix_entry", "india_vix_exit"):
+        for key in ("price_basis", "india_vix_entry", "india_vix_exit", "futures_evidence"):
             row.setdefault(key, context.get(key))
         cells = {}
         for key in columns:

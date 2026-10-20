@@ -119,6 +119,8 @@
             <div class="ledger-filters">
               <label>Review from (IST)<input id="mcxFrom" type="date"></label><label>To (IST)<input id="mcxTo" type="date"></label>
               <label>Trade status<select id="mcxTradeState"><option value="all">All</option><option value="open">Open</option><option value="closed">Closed</option></select></label>
+              <label>Trade date (IST)<select id="mcxTradeBasis"><option value="entry">Entry</option><option value="exit">Exit</option></select></label>
+              <label>From<input id="mcxTradeFrom" type="date"></label><label>To<input id="mcxTradeTo" type="date"></label><button id="mcxTradeClear" type="button">All dates</button>
               <a id="mcxExport" class="lab-download" href="/api/mcx/export?format=zip" download>Download trades &amp; logs (.zip)</a>
             </div>
             <div id="mcxMetrics" class="compact-metrics"></div>
@@ -528,7 +530,8 @@
           </section>
           <section data-expiry-panel="trades" hidden>
             <h3 id="expiryIndexTitle">NIFTY Paper Spreads</h3>
-            <div class="expiry-controls"><label>Setup<select id="expirySetup"><option value="all">All setups</option><option>Expiry_1</option><option>Expiry_2</option><option>Expiry_3</option><option>Expiry_4</option></select></label><label>Status<select id="expiryTradeStatus"><option value="all">All</option><option value="open">Open</option><option value="closed">Closed</option></select></label><label>Ledger<select id="expiryLedger"><option value="all">Independent research</option><option value="portfolio">Portfolio accepted only</option></select></label></div>
+            <div class="expiry-controls"><label>Setup<select id="expirySetup"><option value="all">All setups</option><option>Expiry_1</option><option>Expiry_2</option><option>Expiry_3</option><option>Expiry_4</option></select></label><label>Status<select id="expiryTradeStatus"><option value="all">All</option><option value="open">Open</option><option value="closed">Closed</option></select></label><label>Ledger<select id="expiryLedger"><option value="all">Independent research</option><option value="portfolio">Portfolio accepted only</option></select></label>
+              <label>Trade date (IST)<select id="expiryTradeBasis"><option value="entry">Entry</option><option value="exit">Exit</option></select></label><label>From<input id="expiryTradeFrom" type="date"></label><label>To<input id="expiryTradeTo" type="date"></label><button id="expiryTradeClear" type="button">All dates</button></div>
             <div class="wide-table"><table class="readable-table"><thead><tr><th>Trade / setup</th><th>Direction / status</th><th>Buy / sell contracts</th><th>Expiry / quantity</th><th>Entry (IST) / debit</th><th>Exit (IST) / credit</th><th>Duration</th><th>Net INR / R</th><th>Spot invalidation</th><th>Portfolio / quality</th><th>India VIX</th></tr></thead><tbody id="expiryTrades"></tbody></table></div><div id="expiryTradePager" class="pagination"></div>
             <details><summary>Manual Fill Journal</summary>
               <form id="expiryManualForm" class="expiry-controls">
@@ -564,8 +567,10 @@
             <details class="lab-details"><summary>Feed health</summary><div class="lab-scroll"><table class="readable-table" data-no-pagination><thead><tr><th>Index</th><th>Candles</th><th>Last refresh</th><th>Spot quote</th><th>ATM / expiry</th><th>Option samples / issue</th></tr></thead><tbody id="scalpFeeds"></tbody></table></div></details>
             <nav class="lab-tabs" aria-label="Scalping index"><button type="button" data-scalp-index="NIFTY" class="active">NIFTY</button><button type="button" data-scalp-index="BANKNIFTY">Bank Nifty</button><button type="button" data-scalp-index="SENSEX">Sensex</button></nav>
             <div class="lab-controls"><label>Setup<select id="scalpSetup"><option value="Scalp1">Scalp1: Trend pullback</option><option value="Scalp2">Scalp2: Opening-range retest</option><option value="Scalp3">Scalp3: Failed-breakout reversal</option></select></label></div>
+            <details class="lab-details"><summary>Futures confirmation research</summary><div id="scalpFutures"></div></details>
             <section class="lab-section"><h3>Variant Results</h3><div class="lab-scroll"><table class="readable-table" data-no-pagination><thead><tr><th>Variant</th><th>Open</th><th>Closed</th><th>Win %</th><th>Net spot R</th><th>Expectancy R</th><th>Profit factor</th><th>Drawdown R</th><th>Excluded</th></tr></thead><tbody id="scalpMetrics"></tbody></table></div></section>
-            <section class="lab-section"><div class="lab-heading"><h3>Paper Trades</h3><div class="lab-controls"><label>Variant<select id="scalpVariant"><option value="all">All</option><option value="A">A: Technical</option><option value="B">B: Premium confirmation</option><option value="C">C: Premium + OI confirmation</option></select></label><label>Status<select id="scalpTradeStatus"><option value="all">All</option><option value="open">Open</option><option value="closed">Closed</option></select></label></div></div>
+            <section class="lab-section"><div class="lab-heading"><h3>Paper Trades</h3><div class="lab-controls"><label>Variant<select id="scalpVariant"><option value="all">All</option><option value="A">A: Technical</option><option value="B">B: Premium confirmation</option><option value="C">C: Premium + OI confirmation</option></select></label><label>Status<select id="scalpTradeStatus"><option value="all">All</option><option value="open">Open</option><option value="closed">Closed</option></select></label>
+              <label>Trade date (IST)<select id="scalpTradeBasis"><option value="entry">Entry</option><option value="exit">Exit</option></select></label><label>From<input id="scalpTradeFrom" type="date"></label><label>To<input id="scalpTradeTo" type="date"></label><button id="scalpTradeClear" type="button">All dates</button></div></div>
               <div class="lab-scroll"><table class="readable-table" data-no-pagination><thead><tr><th>Trade / variant</th><th>Direction / status</th><th>Entry (IST) / spot</th><th>Exit (IST) / spot</th><th>Duration</th><th>Spot stop / target</th><th>Spot result</th><th>Option contract / ask entry</th><th>Option bid exit / gross points</th><th>India VIX</th><th>Reason / delivery</th></tr></thead><tbody id="scalpTrades"></tbody></table></div><div id="scalpTradePager" class="lab-controls"></div>
             </section>
             <details class="lab-details"><summary>Signal decisions <span id="scalpDecisionCount" class="muted"></span></summary><div class="lab-scroll"><table class="readable-table" data-no-pagination><thead><tr><th>Decision (IST)</th><th>Signal / delay</th><th>A</th><th>B</th><th>C</th><th>Evidence</th></tr></thead><tbody id="scalpDecisions"></tbody></table></div><div id="scalpDecisionPager" class="lab-controls"></div></details>
@@ -606,6 +611,7 @@
             </nav>
             <section class="lab-section"><h3 id="labSetupTitle">EMA pullback</h3><p id="labRules"></p>
               <p class="muted">1 ATR stop / 2R target / maximum 90 minutes / last entry 14:30 / session exit 15:20 IST. Cost assumption: 2 bps per side.</p>
+              <details class="lab-details"><summary>Futures confirmation research</summary><div id="labFutures"></div></details>
               <div id="labMetrics" class="lab-scroll"></div>
               <div class="lab-chart-heading"><h4>Session cumulative net R</h4><span><i class="lab-key technical"></i> Technical only <i class="lab-key combined"></i> Technical + options</span></div>
               <canvas id="labCurve" width="1100" height="210" aria-label="Cumulative net R for both variants" role="img"></canvas>
@@ -614,6 +620,8 @@
             <section class="lab-section"><div class="lab-heading"><h3>Trades</h3><div class="lab-controls">
               <label>Variant<select id="labVariant"><option value="all">Both variants</option><option value="technical">Technical only</option><option value="combined">Technical + options</option></select></label>
               <label>Status<select id="labTradeState"><option value="all">All</option><option value="open">Open</option><option value="closed">Closed</option></select></label>
+              <label>Trade date (IST)<select id="labTradeBasis"><option value="entry">Entry</option><option value="exit">Exit</option></select></label>
+              <label>From<input id="labTradeFrom" type="date"></label><label>To<input id="labTradeTo" type="date"></label><button id="labTradeClear" type="button">All dates</button>
             </div></div>
               <div class="lab-scroll"><table class="readable-table"><thead><tr><th>Trade / variant</th><th>Direction / status</th><th>Entry (IST)</th><th>Entry spot</th><th>Exit (IST)</th><th>Exit spot</th><th>Open time</th><th>Stop / target</th><th>Net R</th><th>India VIX at entry</th><th>India VIX at exit</th><th>Result basis / reason</th><th>Telegram</th></tr></thead><tbody id="labTrades"></tbody></table></div>
               <div class="lab-controls"><button id="labPrev" type="button" title="Previous trades" aria-label="Previous trades">&#8592;</button><span id="labPage"></span><button id="labNext" type="button" title="Next trades" aria-label="Next trades">&#8594;</button></div>
@@ -643,6 +651,7 @@
                 <span id="indexDiagnosticsStatus" class="cell-note"></span>
               </div>
               <div id="allIndexMessage" class="mini-status"></div>
+              <details class="market-evidence"><summary>Futures confirmation research</summary><div id="indexFutures"></div></details>
               <details class="market-evidence"><summary>Spot quotes &amp; OI evidence</summary>
                 <div id="indexQuoteStatus" class="mini-status"></div>
                 <div class="wide-table"><table class="readable-table"><thead><tr><th>Index</th><th>Observed spot</th><th>Quote time (IST)</th><th>Quote state</th><th>Technical / confirmation state</th><th>Rolling OI (research)</th><th>Last observed OI change</th></tr></thead><tbody id="indexMarketEvidence"></tbody></table></div>

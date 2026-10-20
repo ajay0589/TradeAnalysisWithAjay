@@ -37,6 +37,8 @@ class ScalpingFeed:
             self.active = True
 
     def stop(self):
+        from trading_analysis.live_quotes import LIVE_QUOTES
+        LIVE_QUOTES.release(f"derivatives-context-{id(self)}")
         with self.lock:
             self.active = False
             self.generation += 1
@@ -66,6 +68,8 @@ class ScalpingFeed:
                 return
             self.ticker = ticker
             ticker.connect(threaded=True)
+            from trading_analysis.live_quotes import LIVE_QUOTES
+            LIVE_QUOTES.acquire(f"derivatives-context-{id(self)}")
 
     def _connected(self, ws, response):
         with self.lock:

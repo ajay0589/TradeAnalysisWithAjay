@@ -109,13 +109,15 @@ class LabRepository:
                 self._enqueue(conn, trade, "exit", (detected_at or now).isoformat())
         return trade if updated else None
 
-    def interrupt_open(self, reason, setup=None):
+    def interrupt_open(self, reason, setup=None, detail=None):
         with closing(self.connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute("SELECT id,body FROM lab_trades WHERE status='open' AND (? IS NULL OR setup=?)", (setup, setup)).fetchall()
             for identifier, body in rows:
                 trade = json.loads(body)
                 trade.setdefault("monitoring_interrupted", reason)
+                if detail:
+                    trade.setdefault("first_monitoring_gap", detail)
                 conn.execute("UPDATE lab_trades SET body=? WHERE id=?", (json.dumps(trade), identifier))
 
     def trades(self, day=None, setup=None, open_only=False):

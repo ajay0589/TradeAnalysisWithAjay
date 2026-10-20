@@ -291,7 +291,8 @@ class ExpiryLab:
             states=json.loads(json.dumps(self.states))
             portfolio=self._portfolio_state(now)
         with self.feed.lock:feeds={s:{**self.feed.state[s],"pair":self.feed.pairs.get(s),"samples":len(self.feed.history[s])} for s in SYMBOLS}
-        report.update(states=states,feeds=feeds,now=now.isoformat(),setups=SETUPS,
+        report.update(trade_history=self.repo.trades(), portfolio_history=self.repo.portfolio_trades(),
+            manual_history=self.repo.manual_rows(), states=states,feeds=feeds,now=now.isoformat(),setups=SETUPS,
             running_count=sum(s["enabled"] for s in states.values()),telegram_configured=TelegramNotifier.from_env("EXPIRY_").configured(),
             metrics=[dict(setup=k,**summary([t for t in report["trades"] if t["setup"]==k])) for k in states],
             portfolio={**summary(report["portfolio_trades"]),"current_daily_pnl":portfolio["pnl"],"valuation_incomplete":portfolio["unknown"],"halted":portfolio["halted"]},

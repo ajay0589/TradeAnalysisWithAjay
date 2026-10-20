@@ -146,6 +146,12 @@ class LiveQuoteService:
                         except Exception as exc:
                             self._error = diagnostics.clean(str(exc))
                             diagnostics.record("quote_fallback_failed", area="indexes", status="failed", error=self._error)
+                    if is_market_hours():
+                        try:
+                            from trading_analysis.futures_context import FUTURES
+                            FUTURES.poll()
+                        except Exception as exc:
+                            diagnostics.record("futures_context_failed", area="indexes", status="failed", error=str(exc))
                 self._wake.wait(1)
                 self._wake.clear()
         finally:

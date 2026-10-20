@@ -17,6 +17,7 @@ from trading_analysis.scalping.rules import INDICES, SETUPS, VARIANTS, VERSION, 
 from trading_analysis.scheduler.market_hours import is_market_hours
 from trading_analysis.storage import DEFAULT_DB_PATH
 from trading_analysis.trade_context import capture_vix
+from trading_analysis.futures_context import FUTURES
 
 
 class ScalpRepository(LabRepository):
@@ -212,9 +213,10 @@ class ScalpingLab:
                     state["reason"] = "waiting_fresh_spot"
                     continue
                 evidence = premium_evidence(history, now, signal["direction"]) if signal else {}
+                futures = FUTURES.evidence(symbol, now, signal["direction"] if signal else None)
                 decision = {"id": identifier, "setup": key, "symbol": symbol, "checked_at": now.isoformat(),
                             **reading, "direction": signal["direction"] if signal else None, "spot": spot,
-                            "signal_delay_seconds": delay, "option_evidence": evidence, "variants": {}, "version": VERSION}
+                            "signal_delay_seconds": delay, "option_evidence": evidence, "futures_evidence": futures, "variants": {}, "version": VERSION}
                 entries = {}
                 if signal:
                     sign = 1 if signal["direction"] == "bullish" else -1
@@ -254,7 +256,7 @@ class ScalpingLab:
                             "reference_price": signal["reference"], "risk_points": risk, "stop_level": signal["stop"], "target_level": target,
                             "cost_bps_per_side": POLICY["cost_bps_side"], "telegram_enabled": state["telegram_enabled"],
                             "price_basis": "observed_spot_not_fill", "option_entry": option, "horizon": "scalp",
-                            "option_costs_modeled": False, "policy": POLICY, "last_quote": spot}
+                            "option_costs_modeled": False, "policy": POLICY, "last_quote": spot, "futures_evidence": futures}
                 else:
                     decision["variants"] = {v: reading["reason"] if reading["reason"] != "evaluated" else "technical_rules_not_met" for v in VARIANTS}
                 created = self.repo.record(decision, entries)
@@ -277,7 +279,11 @@ class ScalpingLab:
                     trade.setdefault("monitoring_interrupted", "worker_gap")
                 if not fresh(spot, now):
                     if not trade.get("monitoring_interrupted"):
-                        self.repo.interrupt_open("quote_gap", trade["setup"])
+                        detail = {"detected_at": now.isoformat(), "quote_time": spot.get("quote_time"),
+                                  "received_at": spot.get("received_at"), "stream_connected": self.feed.connected,
+                                  "max_quote_age_seconds": POLICY["max_quote_age_seconds"]}
+                        self.repo.interrupt_open("quote_gap", trade["setup"], detail)
+                        self.repo.event("trade_quote_gap", now, trade_id=trade["id"], setup=trade["setup"], **detail)
                     continue
                 if as_ist(spot["quote_time"]) < as_ist(trade["entry_time"]):
                     continue
@@ -309,7 +315,7 @@ class ScalpingLab:
             if self.feed.active and not self._symbols():
                 self.feed.stop()
 
-    def export(self, from_date=None, to_date=None):
+    def export(self, from_date=None, to_date=None, include_futures=True):
         first, last = date_window(from_date=from_date, to_date=to_date)
         decisions, events = [], []
         for day in days(first, last):
@@ -327,10 +333,11 @@ class ScalpingLab:
                 "validation": "unvalidated_paper_only", "trades": trades, "decisions": decisions, "events": events,
                 "delivery": [r for day in days(first, last) for r in self.repo.outbox.history(day)],
                 "research": research, "runtime": diagnostics.runtime(), "feed_state": feed_state, "states": states,
+                **({"futures_samples": FUTURES.export(first, last)} if include_futures else {}),
                 "price_basis": "observed spot; indicative option ask-to-bid excluding costs"})
 
     def status(self, from_date=None, to_date=None):
-        report = self.export(from_date, to_date)
+        report = self.export(from_date, to_date, include_futures=False)
         now = datetime.now(IST)
         with self._lock:
             states = json.loads(json.dumps(self.states))
@@ -343,7 +350,9 @@ class ScalpingLab:
             for variant in VARIANTS:
                 selected = [t for t in report["trades"] if t["setup"] == key and t["variant"] == variant]
                 summaries.append({"setup": key, "variant": variant, **metrics(selected, report["from_date"], report["to_date"])})
-        return {**report, "now": now.isoformat(), "states": states, "setups": SETUPS, "variants": VARIANTS,
+        return {**report, "futures": {s: FUTURES.evidence(s, now) for s in INDICES},
+                "trade_history": self.repo.trades(), "trade_delivery": self.repo.outbox.history(),
+                "now": now.isoformat(), "states": states, "setups": SETUPS, "variants": VARIANTS,
                 "feeds": feeds, "stream_connected": self.feed.connected, "metrics": summaries,
                 "telegram_configured": TelegramNotifier.from_env("SCALP_").configured(),
                 "running_count": sum(s["enabled"] for s in states.values()),
