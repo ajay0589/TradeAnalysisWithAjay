@@ -175,13 +175,12 @@ class ScalpingLab:
                     self._feed_errors[symbol] = error
 
     def tick(self, symbol, now=None):
-        now = as_ist(now or datetime.now(IST))
         keys = [f"{symbol}:{setup}" for setup in SETUPS]
         with self._lock:
             if not any(self.states[k]["enabled"] for k in keys) and not any(t["symbol"] == symbol for t in self.repo.trades(open_only=True)):
                 return
-        rows, spot, history, snapshot = self.feed.snapshot(symbol, now)
-        self._exits(symbol, spot, now)
+        now, rows, spot, history, snapshot, quotes = self.feed.observe(symbol, now)
+        self._exits(symbol, spot, now, quotes)
         if not is_market_hours(now):
             with self._lock:
                 for key in keys:
@@ -264,7 +263,7 @@ class ScalpingLab:
                     self.repo.outbox.start()
                 state["reason"] = "; ".join(f"{v}: {r}" for v, r in decision["variants"].items())
 
-    def _exits(self, symbol, spot, now):
+    def _exits(self, symbol, spot, now, quotes=None):
         with self._lock:
             last_check = self._last_exit_check.get(symbol)
             self._last_exit_check[symbol] = now
@@ -301,8 +300,11 @@ class ScalpingLab:
                     reason = "holding_limit"
                 if reason:
                     entry = trade.get("option_entry") or {}
-                    with self.feed.lock:
-                        option = dict(self.feed.quotes.get(entry.get("token"), {}))
+                    if quotes is None:
+                        with self.feed.lock:
+                            option = dict(self.feed.quotes.get(entry.get("token"), {}))
+                    else:
+                        option = quotes.get(entry.get("token"), {})
                     trade["option_exit"] = option if usable_option(option, now) else None
                     trade["option_gross_points"] = option["bid"] - entry["ask"] if entry and usable_option(option, now) else None
                     trade["last_quote"] = spot

@@ -117,13 +117,20 @@ def spread_quote(long, short, now, quantity, spot=None, entry=True):
                 short_price=b+(-slip if entry else slip), quote_time=now.isoformat())
 
 
-def select_spread(signal, snapshot, quotes, now):
+def select_spread(signal, snapshot, quotes, now, symbol=None):
     expiry = now.date().isoformat()
     if snapshot.get("expiry") != expiry:
         return None, "not_expiry_day"
     side = "CE" if signal["direction"] == "bullish" else "PE"
-    reference = quotes.get(snapshot.get(side), {})
-    available = [q for q in quotes.values() if q.get("kind")==side and q.get("symbol")==reference.get("symbol") and q.get("expiry")==expiry]
+    reference = snapshot.get(side)
+    if not isinstance(reference, dict):
+        reference = quotes.get(reference, {})
+    symbol = symbol or reference.get("symbol")
+    if not reference:
+        return None, "missing_long_quote"
+    if symbol not in SYMBOLS or reference.get("symbol") != symbol or reference.get("kind") != side or reference.get("expiry") != expiry:
+        return None, "invalid_reference_contract"
+    available = [q for q in quotes.values() if q.get("kind")==side and q.get("symbol")==symbol and q.get("expiry")==expiry]
     price = snapshot.get("spot",{}).get("price",0)
     long = min(available,key=lambda q:(abs(q["strike"]-price),q["strike"])) if available else {}
     if not long or long.get("expiry") != expiry:

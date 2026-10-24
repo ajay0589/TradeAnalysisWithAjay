@@ -254,7 +254,16 @@ class ScalpingFeed:
             old.update(high=max(old["high"], price), low=min(old["low"], price), close=price, last=stamp)
         self.forming[symbol] = old
 
-    def snapshot(self, symbol, now):
+    def observe(self, symbol, now=None):
+        """Copy one feed state before timestamping it; explicit replay time stays fixed."""
+        with self.lock:
+            rows, spot, history, sample = self.snapshot(symbol, now)
+            quotes = {token: dict(q) for token, q in self.quotes.items()
+                      if isinstance(token, int) and q.get("symbol") == symbol}
+            observed_at = as_ist(now) if now is not None else datetime.now(IST)
+        return observed_at, rows, spot, history, sample, quotes
+
+    def snapshot(self, symbol, now=None):
         with self.lock:
             spot = dict(self.quotes.get(symbol, {}))
             pair = dict(self.pairs.get(symbol, {}))
@@ -263,6 +272,7 @@ class ScalpingFeed:
             if spot and strikes and pair.get("strike") != min(strikes, key=lambda s: (abs(s - spot["price"]), s)):
                 self.history[symbol].clear()
                 pair = {}
+            now = as_ist(now) if now is not None else datetime.now(IST)
             sample = {"time": now.isoformat(), "spot": spot, **pair,
                       "CE": dict(self.quotes.get(pair.get("CE"), {})), "PE": dict(self.quotes.get(pair.get("PE"), {}))}
             history = self.history[symbol]

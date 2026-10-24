@@ -5,6 +5,7 @@ from math import isfinite
 from trading_analysis.analysis.technical import ema, atr
 from trading_analysis.live_timing import as_ist, CLOCK_SKEW_SECONDS
 from trading_analysis.models import Candle
+from trading_analysis.scheduler.market_hours import is_market_day
 
 VERSION = "scalping-v1-experimental"
 INDICES = {"NIFTY": ("NSE", "NIFTY 50", "NFO", "NIFTY"),
@@ -25,7 +26,7 @@ def aggregate(rows, minutes=1):
         stamp = as_ist(c.timestamp)
         start = stamp.replace(hour=9, minute=15, second=0, microsecond=0)
         offset = int((stamp - start).total_seconds() // 60)
-        if stamp.weekday() >= 5 or not 0 <= offset < 375:
+        if not is_market_day(stamp.date()) or not 0 <= offset < 375:
             continue
         key = start + timedelta(minutes=offset // minutes * minutes)
         groups.setdefault(key, []).append(c)

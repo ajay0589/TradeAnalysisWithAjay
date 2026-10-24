@@ -113,11 +113,9 @@ class ExpiryLab:
         if selected:self.feed.refresh(selected,now)
 
     def tick(self,symbol,now=None):
-        now=as_ist(now or datetime.now(IST))
         with self._lock:
             if symbol not in self._symbols():return
-        rows,spot,history,snapshot=self.feed.snapshot(symbol,now)
-        with self.feed.lock:quotes={token:dict(q) for token,q in self.feed.quotes.items() if isinstance(token,int) and q.get("symbol")==symbol}
+        now,rows,spot,history,snapshot,quotes=self.feed.observe(symbol,now)
         with self._lock:
             if is_market_hours(now) and snapshot.get("expiry")==now.date().isoformat():
                 first=self._recorded.get(symbol,{}).get("day")!=now.date()
@@ -179,7 +177,7 @@ class ExpiryLab:
                 elif abs(spot["price"]-signal["reference"])>.25*signal["risk"]:decision["reason"]="entry_drift"
                 elif not evidence["premium_pass"]:decision["reason"]=evidence["reason"]
                 else:
-                    spread,reason=select_spread(signal,snapshot,quotes,now)
+                    spread,reason=select_spread(signal,snapshot,quotes,now,symbol=symbol)
                     decision["reason"]=reason
                     if spread:
                         portfolio=self._portfolio_state(now)

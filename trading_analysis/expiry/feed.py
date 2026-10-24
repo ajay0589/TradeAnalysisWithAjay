@@ -1,9 +1,9 @@
 """Expiry feed: reuse the broker stream, retain both legs, freeze ATM evidence."""
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from trading_analysis.scalping.feed import ScalpingFeed
 from trading_analysis.scalping.rules import INDICES
-from trading_analysis.live_timing import as_ist
+from trading_analysis.live_timing import IST, as_ist
 
 
 class ExpiryFeed(ScalpingFeed):
@@ -51,9 +51,10 @@ class ExpiryFeed(ScalpingFeed):
                 if token in self.quotes:
                     self.quotes[token].update(lot_size=meta["lot_size"])
 
-    def snapshot(self, symbol, now):
+    def snapshot(self, symbol, now=None):
         with self.lock:
             pair = dict(self.pairs.get(symbol, {}))
+            now = as_ist(now) if now is not None else datetime.now(IST)
             sample = {"time": now.isoformat(), "spot": dict(self.quotes.get(symbol, {})), **pair,
                       "CE": dict(self.quotes.get(pair.get("CE"), {})), "PE": dict(self.quotes.get(pair.get("PE"), {}))}
             history = self.history[symbol]

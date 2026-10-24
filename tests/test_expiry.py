@@ -14,7 +14,7 @@ from trading_analysis.expiry import rules
 from trading_analysis.expiry.service import ExpiryLab, summary
 from trading_analysis.expiry.replay import replay_frames
 
-NOW=datetime(2026,10,20,10,0,1,tzinfo=IST)
+NOW=datetime(2026,10,22,10,0,1,tzinfo=IST)
 
 
 def quote(token=1,kind="CE",strike=23000,bid=100,ask=101,now=NOW):
@@ -26,7 +26,7 @@ def quote(token=1,kind="CE",strike=23000,bid=100,ask=101,now=NOW):
 def market(now=NOW):
     spot={"price":23000,"quote_time":now.isoformat(),"received_at":now.isoformat()}
     quotes={1:quote(now=now),2:quote(2,strike=23100,bid=60,ask=60.5,now=now),3:quote(3,kind="PE",now=now)}
-    snapshot=dict(identity="NIFTY:23000",expiry=now.date().isoformat(),strike=23000,CE=1,PE=3,spot=spot,time=now.isoformat())
+    snapshot=dict(identity="NIFTY:23000",expiry=now.date().isoformat(),strike=23000,CE=quotes[1],PE=quotes[3],spot=spot,time=now.isoformat())
     return spot,quotes,snapshot
 
 
@@ -151,11 +151,11 @@ def test_portfolio_unknown_marks_block_new_acceptance(lab):
 
 def test_export_and_replay_missing_history(lab):
     process(lab)
-    report=lab.export("2026-10-20","2026-10-20",True)
+    report=lab.export("2026-10-22","2026-10-22",True)
     assert len(report["trades"])==4 and "frames" in report and "long" in report["csv_columns"]
-    assert not lab.export("2026-10-21","2026-10-21")["decisions"]
-    with pytest.raises(ValueError):lab.export("2026-10-21","2026-10-20")
-    assert lab.replay("2026-10-20","2026-10-20")["phase"]=="unavailable"
+    assert not lab.export("2026-10-23","2026-10-23")["decisions"]
+    with pytest.raises(ValueError):lab.export("2026-10-23","2026-10-22")
+    assert lab.replay("2026-10-22","2026-10-22")["phase"]=="unavailable"
     with pytest.raises(ValueError,match="version"):replay_frames([{"version":"bad"}])
 
 
@@ -332,3 +332,73 @@ def test_portfolio_exit_does_not_change_independent_research(lab,monkeypatch):
     portfolio=lab.repo.portfolio_trades()
     assert len(portfolio)==1 and portfolio[0]["exit_reason"]=="portfolio_daily_loss"
     assert lab._portfolio_state(NOW)["halted"]
+
+
+def test_spread_selection_supports_legacy_token_snapshots():
+    spot, quotes, snapshot = market()
+    snapshot.update(CE=1, PE=3)
+    spread, reason = rules.select_spread(SIGNAL, snapshot, quotes, NOW, symbol="NIFTY")
+    assert reason == "qualified"
+    assert spread["long"]["token"] == 1 and spread["short"]["token"] == 2
+
+
+@pytest.mark.parametrize("field,value", [
+    ("symbol", "SENSEX"), ("kind", "PE"), ("expiry", "2026-10-29"),
+])
+def test_reference_contract_cannot_cross_index_kind_or_expiry(field, value):
+    spot, quotes, snapshot = market()
+    snapshot["CE"] = {**quotes[1], field: value}
+    spread, reason = rules.select_spread(SIGNAL, snapshot, quotes, NOW, symbol="NIFTY")
+    assert spread is None and reason == "invalid_reference_contract"
+
+
+def test_missing_reference_does_not_select_unrelated_options():
+    spot, quotes, snapshot = market()
+    snapshot["CE"] = {}
+    spread, reason = rules.select_spread(SIGNAL, snapshot, quotes, NOW, symbol="NIFTY")
+    assert spread is None and reason == "missing_long_quote"
+
+
+def load_feed_market(lab, now=NOW, spot_price=23000):
+    spot, quotes, snapshot = market(now)
+    spot["price"] = spot_price
+    with lab.feed.lock:
+        lab.feed.quotes = {"NIFTY": spot, **quotes}
+        lab.feed.pairs["NIFTY"] = {k: snapshot[k] for k in ("identity", "expiry", "strike")}
+        lab.feed.pairs["NIFTY"].update(CE=1, PE=3)
+
+
+def test_real_feed_shape_live_tick_and_replay_match_without_alerts(lab):
+    load_feed_market(lab)
+    lab.tick("NIFTY", NOW)
+    assert len(lab.repo.trades()) == 4
+    load_feed_market(lab, NOW + timedelta(seconds=1), spot_price=22899)
+    lab.tick("NIFTY", NOW + timedelta(seconds=1))
+    frames = lab.repo.frames(NOW.date().isoformat(), NOW.date().isoformat())
+    assert isinstance(frames[0]["snapshot"]["CE"], dict)
+    result = replay_frames(frames)
+    assert len(result["trades"]) == 4
+    assert [t["net_pnl"] for t in result["trades"]] == [t["net_pnl"] for t in lab.repo.trades()]
+    assert all(t["performance_eligible"] for t in result["trades"])
+    assert not lab.repo.outbox.history()
+
+
+def test_expiry_tick_uses_post_copy_observation_time(lab, monkeypatch):
+    received = NOW + timedelta(microseconds=699)
+    clock = Mock()
+    clock.now.return_value = NOW
+    monkeypatch.setattr("trading_analysis.expiry.service.datetime", clock)
+    monkeypatch.setattr("trading_analysis.expiry.feed.datetime", clock)
+    monkeypatch.setattr("trading_analysis.scalping.feed.datetime", clock)
+    original = lab.feed.snapshot
+
+    def receive_during_snapshot(symbol, now=None):
+        load_feed_market(lab, received)
+        clock.now.return_value = received
+        return original(symbol, now)
+
+    monkeypatch.setattr(lab.feed, "snapshot", receive_during_snapshot)
+    lab.tick("NIFTY")
+    assert len(lab.repo.trades()) == 4
+    assert all(t["entry_time"] == received.isoformat() for t in lab.repo.trades())
+    assert lab.repo.frames(NOW.date().isoformat(), NOW.date().isoformat())[0]["time"] == received.isoformat()

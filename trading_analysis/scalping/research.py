@@ -7,6 +7,7 @@ from trading_analysis.brokers.zerodha import merge_candles_csv, resolve_instrume
 from trading_analysis.data_sources.csv_loader import load_candles
 from trading_analysis.live_timing import IST, as_ist
 from trading_analysis.scalping.rules import INDICES, SETUPS, POLICY, VERSION, technical, aggregate
+from trading_analysis.scheduler.market_hours import is_market_day
 
 WINDOWS = {"1 week": 7, "2 weeks": 14, "1 month": 30, "2 months": 60, "3 months": 90, "6 months": 180}
 
@@ -75,7 +76,7 @@ def run_research(feed, download=False, progress=lambda message: None, cancelled=
     end = now.replace(hour=15, minute=30, second=0, microsecond=0)
     if end > now:
         end -= timedelta(days=1)
-    while end.weekday() >= 5:
+    while not is_market_day(end.date()):
         end -= timedelta(days=1)
     report = {"version": VERSION, "as_of": end.isoformat(), "rows": [], "coverage": {}, "errors": {},
               "validation": "not_promoted", "options_replay": "unavailable_without_historical_fixed_contract_quotes",

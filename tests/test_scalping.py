@@ -304,3 +304,49 @@ def test_contract_selection_keeps_expiry_and_retains_open_contract(tmp_path):
     assert not feed.history["NIFTY"]
     assert old in feed.tokens
     assert feed.pairs["NIFTY"]["strike"]==120
+
+
+def test_live_tick_timestamps_after_quote_copy_without_false_gap(tmp_path, monkeypatch):
+    lab, key = fake_lab(tmp_path, monkeypatch)
+    lab.tick("NIFTY", NOW)
+    clock = Mock()
+    clock.now.return_value = NOW + timedelta(seconds=1)
+    monkeypatch.setattr("trading_analysis.scalping.service.datetime", clock)
+    monkeypatch.setattr("trading_analysis.scalping.feed.datetime", clock)
+    received = NOW + timedelta(seconds=1, microseconds=699)
+
+    def updated_snapshot(symbol, now=None):
+        lab.feed.quotes[symbol] = quote(116, received)
+        clock.now.return_value = received
+        return [], dict(lab.feed.quotes[symbol]), [], {"time": received.isoformat()}
+
+    monkeypatch.setattr(lab.feed, "snapshot", updated_snapshot)
+    lab.tick("NIFTY")
+    trades = lab.repo.trades()
+    assert len(trades) == 3
+    assert all(t["status"] == "closed" and t["performance_eligible"] for t in trades)
+    assert all(not t.get("monitoring_interrupted") for t in trades)
+    assert all(t["exit_time"] == received.isoformat() for t in trades)
+
+
+def test_observation_copies_option_quotes_and_keeps_explicit_replay_time(tmp_path):
+    feed = ScalpingFeed(SimpleNamespace(), tmp_path)
+    future = NOW + timedelta(microseconds=699)
+    feed.quotes["NIFTY"] = quote(106, future)
+    feed.quotes[1] = quote(100, future, symbol="NIFTY", token=1)
+    at, _, spot, _, _, options = feed.observe("NIFTY", NOW)
+    assert at == NOW
+    assert not rules.fresh(spot, at)
+    assert not rules.fresh(options[1], at)
+    feed.quotes[1]["price"] = 500
+    assert options[1]["price"] == 100
+
+
+def test_exit_uses_option_quote_from_same_observation(tmp_path, monkeypatch):
+    lab, key = fake_lab(tmp_path, monkeypatch)
+    lab.tick("NIFTY", NOW)
+    at = NOW + timedelta(seconds=1)
+    option = quote(110, at, token=1, bid=109.9, ask=110.1, bid_qty=10, ask_qty=10)
+    lab.feed.quotes[1] = {**option, "received_at": (at + timedelta(seconds=1)).isoformat()}
+    lab._exits("NIFTY", quote(116, at), at, {1: option})
+    assert all(t["option_exit"]["price"] == 110 for t in lab.repo.trades())
