@@ -1,4 +1,4 @@
-"""Versioned F&O swing experiments. Deliberately no live-start or alert interface."""
+"""Shared F&O swing rules and historical validation; never places broker orders."""
 from bisect import bisect_right
 from collections import Counter
 from datetime import date, datetime, timedelta, time
@@ -19,13 +19,14 @@ from trading_analysis.candles import candle_path
 from trading_analysis.data_sources.csv_loader import load_candles
 from trading_analysis.live_timing import IST, as_ist
 from trading_analysis.nifty.live_scanner import candle_close_time
+from trading_analysis.scheduler.market_hours import is_market_day
 
 VERSION = "fno-swing-research-v1"
 SETUPS = {"trend_pullback": "Trend Pullback", "compression_breakout": "Compression Breakout"}
 VARIANTS = {"technical": "Technical control", "aligned": "Market + sector", "relative": "Market + sector + relative strength"}
 WINDOWS = ("1 week", "2 weeks", "1 month", "2 months", "3 months", "6 months")
 RULES = [
-    "Research only; no orders, Telegram alerts or live scanner promotion.",
+    "Historical validation is separate from live-data paper observation. No automatic approval or broker orders.",
     "Both directions; Daily and 1-hour completed candles. EMA20/50 trend and five-bar EMA50 slope.",
     "Pullback: prior three bars touch prior EMA20 within 0.25 ATR, hold prior EMA50, then close beyond prior high/low and EMA20.",
     "Compression: prior five-bar range <= 60% of prior twenty-bar range; close breaks prior twenty-bar high/low; volume >= 1.3x prior twenty-bar mean.",
@@ -48,6 +49,21 @@ def window_start(end, label):
     n = end.year * 12 + end.month - 1 - months
     start = date(n // 12, n % 12 + 1, min(end.day, calendar.monthrange(n // 12, n % 12 + 1)[1]))
     return start + timedelta(days=1)
+
+
+def session_on_or_before(day):
+    while not is_market_day(day):
+        day -= timedelta(days=1)
+    return day
+
+
+def entry_plan(signal, price, target_r):
+    sign = 1 if signal["side"] == "long" else -1
+    risk = (price-signal["stop"]) * sign
+    if not math.isfinite(price) or risk <= 0 or abs(price-signal["reference"]) > .25*signal["risk"]:
+        return None
+    return {"entry_price": price, "stop_level": signal["stop"], "risk_points": risk,
+            "target_level": price + sign*risk*target_r}
 
 
 def technical(rows):
@@ -156,10 +172,10 @@ def replay(symbol, rows, signals, setup, side, variant, rr, start, end, frame, c
             if any(r.get("aligned") != side or (variant == "relative" and r.get("relative") != side) for r in checks):
                 continue
         sign = 1 if side == "long" else -1
-        risk = (c.open-sig["stop"]) * sign
-        if risk <= 0 or abs(c.open-sig["reference"]) > .25*sig["risk"]:
+        plan = entry_plan(sig, c.open, rr)
+        if not plan:
             continue
-        target = c.open + sign*risk*rr
+        risk, target = plan["risk_points"], plan["target_level"]
         # Reuse the application's stop/target engine; enable adverse gap handling only here.
         result = exit_for(rows, i+1, side, sig["stop"], target, hold-1, adverse_gaps=True)
         j, price = result["index"], result["price"]
@@ -201,8 +217,20 @@ class StockResearch:
             report = {k: v for k, v in report.items() if k != "trades"}
             if state["phase"] == "idle":
                 state.update(phase="completed", progress="Last completed report loaded")
+        rows = (report or {}).get("rows", [])
+        reasons = []
+        if not report:
+            reasons.append("No historical validation report")
+        elif report.get("as_of") and not is_market_day(date.fromisoformat(report["as_of"])):
+            reasons.append("Previous report ends on a non-trading date; rerun validation")
+        if rows and any(r.get("screen") == "incomplete_data" for r in rows):
+            reasons.append("Incomplete historical candle or market/sector coverage")
+        if report and not any(r.get("screen") == "screen_pass_not_approved" for r in rows):
+            reasons.append("No comparison passes the historical sample, net-return and stress-cost screens")
+        reasons.append("Historical membership, corporate actions and derivative execution still require review")
         return {**state, "version": VERSION, "setups": SETUPS, "variants": VARIANTS, "rules": RULES,
-                "live_enabled": False, "approval": "blocked_pending_review", "report": report}
+                "live_enabled": False, "paper_available": True, "approval": "blocked_pending_review",
+                "approval_reasons": reasons, "report": report}
 
     def export(self, from_date=None, to_date=None):
         from trading_analysis.audit_exports import date_window, trade_overlaps
@@ -225,6 +253,7 @@ class StockResearch:
         end = date.fromisoformat(as_of) if as_of else datetime.now(IST).date()-timedelta(days=1)
         if end >= datetime.now(IST).date():
             raise ValueError("Choose a completed historical session before today")
+        end = session_on_or_before(end)
         with self.lock:
             if self.state["phase"] == "running":
                 raise ValueError("Stock validation is already running")
@@ -252,7 +281,8 @@ class StockResearch:
                     raise InterruptedError("Cancelled; previous completed report retained")
                 with sqlite3.connect(self.path) as db:
                     db.execute("INSERT INTO stock_research_runs VALUES(?,?,?)", (report["id"], report["created_at"], json.dumps(report, allow_nan=False)))
-                self.state.update(phase="completed", progress="Validation complete; live approval remains blocked")
+                self.state.update(phase="completed", completed=self.state["total"],
+                                  progress="Historical backtest complete; paper scanner is separate from strategy approval")
         except Exception as exc:
             from trading_analysis.diagnostics import clean
             with self.lock:
@@ -263,6 +293,7 @@ class StockResearch:
 
     def run(self, end, benchmark="NIFTY 50", download=False):
         from trading_analysis.data_sources.fno_universe import current_watchlist_symbols
+        end = session_on_or_before(end)
         symbols = sorted(current_watchlist_symbols(self.analysis, datetime.now(IST)))
         if not symbols:
             raise ValueError("No current F&O stock universe. Refresh NSE/NFO instrument masters in Data Ops.")

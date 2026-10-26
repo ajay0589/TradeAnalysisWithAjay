@@ -19,6 +19,7 @@ from trading_analysis.nifty_lab.service import NiftySetupLab
 from trading_analysis.scalping.service import ScalpingLab
 from trading_analysis.expiry.service import ExpiryLab
 from trading_analysis.stock_research import StockResearch
+from trading_analysis.stock_swing import StockSwingScanner
 from trading_analysis.mcx.service import McxSwingScanner
 from trading_analysis.scanner_dashboard import ScannerDashboard
 from trading_analysis.notifications.telegram import TelegramNotifier
@@ -58,6 +59,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
     scalping_lab = ScalpingLab(service)
     expiry_lab = ExpiryLab(service)
     stock_research = StockResearch(service)
+    stock_swing = StockSwingScanner(service)
     mcx_scanner = McxSwingScanner()
 
     @diagnostics.audit_http
@@ -100,6 +102,20 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                         self._send_csv(report["trades"], "stock-research-trades", report, redact=False)
                     elif params.get("format") == ["zip"]:
                         self._send_zip(report, "stock-research")
+                    else:
+                        self._send_json(report)
+            elif parsed.path in {"/api/stocks/scanner/status", "/api/stocks/scanner/export"}:
+                params = parse_qs(parsed.query)
+                if set(params) - {"from_date", "to_date", "format"}:
+                    raise ValueError("Unknown swing scanner filter")
+                if parsed.path.endswith("status"):
+                    self._send_json(self.stock_swing.status())
+                else:
+                    report = self.stock_swing.export(**_export_dates(params))
+                    if params.get("format") == ["csv"]:
+                        self._send_csv(report["trades"], "stock-swing-trades", report)
+                    elif params.get("format") == ["zip"]:
+                        self._send_zip(report, "stock-swing-audit")
                     else:
                         self._send_json(report)
             elif parsed.path in {"/api/scalping/status", "/api/scalping/export"}:
@@ -177,6 +193,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 report["scalping"] = self.scalping_lab.export(**dates)
                 report["expiry"] = self.expiry_lab.export(**dates)
                 report["stock_research"] = self.stock_research.export(**dates)
+                report["stock_swing"] = self.stock_swing.export(**dates)
                 report["mcx"] = self.mcx_scanner.export(**dates)
                 if params.get("format") == ["zip"]:
                     self._send_zip(report, "trading-app-log")
@@ -688,7 +705,17 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._read_json()
                 self._send_json(self.stock_research.cancel())
             elif parsed.path == "/api/stocks/start":
-                raise ValueError("Live stock strategies are blocked pending validation review")
+                raise ValueError("Use the Swing Scanner paper start endpoint; automated orders and strategy approval remain unavailable")
+            elif parsed.path == "/api/stocks/scanner/start":
+                if self.pullback_scanner.status()["running"]:
+                    raise ValueError("Stop the legacy monitor before starting the swing scanner")
+                self._send_json(self.stock_swing.start(**self._read_json()))
+            elif parsed.path == "/api/stocks/scanner/stop":
+                self._read_json()
+                self._send_json(self.stock_swing.stop())
+            elif parsed.path == "/api/stocks/scanner/test-telegram":
+                self._read_json()
+                self._send_json(TelegramNotifier.from_env("PULLBACK_").send_message("F&O SWING - CONNECTION TEST ONLY. No trade or order."))
             elif parsed.path == "/api/expiry/start":
                 payload = self._read_json()
                 self._send_json(self.expiry_lab.start(payload.get("setup"), payload.get("telegram_enabled", False), payload.get("acknowledge", False)))
@@ -722,17 +749,7 @@ class TradingRequestHandler(BaseHTTPRequestHandler):
                 self._read_json()
                 self._send_json(TelegramNotifier.from_env("NIFTY_LAB_").send_message("NIFTY Setup Lab TEST. Paper experiments only, not a trade alert."))
             elif parsed.path in {"/api/pullbacks/start", "/api/pullbacks/start-all"}:
-                payload = self._read_json()
-                was_running = self.pullback_scanner.status()["running"]
-                result = self.pullback_scanner.start(payload)
-                if parsed.path.endswith("start-all"):
-                    try:
-                        self.all_index_monitor.start()
-                    except Exception:
-                        if not was_running:
-                            self.pullback_scanner.stop()
-                        raise
-                self._send_json(result)
+                raise ValueError("Legacy pullback monitor retired. Use F&O Stocks > Swing Scanner; existing history is preserved")
             elif parsed.path == "/api/pullbacks/stop":
                 self._read_json()
                 self._send_json(self.pullback_scanner.stop())

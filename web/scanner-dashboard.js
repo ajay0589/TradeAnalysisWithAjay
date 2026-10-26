@@ -1,6 +1,6 @@
 /* Read-only views. Opening these panels never starts a scanner or quote feed. */
 const ledgerViews = {};
-const ledgerSources = ["NIFTY", "BANKNIFTY", "SENSEX", "MCX", "scalping", "expiry", "pullbacks", "purple", ...Array.from({length: 5}, (_, i) => `Nifty_Setup${i + 1}`)];
+const ledgerSources = ["NIFTY", "BANKNIFTY", "SENSEX", "MCX", "scalping", "expiry", "stock_swing", "pullbacks", "purple", ...Array.from({length: 5}, (_, i) => `Nifty_Setup${i + 1}`)];
 const ledgerHeading = '<tr><th>Trade / scanner</th><th>Status / direction</th><th>Result / basis</th><th>Horizon / variant</th><th>Entry (IST)</th><th>Entry price</th><th>Exit (IST)</th><th>Exit price</th><th>Open time</th><th>Stop / target</th><th>India VIX at entry</th><th>India VIX at exit</th><th>Exit reason</th></tr>';
 
 function tradeResultCell(result) {
@@ -90,7 +90,7 @@ async function loadScannerDashboard() {
     $("dashboardStatus").textContent = `${d.running_count} running / ${d.open_trade_count} open trades | ${fmtDateTime(d.as_of)}`;
     $("dashboardIssues").textContent = (d.issues || []).join(" | ");
     $("dashboardVix").innerHTML = `India VIX now: ${vixCell(d.india_vix)}`;
-    $("dashboardScanners").innerHTML = d.scanners.map(r => `<tr><td>${escapeHtml(r.name)}</td><td><strong class="${r.running ? "points-positive" : ""}">${r.running ? "Running" : r.phase === "on_demand" ? "On demand" : r.phase === "unavailable" ? "Unavailable" : "Stopped"}</strong><div class="cell-note">${escapeHtml(r.phase)}</div></td>
+    $("dashboardScanners").innerHTML = d.scanners.map(r => `<tr><td>${escapeHtml(r.name)}</td><td><strong class="${r.running ? "points-positive" : ""}">${r.running ? "Running" : r.phase === "monitoring_exits" ? "Exits only" : r.phase === "on_demand" ? "On demand" : r.phase === "unavailable" ? "Unavailable" : "Stopped"}</strong><div class="cell-note">${escapeHtml(r.phase)}</div></td>
       <td>${escapeHtml(r.detail)}</td><td>${fmtDateTime(r.started_at)}</td><td>${fmtDateTime(r.last_checked)}</td><td>${fmtDateTime(r.stopped_at)}</td>
       <td><button type="button" data-open-scanner="${escapeHtml(r.id)}">Open</button></td></tr>`).join("");
     $("dashboardScanners").querySelectorAll("[data-open-scanner]").forEach(b => b.addEventListener("click", () => {

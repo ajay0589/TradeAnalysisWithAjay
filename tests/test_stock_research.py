@@ -151,3 +151,18 @@ def test_stock_api_no_live_start_and_export(runner,monkeypatch):
             with pytest.raises(HTTPError) as e:urlopen(Request(base+"/api/stocks/start",data=b"{}",headers={"Content-Type":"application/json"}))
             assert e.value.code==400
         finally:server.shutdown();worker.join()
+
+
+def test_validation_weekend_end_and_progress_completion_are_explicit(runner, monkeypatch):
+    from trading_analysis.stock_research import session_on_or_before
+    assert session_on_or_before(date(2026, 10, 25)) == date(2026, 10, 23)
+    report = {"id": "session", "created_at": "2026-10-26T10:00:00+05:30", "as_of": "2026-10-23",
+              "rows": [{"screen": "incomplete_data"}], "trades": []}
+    runner.state.update(total=206, completed=205)
+    monkeypatch.setattr(runner, "run", lambda *a: report)
+    runner._worker(date(2026, 10, 23), "NIFTY 50", False)
+    result = runner.status()
+    assert result["completed"] == result["total"] == 206
+    assert result["paper_available"] and not result["live_enabled"]
+    assert any("coverage" in r for r in result["approval_reasons"])
+    assert "live approval remains blocked" not in result["progress"]

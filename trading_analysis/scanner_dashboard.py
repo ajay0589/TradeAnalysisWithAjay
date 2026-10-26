@@ -46,7 +46,7 @@ def normalize(row, source, now):
     end = as_ist(exited) if exited else now
     return {"id": row.get("trade_id") or row.get("id"), "scanner": source, "symbol": symbol,
             "status": row["status"], "direction": direction, "horizon": row.get("horizon") or row.get("purple_timeframe") or row.get("timeframe") or "intraday",
-            "variant": row.get("variant") or row.get("entry_kind") or row.get("strategy_id") or row.get("strategy"),
+            "variant": f"{row.get('family')} / {row.get('timeframe')}" if source == "stock_swing" else row.get("variant") or row.get("entry_kind") or row.get("strategy_id") or row.get("strategy"),
             "entry_time": as_ist(entered).isoformat() if entered else None, "entry_price": row.get("entry_price"),
             "exit_time": as_ist(exited).isoformat() if exited else None, "exit_price": row.get("exit_price"),
             "open_seconds": max(0, (end - as_ist(entered)).total_seconds()) if entered else None,
@@ -79,6 +79,8 @@ class ScannerDashboard:
                 rows.append(normalize(row, row["symbol"], now))
         if source in {"all", "pullbacks"}:
             rows.extend(normalize(_json(r["body"]), "pullbacks", now) for r in _table(h.pullback_scanner.repository.path, "pullback_setups", status))
+        if source in {"all", "stock_swing"} and hasattr(h, "stock_swing"):
+            rows.extend(normalize(_json(r["body"]), "stock_swing", now) for r in _table(h.stock_swing.path, "lab_trades", status))
         if source in {"all", "purple"}:
             for row in _table(getattr(h, "purple_db_path", DEFAULT_DB_PATH), "krishna_purple_trades", status):
                 row["metadata"] = _json(row.get("metadata_json"))
@@ -117,7 +119,7 @@ class ScannerDashboard:
         return sorted(rows, key=lambda r: (r["entry_time"] or "", str(r["id"])), reverse=True)
 
     def ledger(self, source="all", status="all", from_date=None, to_date=None, date_basis="entry", page=1):
-        allowed = {"all", "NIFTY", "BANKNIFTY", "SENSEX", "MCX", "scalping", "expiry", "pullbacks", "purple", *[f"Nifty_Setup{i}" for i in range(1, 6)]}
+        allowed = {"all", "NIFTY", "BANKNIFTY", "SENSEX", "MCX", "scalping", "expiry", "stock_swing", "pullbacks", "purple", *[f"Nifty_Setup{i}" for i in range(1, 6)]}
         if source not in allowed or status not in {"all", "open", "closed"} or date_basis not in {"entry", "exit"}:
             raise ValueError("Invalid scanner, trade status, or date basis")
         start, end = (date.fromisoformat(v) if v else None for v in (from_date, to_date))
@@ -180,10 +182,14 @@ class ScannerDashboard:
                 for root in ("SILVERM", "GOLDM", "NATURALGAS", "CRUDEOIL"):
                     add(f"mcx_{root}", f"MCX {root}", dict(h.mcx_scanner.state), "mcx", "Swing futures / Daily trend + hourly breakout")
         with h.pullback_scanner._lock:
-            add("pullback_legacy", "Legacy pullback paper monitor", h.pullback_scanner.state, "pullbacks", "Unvalidated legacy long/short monitor")
+            if h.pullback_scanner.state.get("running"):
+                add("pullback_legacy", "Legacy pullback monitor", h.pullback_scanner.state, "pullbacks", "Retired / exit history only")
+        if hasattr(h, "stock_swing"):
+            with h.stock_swing._lock:
+                add("stock_swing", "F&O Swing Scanner", h.stock_swing.state, "stocks", "Live-data paper / Pullback + Breakout / Daily + hourly")
         if hasattr(h, "stock_research"):
-            add("stock_research", "F&O swing validation", {"phase": h.stock_research.state["phase"]}, "stocks", "Research only; live approval blocked")
-        for key, label in (("scans", "Stock screener"), ("analyze", "Stock / index research")):
+            add("stock_research", "F&O swing validation", {"phase": h.stock_research.state["phase"]}, "backtest", "Historical evidence / no automatic approval")
+        for key, label in (("analyze", "Stock / index research"),):
             add(key, label, {"phase": "on_demand"}, key, "Manual analysis; no recurring monitor")
         open_rows = self.all_trades(status="open")
         return {"scanners": rows, "running_count": sum(r["running"] for r in rows), "open_trade_count": len(open_rows),

@@ -42,11 +42,10 @@
       </nav>
 
       <nav id="researchSubtabs" class="index-subtabs" aria-label="Stock research">
-        <button class="index-subtab active" data-research-target="stocks" type="button" aria-selected="true">Overview</button>
-        <button class="index-subtab" data-research-target="analyze" type="button" aria-selected="false">Analyze</button>
-        <button class="index-subtab" data-research-target="scans" type="button" aria-selected="false">Screener</button>
-        <button class="index-subtab" data-research-target="pullbacks" type="button" aria-selected="false">Trade Archive</button>
-        <button class="index-subtab" data-research-target="backtest" type="button" aria-selected="false">Backtests</button>
+        <button class="index-subtab active" data-research-target="stocks" type="button" aria-selected="true">Swing Scanner</button>
+        <button class="index-subtab" data-research-target="pullbacks" type="button" aria-selected="false">Trades</button>
+        <button class="index-subtab" data-research-target="backtest" type="button" aria-selected="false">Validation</button>
+        <button class="index-subtab" data-research-target="analyze" type="button" aria-selected="false">Research</button>
       </nav>
 
       <section class="notes" id="notes" hidden></section>
@@ -54,17 +53,37 @@
       <section class="tab-panes">
         <section id="tab-stocks" class="tab-pane active" data-tab-panel="stocks">
           <section class="dashboard-band">
-            <div class="section-heading"><h2>F&amp;O Swing Research</h2><span id="stockApproval">Live approval blocked</span></div>
+            <div class="section-heading"><h2>F&amp;O Swing Scanner</h2><span id="stockSwingStatus" role="status">Stopped / unvalidated paper</span></div>
+            <div class="ledger-filters swing-settings">
+              <label>Setups<select id="swingSetup"><option value="all">Pullback + Breakout</option><option value="trend_pullback">Trend Pullback</option><option value="compression_breakout">Compression Breakout</option></select></label>
+              <label>Candles<select id="swingFrame"><option value="both">Daily + 1 hour</option><option value="day">Daily</option><option value="60minute">1 hour</option></select></label>
+              <label>Market benchmark<select id="swingBenchmark"><option>NIFTY 50</option><option>NIFTY 500</option></select></label>
+              <label>Confirmation<select id="swingVariant"><option value="aligned">Market + sector</option><option value="relative">Aligned + relative strength</option></select></label>
+              <label>Target R<select id="swingTarget"><option value="1">1R</option><option value="1.5">1.5R</option><option value="2" selected>2R</option></select></label>
+            </div>
+            <div class="mcx-toolbar"><label class="check-row"><input id="swingAcknowledge" type="checkbox">I acknowledge unvalidated paper signals</label><label class="check-row"><input id="swingTelegram" type="checkbox">Telegram paper alerts</label><button id="swingStart" type="button" disabled>Start swing scanner</button><button id="swingStop" type="button" disabled>Stop new entries</button><button id="swingTelegramTest" type="button">Send test</button><button id="stockOpenValidation" type="button">Validation evidence</button></div>
+            <div id="swingReadiness" role="status"></div><div id="swingAction" role="status"></div>
+            <div id="swingMetrics" class="compact-metrics"></div>
+            <progress id="swingProgress" max="1" value="0"></progress><div id="swingRefresh" class="cell-note"></div><div id="swingErrors" class="points-warn" role="status"></div>
+          </section>
+          <section class="dashboard-band">
+            <div class="section-heading"><h2>Latest Stock Checks</h2><span id="swingDecisionCount"></span></div>
+            <div class="ledger-filters"><label>Stock<input id="swingSymbol" type="search" placeholder="All stocks"></label><label>Checks<select id="swingDecisionFilter"><option value="all">All checks</option><option value="signal">Technical candidates</option></select></label></div>
+            <div class="wide-table"><table class="readable-table" data-no-pagination="true"><thead><tr><th>Stock / candles</th><th>Setup</th><th>Direction</th><th>Decision</th><th>Market / sector</th><th>Close / EMA20 / EMA50</th><th>Checked (IST)</th></tr></thead><tbody id="stockDecisions"></tbody></table></div><div id="stockDecisionPager" class="table-pagination"></div>
+          </section>
+          <section class="dashboard-band"><details><summary>Setup rules &amp; validation policy</summary><div id="stockRules"></div></details></section>
+        </section>
+        <section id="stockValidationSummary" hidden>
+          <section class="dashboard-band">
+            <div class="section-heading"><h2>Validation Evidence</h2><span id="stockApproval">Not evaluated</span></div>
             <div id="stockSummary" class="compact-metrics"></div>
-            <div class="wide-table"><table class="readable-table"><thead><tr><th>Strategy</th><th>Direction</th><th>Frames</th><th>Status</th></tr></thead><tbody><tr><td>Trend Pullback</td><td>Long / short</td><td>Daily / 1 hour</td><td>Research only</td></tr><tr><td>Compression Breakout</td><td>Long / short</td><td>Daily / 1 hour</td><td>Research only</td></tr></tbody></table></div>
-            <button id="stockOpenValidation" type="button">Review validation</button>
+            <div id="stockApprovalReasons" class="points-warn"></div>
           </section>
           <section class="dashboard-band">
             <div class="section-heading"><h2>Latest Research Candidates</h2><span id="stockCandidateDate"></span></div>
             <div class="ledger-filters"><label>Symbol<input id="stockSymbol" type="search" placeholder="All stocks"></label><label>Result<select id="stockCandidateFilter"><option value="all">All decisions</option><option value="candidate">Candidates</option></select></label></div>
             <div class="wide-table"><table class="readable-table" data-no-pagination="true"><thead><tr><th>Stock / frame</th><th>Candle close (IST)</th><th>Technical result</th><th>Direction</th><th>Close / EMA20 / EMA50</th><th>ATR</th></tr></thead><tbody id="stockCandidates"></tbody></table></div><div id="stockCandidatePager" class="table-pagination"></div>
           </section>
-          <section class="dashboard-band"><details><summary>Rules &amp; validation policy</summary><div id="stockRules"></div></details></section>
         </section>
         <section id="tab-help" class="tab-pane" data-tab-panel="help">
           <section class="dashboard-band help-guide">
@@ -135,6 +154,7 @@
           </section>
         </section>
         <section id="tab-analyze" class="tab-pane" data-tab-panel="analyze">
+          <details id="stockAdvancedResearch" class="dashboard-band"><summary>Custom backtest (advanced)</summary></details>
           <section class="workspace">
             <aside class="sidebar">
               <div class="panel">
@@ -1114,11 +1134,8 @@
 
 
         <section id="tab-backtest" class="tab-pane" data-tab-panel="backtest">
-          <nav class="index-subtabs" aria-label="Stock backtest type">
-            <button class="index-subtab active" data-backtest-target="validation" type="button" aria-selected="true">Swing Validation</button>
-            <button class="index-subtab" data-backtest-target="generic" type="button" aria-selected="false">Custom Research</button>
-          </nav>
           <section data-backtest-view="validation">
+            <div id="stockValidationIntro"></div>
             <section class="dashboard-band">
               <div class="section-heading"><h2>Swing Validation Matrix</h2><span id="stockRunState">Not run</span></div>
               <div class="ledger-filters"><label>Historical end date (IST)<input id="stockAsOf" type="date"></label><label>Market benchmark<select id="stockBenchmark"><option>NIFTY 50</option><option>NIFTY 500</option></select></label><button id="stockValidate" type="button">Validate cached history</button><button id="stockDownload" type="button">Download history &amp; validate</button><button id="stockCancel" type="button" disabled>Cancel</button></div>
@@ -1129,7 +1146,7 @@
             <section class="dashboard-band"><div class="section-heading"><h2>Data Coverage</h2><span id="stockCoverageSummary"></span></div><div class="wide-table"><table class="readable-table" data-no-pagination="true"><thead><tr><th>Symbol</th><th>Frame</th><th>Bars</th><th>First candle (IST)</th><th>Last candle (IST)</th></tr></thead><tbody id="stockCoverage"></tbody></table></div><div id="stockCoveragePager" class="table-pagination"></div><div id="stockErrors" role="status"></div></section>
             <section class="dashboard-band"><div class="section-heading"><h2>Research Export</h2><span>Latest completed run</span></div><div class="ledger-filters"><label>Trades from (IST)<input id="stockFrom" type="date"></label><label>To (IST)<input id="stockTo" type="date"></label><button id="stockZip" type="button">Download trades &amp; logs</button><button id="stockCsv" type="button">Download trade CSV</button></div><div id="stockExportStatus" role="status"></div></section>
           </section>
-          <section class="workspace" data-backtest-view="generic" hidden>
+          <section id="stockCustomWorkspace" class="workspace" data-backtest-view="generic" hidden>
             <aside class="sidebar">
               <div class="panel" data-backtest-view="generic">
                 <label>Generic Strategy Backtest</label>
@@ -1299,42 +1316,24 @@
         </section>
 
         <section id="tab-pullbacks" class="tab-pane" data-tab-panel="pullbacks">
-          <section class="workspace">
-            <aside class="sidebar"><div class="panel">
-              <h2 class="nifty-settings-title">Legacy Pullback Monitor</h2>
-              <details><summary>Legacy controls (unvalidated)</summary>
-              <label for="pullbackFrame">Setup candles</label>
-              <select id="pullbackFrame"><option value="day">Daily</option><option value="60minute">1 hour</option><option value="15minute">15 min</option></select>
-              <label for="pullbackBenchmark">Market benchmark</label>
-              <select id="pullbackBenchmark"><option>NIFTY 50</option><option>NIFTY 100</option><option>NIFTY 200</option><option>NIFTY 500</option></select>
-              <label class="check-row"><input id="pullbackStructure" type="checkbox" checked />Confirmed index swing structure</label>
-              <div class="button-row"><button id="pullbackStart">Start legacy paper monitor</button><button id="pullbackStop" disabled>Stop legacy monitor &amp; exits</button></div>
-              <button id="pullbackStartAll" class="full-btn">Start indices + pullbacks</button>
-              <div id="pullbackTelegram" class="mini-status"></div>
-              <button id="pullbackTestTelegram" class="full-btn">Test pullback Telegram</button>
-              </details>
+          <section class="dashboard-band">
+            <div class="section-heading"><h2>Swing Trades</h2><span id="swingTradeCount"></span></div>
+            <div class="ledger-filters"><label>Stock<input id="swingTradeSymbol" type="search" placeholder="All stocks"></label><label>Status<select id="swingTradeStatus"><option value="all">All trades</option><option value="open">Open</option><option value="closed">Closed</option></select></label><label>Setup<select id="swingTradeSetup"><option value="all">All setups</option><option value="trend_pullback">Trend Pullback</option><option value="compression_breakout">Compression Breakout</option></select></label><label>Date basis<select id="swingTradeBasis"><option value="entry">Entry</option><option value="exit">Exit</option></select></label><label>From (IST)<input id="swingTradeFrom" type="date"></label><label>To (IST)<input id="swingTradeTo" type="date"></label><button id="swingTradeClear" type="button">Clear filters</button></div>
+            <div class="wide-table"><table class="readable-table" data-no-pagination="true"><thead><tr><th>Stock / trade</th><th>Setup / candles</th><th>Status / direction</th><th>Result</th><th>Entry / time (IST)</th><th>Exit / time (IST)</th><th>Open time</th><th>Stop / target</th><th>India VIX</th><th>Exit reason</th></tr></thead><tbody id="stockTrades"></tbody></table></div><div id="stockTradePager" class="table-pagination"></div>
+          </section>
+          <section class="dashboard-band"><div class="section-heading"><h2>Swing Audit Export</h2><span>Paper trades &amp; scan decisions</span></div><div class="ledger-filters"><label>Logs from (IST)<input id="swingExportFrom" type="date"></label><label>To (IST)<input id="swingExportTo" type="date"></label><button id="swingExportZip" type="button">Trades &amp; logs ZIP</button><button id="swingExportCsv" type="button">Trades CSV</button></div><div id="swingExportStatus" role="status"></div><details><summary>Telegram delivery</summary><div class="wide-table"><table class="readable-table"><thead><tr><th>Stock</th><th>Trade</th><th>Event</th><th>Time (IST)</th><th>Status</th><th>Issue</th></tr></thead><tbody id="swingDelivery"></tbody></table></div></details></section>
+          <section class="dashboard-band"><details id="legacyStockArchive"><summary>Legacy pullback archive</summary>
+              <button id="pullbackStop" type="button" hidden>Stop legacy monitor</button>
+              <div class="ledger-filters">
               <label for="pullbackExportFrom">Logs from (IST)</label><input id="pullbackExportFrom" type="date" />
               <label for="pullbackExportTo">To (IST)</label><input id="pullbackExportTo" type="date" />
               <button id="pullbackExport" class="full-btn">Download scanner log</button>
+              </div>
               <div id="pullbackActionStatus" class="mini-status" role="status"></div>
-            </div></aside>
-            <section class="content">
-              <section class="table-panel">
-                <div class="panel-head"><h2>Legacy Paper Trades</h2><span id="pullbackStatus">Stopped</span></div>
-                <div class="ops-body"><div id="pullbackMetrics" class="compact-metrics"></div><div id="pullbackRefresh" class="mini-status"></div><div id="pullbackErrors" class="mini-list"></div></div>
-              </section>
-              <section class="table-panel">
-                <div class="panel-head"><h2>Stock Decisions</h2><span id="pullbackDecisionCount"></span></div>
-                <div class="wide-table"><table class="readable-table"><thead><tr><th>Stock</th><th>Latest check</th><th>Time (IST)</th></tr></thead><tbody id="pullbackDecisions"></tbody></table></div>
-              </section>
-              <section class="table-panel">
-                <div class="panel-head"><h2>Waiting Setups &amp; Spot Trades</h2><span id="pullbackSetupCount"></span></div>
+                <div class="section-heading"><h3>Archived Paper Trades</h3><span id="pullbackStatus">Read only</span><span id="pullbackSetupCount"></span></div>
                 <div class="date-grid compact-controls"><div><label for="pullbackSide">Direction</label><select id="pullbackSide"><option value="all">Both</option><option value="long">Bullish</option><option value="short">Bearish</option></select></div><div><label for="pullbackState">Status</label><select id="pullbackState"><option value="all">All</option><option>waiting</option><option>open</option><option>closed</option><option>discarded</option></select></div></div>
                 <div class="wide-table"><table class="readable-table"><thead><tr><th>Stock / ID</th><th>Side / Frame</th><th>Status</th><th>Setup (IST)</th><th>Trigger / Stop / Target</th><th>Entry / time (IST)</th><th>Exit / time (IST)</th><th>Open time</th><th>India VIX at entry</th><th>India VIX at exit</th><th>Market / Sector</th><th>Reason</th></tr></thead><tbody id="pullbackSetups"></tbody></table></div>
-              </section>
-              <section class="table-panel"><div class="panel-head"><h2>Pullback Alert Delivery</h2></div><div class="wide-table"><table class="readable-table"><thead><tr><th>Stock</th><th>Trade ID</th><th>Event</th><th>Created (IST)</th><th>Telegram</th><th>Issue</th></tr></thead><tbody id="pullbackDelivery"></tbody></table></div></section>
-            </section>
-          </section>
+          </details></section>
         </section>
 
         <section id="tab-data" class="tab-pane" data-tab-panel="data">

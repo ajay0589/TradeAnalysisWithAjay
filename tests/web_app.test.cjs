@@ -215,10 +215,12 @@ test("grouped navigation selects all index and stock research views", () => {
     assert.equal(ui.ids.get(name === "nifty" ? "tab-nifty" : "tab-index").classList.contains("active"), true);
     if (name !== "nifty") assert.equal(ui.ids.get("indexScannerSymbol").value, name.toUpperCase());
   }
-  for (const name of ["stocks", "analyze", "scans", "backtest", "data", "reports"]) {
+  for (const name of ["stocks", "analyze", "pullbacks", "backtest", "data", "reports"]) {
     ui.context.activateTab(name);
     assert.equal(ui.ids.get(`tab-${name}`).classList.contains("active"), true);
   }
+  ui.context.activateTab("scans");
+  assert.equal(ui.ids.get("tab-stocks").classList.contains("active"),true);
 });
 
 test("browser errors are recorded without exporting the page or input forms", () => {
@@ -345,14 +347,13 @@ test("NIFTY action failures stay within their own view", async () => {
   assert.equal(ui.ids.get("niftyScannerBacktestMeta").textContent, "Failed: Backtest failed");
 });
 
-test("stock backtest types keep their controls and results separate without running either", () => {
+test("validation and advanced research have separate destinations without starting jobs", () => {
   const ui = app();
   const before = ui.requests.length;
   for (const name of ["generic", "validation", "generic"]) {
     ui.context.activateBacktestView(name);
-    const panels = ui.run('[...document.querySelectorAll("[data-backtest-view]")].map(p => ({name:p.dataset.backtestView, hidden:p.hidden}))');
-    assert.equal(panels.length, 4);
-    for (const panel of panels) assert.equal(panel.hidden, panel.name !== name);
+    assert.equal(ui.ids.get(name==="generic"?"tab-analyze":"tab-backtest").classList.contains("active"),true);
+    if(name==="generic")assert.equal(ui.ids.get("stockAdvancedResearch").open,true);
   }
   assert.equal(ui.requests.length, before);
   ui.context.activateTab("backtest");
@@ -495,6 +496,44 @@ test("stock research navigation never starts validation or live jobs and paginat
   assert.ok(ui.ids.get("stockCandidatePager").innerHTML.includes("Page 1 / 3"));
   ui.run('stocks.pages.Candidate=3;stockPage("Candidate",[],x=>x)');
   assert.ok(ui.ids.get("stockCandidatePager").innerHTML.includes("Page 1 / 1"));
+});
+
+test("one swing workspace retires duplicate navigation and preserves advanced research",()=>{
+  const ui=app();
+  const targets=ui.run('[...document.querySelectorAll("[data-research-target]")].map(x=>x.dataset.researchTarget)');
+  assert.deepEqual(Array.from(targets),["stocks","pullbacks","backtest","analyze"]);
+  assert.ok(!html.includes('id="pullbackStart"'));
+  assert.ok(!html.includes('id="pullbackStartAll"'));
+  assert.ok(html.includes('id="stockAdvancedResearch"'));
+});
+
+test("swing start requires explicit paper acknowledgement and does not start other scanners",async()=>{
+  const ui=app();ui.run(fs.readFileSync(path.join(root,"web/stocks.js"),"utf8"));
+  ui.run('stocks.swing={running:false,phase:"stopped",readiness:{ready:true,telegram_configured:true},trades:[],decisions:[]};');
+  ui.run('renderSwing()');
+  assert.equal(ui.ids.get("swingStart").disabled,true);
+  ui.ids.get("swingAcknowledge").checked=true;
+  ui.ids.get("swingAcknowledge").handlers.change();
+  assert.equal(ui.ids.get("swingStart").disabled,false);
+  for(const [id,value] of [["swingSetup","all"],["swingFrame","both"],["swingBenchmark","NIFTY 50"],["swingVariant","aligned"],["swingTarget","2"]])ui.ids.get(id).value=value;
+  const pending=ui.run('swingControl("start")');
+  const request=ui.requests.find(r=>r.url==="/api/stocks/scanner/start");
+  const payload=JSON.parse(request.options.body);
+  assert.equal(payload.acknowledge,true);assert.equal(payload.telegram_enabled,false);assert.equal(payload.target_r,2);
+  assert.ok(!ui.requests.some(r=>r.url==="/api/pullbacks/start"||r.url==="/api/indices/start-all"));
+  request.resolve({running:true,phase:"waiting_market",readiness:{ready:true},trades:[]});await pending;
+  assert.equal(ui.ids.get("swingStart").disabled,true);
+});
+
+test("swing trade filters are local and independent of audit export dates",()=>{
+  const ui=app();ui.run(fs.readFileSync(path.join(root,"web/stocks.js"),"utf8"));
+  for(const [id,value] of [["swingTradeStatus","all"],["swingTradeSetup","all"],["swingTradeBasis","entry"],["swingDecisionFilter","all"]])ui.ids.get(id).value=value;
+  ui.ids.get("swingExportFrom").value="2026-10-26";
+  ui.run('stocks.swing={readiness:{},setups:{trend_pullback:"Trend Pullback"},trades:[{id:"SW-X",symbol:"TEST",family:"trend_pullback",status:"closed",direction:"bullish",entry_time:"2026-10-19T10:00:00+05:30",exit_time:"2026-10-21T10:00:00+05:30",net_r:-1,performance_eligible:true,timeframe:"day"}]};renderSwing();');
+  assert.match(ui.ids.get("stockTrades").innerHTML,/SW-X/);assert.match(ui.ids.get("stockTrades").innerHTML,/Loss/);
+  ui.ids.get("swingTradeFrom").value="2026-10-26";ui.run('renderSwing()');
+  assert.doesNotMatch(ui.ids.get("stockTrades").innerHTML,/SW-X/);
+  assert.equal(ui.ids.get("swingExportFrom").value,"2026-10-26");
 });
 
 test("custom research excludes the retired Krishna strategy from its selector", async () => {

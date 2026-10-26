@@ -306,12 +306,16 @@ def test_pullback_api_status_export_and_controls(scanner, monkeypatch):
         for route in ("status", "export"):
             with urlopen(f"{base}/api/pullbacks/{route}") as response:
                 assert "setups" in json.load(response)
-        for route in ("start", "start-all", "stop"):
+        for route in ("start", "start-all"):
             request = Request(f"{base}/api/pullbacks/{route}", data=b'{}', headers={"Content-Type": "application/json"})
-            with urlopen(request) as response:
-                assert "running" in json.load(response)
-        assert scanner.start.call_count == 2
-        monitors.start.assert_called_once()
+            from urllib.error import HTTPError
+            with pytest.raises(HTTPError) as error:
+                urlopen(request)
+            assert error.value.code == 400
+        with urlopen(Request(base+"/api/pullbacks/stop", data=b'{}', headers={"Content-Type": "application/json"})) as response:
+            assert "running" in json.load(response)
+        scanner.start.assert_not_called()
+        monitors.start.assert_not_called()
     finally:
         server.shutdown()
         thread.join()

@@ -109,6 +109,7 @@ const state = {
 const $ = (id) => document.getElementById(id);
 
 function activateTab(name) {
+  if (name === "scans") name = "stocks";
   if (["krishna", "purple"].includes(name)) name = "stocks";
   if (["stocks", "analyze", "scans", "pullbacks", "backtest"].includes(name)) {
     state.research.active = name;
@@ -125,7 +126,7 @@ function activateTab(name) {
     state.pullbacks.pollTimer = null;
   }
   state.activeTab = panelName;
-  if (["stocks", "backtest"].includes(panelName) && typeof loadStocks === "function") loadStocks();
+  if (["stocks", "backtest", "pullbacks"].includes(panelName) && typeof loadStocks === "function") loadStocks();
   if (name === "scalping" && typeof loadScalping === "function") loadScalping();
   if (name === "expiry" && typeof loadExpiry === "function") loadExpiry();
   if (name === "mcx" && typeof loadMcx === "function") loadMcx();
@@ -209,12 +210,8 @@ function activateNiftyView(name) {
 
 function activateBacktestView(name) {
   if (!["generic", "validation"].includes(name)) return;
-  document.querySelectorAll("[data-backtest-target]").forEach((button) => {
-    const active = button.dataset.backtestTarget === name;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-selected", String(active));
-  });
-  document.querySelectorAll("[data-backtest-view]").forEach((panel) => { panel.hidden = panel.dataset.backtestView !== name; });
+  activateTab(name === "generic" ? "analyze" : "backtest");
+  if (name === "generic") $("stockAdvancedResearch").open = true;
 }
 
 async function loadPullbacks() {
@@ -228,35 +225,19 @@ async function loadPullbacks() {
 async function controlPullbacks(action) {
   $("pullbackActionStatus").textContent = `${action} requested`;
   try {
-    const payload = action.startsWith("start") ? {timeframe: $("pullbackFrame").value, benchmark: $("pullbackBenchmark").value, structure: $("pullbackStructure").checked} : {};
-    const data = await postApi(`/api/pullbacks/${action}`, payload);
+    const data = await postApi(`/api/pullbacks/${action}`, {});
     $("pullbackActionStatus").textContent = action === "test-telegram" ? (data.sent ? "Test sent" : data.error || "Delivery failed") : "";
     if (action !== "test-telegram") { state.pullbacks.data = data; renderPullbacks(data); }
   } catch (error) { $("pullbackActionStatus").textContent = error.message; }
 }
 
 function renderPullbacks(data) {
-  $("pullbackStatus").textContent = `Paper only / ${data.running ? "Running" : "Stopped"} / ${data.phase}`;
-  $("pullbackStart").disabled = data.running || data.phase === "stopping";
+  $("pullbackStatus").textContent = `Legacy archive / ${data.running ? "Running legacy worker" : "Read only"}`;
+  $("pullbackStop").hidden = !data.running;
   $("pullbackStop").disabled = !data.running;
-  $("pullbackStartAll").disabled = data.phase === "stopping";
-  for (const id of ["pullbackFrame", "pullbackBenchmark", "pullbackStructure"]) $(id).disabled = data.running;
-  if (data.running) {
-    $("pullbackFrame").value = data.settings.timeframe;
-    $("pullbackBenchmark").value = data.settings.benchmark;
-    $("pullbackStructure").checked = data.settings.structure;
-  }
-  $("pullbackTelegram").textContent = data.telegram_configured ? "Separate pullback Telegram configured" : "PULLBACK_TELEGRAM_BOT_TOKEN / PULLBACK_TELEGRAM_CHAT_ID not configured";
-  $("pullbackMetrics").innerHTML = [["Started (IST)", fmtDateTime(data.started_at)], ["Stopped (IST)", fmtDateTime(data.stopped_at)], ["Completed (IST)", fmtDateTime(data.last_completed)], ["Progress", `${data.completed} / ${data.total}`], ["Current stock", data.current || "-"]]
-    .map(([label, value]) => `<div class="compact-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
-  $("pullbackRefresh").textContent = `Candle refresh: ${data.refresh?.current || "idle"} | Last success ${fmtDateTime(data.refresh?.last_success)}`;
-  $("pullbackErrors").textContent = (data.errors || []).join(" | ");
-  $("pullbackDecisionCount").textContent = `${(data.decisions || []).length} stock(s)`;
-  $("pullbackDecisions").innerHTML = (data.decisions || []).map((r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.reason)}</td><td>${fmtDateTime(r.checked_at)}</td></tr>`).join("");
   const rows = (data.setups || []).filter((r) => ($("pullbackSide").value === "all" || r.side === $("pullbackSide").value) && ($("pullbackState").value === "all" || r.status === $("pullbackState").value));
   $("pullbackSetupCount").textContent = `${rows.length} shown / ${data.setup_total} total`;
   $("pullbackSetups").innerHTML = rows.map((r) => `<tr><td>${escapeHtml(r.symbol)}<div class="cell-note">${escapeHtml(r.id)}</div></td><td>${escapeHtml(r.side)} / ${escapeHtml(r.timeframe)}</td><td>${escapeHtml(r.status)}</td><td>${fmtDateTime(r.signal_time)}</td><td>${fmt(r.trigger)} / ${fmt(r.stop)} / ${fmt(r.target)}</td><td>${fmt(r.entry_price)}<br>${fmtDateTime(r.entry_time)}</td><td>${fmt(r.exit_price)}<br>${fmtDateTime(r.exit_time)}</td><td>${r.entry_time ? formatSeconds(r.open_seconds ?? (Date.now() - parseDateTime(r.entry_time)) / 1000) : "-"}</td><td>${vixCell(r.india_vix_entry)}</td><td>${vixCell(r.india_vix_exit)}</td><td>${Object.values(r.context?.evidence || {}).map((e) => escapeHtml(`${e.index}: ${e.direction}`)).join("<br>")}</td><td>${escapeHtml(r.discard_reason || r.exit_reason || "-")}</td></tr>`).join("");
-  $("pullbackDelivery").innerHTML = (data.delivery || []).map((r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.trade_id)}</td><td>${escapeHtml(r.event_kind)}</td><td>${fmtDateTime(r.created_at)}</td><td>${escapeHtml(r.status)}</td><td>${escapeHtml(r.error || "-")}</td></tr>`).join("");
 }
 
 const BULK_TIMEFRAME_LABELS = {
@@ -4129,12 +4110,7 @@ $("genericBacktestRunBtn").addEventListener("click", runGenericBacktest);
 $("genericBacktestExport").addEventListener("click", () => {
   if (state.lastGenericBacktest) downloadBlob(new Blob([JSON.stringify(state.lastGenericBacktest, null, 2)], {type: "application/json"}), "stock-strategy-backtest.json");
 });
-document.querySelectorAll("[data-backtest-target]").forEach((button) => button.addEventListener("click", () => activateBacktestView(button.dataset.backtestTarget)));
-activateBacktestView("validation");
-$("pullbackStart").addEventListener("click", () => controlPullbacks("start"));
 $("pullbackStop").addEventListener("click", () => controlPullbacks("stop"));
-$("pullbackStartAll").addEventListener("click", () => controlPullbacks("start-all"));
-$("pullbackTestTelegram").addEventListener("click", () => controlPullbacks("test-telegram"));
 $("pullbackExport").addEventListener("click", async () => {
   try { const range = auditRange("pullbackExportFrom", "pullbackExportTo"); await downloadArchive(`/api/pullbacks/export?${range.query}&format=zip`, `pullback-scanner-log-${range.label}.zip`); }
   catch (error) { $("pullbackActionStatus").textContent = error.message; }

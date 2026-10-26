@@ -190,9 +190,26 @@ def test_catalog_is_read_only_and_has_all_scanners(dashboard, monkeypatch):
     monkeypatch.setattr(LIVE_QUOTES, "acquire", lambda *_: pytest.fail("Dashboard must not start quotes"))
     d = dashboard.status()
     assert d["running_count"] == 2 and d["open_trade_count"] == 120
-    assert len(d["scanners"]) == 11
+    assert len(d["scanners"]) == 9
+    assert not any(s["id"] in {"pullback_legacy", "scans"} for s in d["scanners"])
     assert not any(s["id"].startswith("purple") or s["id"]=="krishna" for s in d["scanners"])
     assert all("Intraday" in s["detail"] for s in d["scanners"] if s["id"].startswith("Nifty_Setup"))
+
+
+def test_swing_scanner_and_trades_appear_once_in_common_dashboard(dashboard, tmp_path):
+    path = tmp_path/"swing.db"
+    body = dict(id="SW-ONE", symbol="TEST", status="open", entry_time=NOW.isoformat(), entry_price=100,
+                family="trend_pullback", timeframe="day", horizon="swing", direction="bullish", variant="paper")
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE lab_trades(status,body)")
+        conn.execute("INSERT INTO lab_trades VALUES('open',?)", (json.dumps(body),))
+    dashboard.services.stock_swing = NS(path=path, _lock=RLock(), state={"running": False, "phase": "monitoring_exits"})
+    rows = dashboard.ledger(source="stock_swing")
+    assert rows["total"] == 1
+    assert rows["trades"][0]["variant"] == "trend_pullback / day"
+    inventory = dashboard.status()["scanners"]
+    assert sum(r["id"] == "stock_swing" for r in inventory) == 1
+    assert next(r for r in inventory if r["id"] == "stock_swing")["phase"] == "monitoring_exits"
 
 
 def test_dashboard_http_payloads_and_invalid_filter_response(dashboard, monkeypatch):
